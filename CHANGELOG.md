@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2](https://github.com/ziyilam3999/forge-harness/compare/v0.3.1...v0.3.2) (2026-04-02)
+
+### Bug Fixes
+
+* use OAuth token directly as Bearer instead of key exchange
+  - The create_api_key endpoint requires org:create_api_key scope which is not a valid OAuth scope (anthropics/claude-code#20325)
+  - Pass authToken to Anthropic SDK constructor — sends Authorization: Bearer header
+  - Makes getClient() synchronous; no network call needed for auth setup
+  - Explicit clientExpiresAt reset in API-key path prevents stale expiry from evicting a valid cached client
+
 ## [0.3.1](https://github.com/ziyilam3999/forge-harness/compare/v0.3.0...v0.3.1) (2026-04-02)
 
 ### Bug Fixes

@@ -6,13 +6,29 @@ import { homedir } from "node:os";
 const DEFAULT_MODEL = "claude-sonnet-4-6-20250514";
 const DEFAULT_MAX_TOKENS = 8192;
 
-let client: Anthropic | null = null;
+// OAuth tokens from credentials.json are issued by the Claude.ai OAuth flow and cannot
+// be used directly as Bearer tokens with api.anthropic.com (returns 401 "OAuth
+// authentication is currently not supported"). Instead, we exchange them for a
+// short-lived API key via the claude_cli endpoint — the same flow Claude Code uses.
+const OAUTH_KEY_EXCHANGE_URL =
+  "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
+
+// Promise-based singleton so concurrent callers coalesce on one exchange request
+// rather than each firing a redundant key-exchange HTTP call.
+let clientPromise: Promise<Anthropic> | null = null;
+// When the client was built from an OAuth-derived key, track the OAuth token's expiry
+// so we can evict the cache before the key goes stale. Evict 10 min early — wider than
+// the 5-min readOAuthToken rejection window — to guarantee there is always time for a
+// fresh exchange before the token is unreadable.
+let clientExpiresAt: number | null = null;
+const EVICT_BEFORE_MS = 10 * 60 * 1000;
 
 /**
  * Read the Claude OAuth access token from ~/.claude/.credentials.json.
  * Returns null if the file doesn't exist, is invalid, or the token is expired.
+ * Also returns the expiresAt timestamp so callers can track key lifetime.
  */
-function readOAuthToken(): string | null {
+function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
   try {
     const credPath = join(homedir(), ".claude", ".credentials.json");
     const creds = JSON.parse(readFileSync(credPath, "utf-8"));
@@ -26,29 +42,53 @@ function readOAuthToken(): string | null {
       return null;
     }
 
-    return oauth.accessToken as string;
+    return { accessToken: oauth.accessToken as string, expiresAt: oauth.expiresAt as number };
   } catch {
     return null;
   }
 }
 
-export function getClient(): Anthropic {
-  if (client) return client;
+/**
+ * Exchange a Claude OAuth access token for a short-lived Anthropic API key.
+ * The OAuth token itself is rejected by the inference API; only the derived key works.
+ */
+async function exchangeOAuthForApiKey(oauthToken: string): Promise<string | null> {
+  try {
+    const response = await fetch(OAUTH_KEY_EXCHANGE_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${oauthToken}` },
+    });
+    if (!response.ok) {
+      console.error(`forge: OAuth key exchange failed (HTTP ${response.status})`);
+      return null;
+    }
+    const data = (await response.json()) as { raw_key?: string };
+    return data.raw_key ?? null;
+  } catch (err) {
+    console.error(`forge: OAuth key exchange error: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
 
-  // 1. Try Claude OAuth token (primary — works with Claude Code Max subscription)
-  const oauthToken = readOAuthToken();
-  if (oauthToken) {
-    console.error("forge: using Claude OAuth token for API auth");
-    client = new Anthropic({ authToken: oauthToken });
-    return client;
+async function buildClient(): Promise<Anthropic> {
+  // 1. Try Claude OAuth token (primary — works with Claude Code Max subscription).
+  //    Exchange it for a real API key; the OAuth token itself is rejected by the API.
+  const oauthCreds = readOAuthToken();
+  if (oauthCreds) {
+    const apiKey = await exchangeOAuthForApiKey(oauthCreds.accessToken);
+    if (apiKey) {
+      console.error("forge: using OAuth-derived API key for auth");
+      clientExpiresAt = oauthCreds.expiresAt;
+      return new Anthropic({ apiKey });
+    }
+    console.error("forge: OAuth key exchange failed, falling back to ANTHROPIC_API_KEY");
   }
 
   // 2. Fall back to ANTHROPIC_API_KEY (for standalone/CI use)
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (apiKey) {
     console.error("forge: using ANTHROPIC_API_KEY for API auth");
-    client = new Anthropic({ apiKey });
-    return client;
+    return new Anthropic({ apiKey });
   }
 
   throw new Error(
@@ -56,6 +96,24 @@ export function getClient(): Anthropic {
       "  1. Log in to Claude Code (OAuth token in ~/.claude/.credentials.json), or\n" +
       "  2. Set ANTHROPIC_API_KEY environment variable: export ANTHROPIC_API_KEY=sk-...",
   );
+}
+
+export function getClient(): Promise<Anthropic> {
+  // Evict cache if the OAuth-derived key is expiring soon. The eviction window is
+  // wider than readOAuthToken's 5-min rejection window, so there is always a gap
+  // in which a fresh exchange can succeed.
+  if (clientPromise && clientExpiresAt !== null && Date.now() >= clientExpiresAt - EVICT_BEFORE_MS) {
+    clientPromise = null;
+    clientExpiresAt = null;
+  }
+  if (!clientPromise) {
+    clientPromise = buildClient().catch((err: unknown) => {
+      // Clear so the next call retries rather than returning a permanently-cached rejection
+      clientPromise = null;
+      throw err;
+    });
+  }
+  return clientPromise;
 }
 
 export interface CallClaudeOptions {
@@ -125,7 +183,7 @@ export function extractJson(text: string): unknown {
  * Call Claude API with the given prompt. Handles JSON extraction when jsonMode is true.
  */
 export async function callClaude(options: CallClaudeOptions): Promise<CallClaudeResult> {
-  const anthropic = getClient();
+  const anthropic = await getClient(); // getClient() returns a Promise; concurrent calls share one exchange
 
   const response = await anthropic.messages.create({
     model: options.model ?? DEFAULT_MODEL,

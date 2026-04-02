@@ -55,6 +55,12 @@ Respond with ONLY a JSON object matching this exact schema (execution-plan v3.0.
   - GOOD: "npx tsc && echo PASS" / "node -e \\"process.exit(require('./dist/foo').bar?0:1)\\""
   - BAD: "code is well-structured" / "API responses are reasonable"
 - Commands should work on both Unix and Windows (Git Bash). Prefer node -e for portability.
+- When an AC command checks the output/evidence of another command (e.g., \`r.evidence.includes('...')\`),
+  the checked substring must exactly match what the code will produce. Do not assume wording —
+  if the code says "timed out", the AC must check for "timed out", not "timeout".
+- If an AC command imports from a build output directory (e.g., \`./dist/\`, \`./build/\`),
+  the command must include the build step as a prerequisite (e.g., \`npm run build && node ...\`).
+  Without this, the AC fails in a clean environment where the build output doesn't exist.
 
 ### Mode-Specific Rules (mode: ${mode})
 ${modeRules[mode]}

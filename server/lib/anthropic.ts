@@ -6,6 +6,13 @@ import { homedir } from "node:os";
 const DEFAULT_MODEL = "claude-sonnet-4-6-20250514";
 const DEFAULT_MAX_TOKENS = 8192;
 
+// OAuth tokens from credentials.json are issued by the Claude.ai OAuth flow and cannot
+// be used directly as Bearer tokens with api.anthropic.com (returns 401 "OAuth
+// authentication is currently not supported"). Instead, we exchange them for a
+// short-lived API key via the claude_cli endpoint — the same flow Claude Code uses.
+const OAUTH_KEY_EXCHANGE_URL =
+  "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
+
 let client: Anthropic | null = null;
 
 /**
@@ -32,15 +39,41 @@ function readOAuthToken(): string | null {
   }
 }
 
-export function getClient(): Anthropic {
+/**
+ * Exchange a Claude OAuth access token for a short-lived Anthropic API key.
+ * The OAuth token itself is rejected by the inference API; only the derived key works.
+ */
+async function exchangeOAuthForApiKey(oauthToken: string): Promise<string | null> {
+  try {
+    const response = await fetch(OAUTH_KEY_EXCHANGE_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${oauthToken}` },
+    });
+    if (!response.ok) {
+      console.error(`forge: OAuth key exchange failed (HTTP ${response.status})`);
+      return null;
+    }
+    const data = (await response.json()) as { raw_key?: string };
+    return data.raw_key ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getClient(): Promise<Anthropic> {
   if (client) return client;
 
-  // 1. Try Claude OAuth token (primary — works with Claude Code Max subscription)
+  // 1. Try Claude OAuth token (primary — works with Claude Code Max subscription).
+  //    Exchange it for a real API key; the OAuth token itself is rejected by the API.
   const oauthToken = readOAuthToken();
   if (oauthToken) {
-    console.error("forge: using Claude OAuth token for API auth");
-    client = new Anthropic({ authToken: oauthToken });
-    return client;
+    const apiKey = await exchangeOAuthForApiKey(oauthToken);
+    if (apiKey) {
+      console.error("forge: using OAuth-derived API key for auth");
+      client = new Anthropic({ apiKey });
+      return client;
+    }
+    console.error("forge: OAuth key exchange failed, falling back to ANTHROPIC_API_KEY");
   }
 
   // 2. Fall back to ANTHROPIC_API_KEY (for standalone/CI use)
@@ -125,7 +158,7 @@ export function extractJson(text: string): unknown {
  * Call Claude API with the given prompt. Handles JSON extraction when jsonMode is true.
  */
 export async function callClaude(options: CallClaudeOptions): Promise<CallClaudeResult> {
-  const anthropic = getClient();
+  const anthropic = await getClient();
 
   const response = await anthropic.messages.create({
     model: options.model ?? DEFAULT_MODEL,

@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0](https://github.com/ziyilam3999/forge-harness/compare/v0.3.1...v0.4.0) (2026-04-02)
+
+### Features
+
+- implement forge_evaluate — stateless binary grading tool (Phase 2) (#22)
+
+### Bug Fixes
+
+- use OAuth token directly as Bearer instead of key exchange (#21)
+
 ## [0.3.2](https://github.com/ziyilam3999/forge-harness/compare/v0.3.1...v0.3.2) (2026-04-02)
 
 ### Bug Fixes

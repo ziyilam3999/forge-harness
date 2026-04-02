@@ -1,23 +1,61 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6-20250514";
 const DEFAULT_MAX_TOKENS = 8192;
 
 let client: Anthropic | null = null;
 
+/**
+ * Read the Claude OAuth access token from ~/.claude/.credentials.json.
+ * Returns null if the file doesn't exist, is invalid, or the token is expired.
+ */
+function readOAuthToken(): string | null {
+  try {
+    const credPath = join(homedir(), ".claude", ".credentials.json");
+    const creds = JSON.parse(readFileSync(credPath, "utf-8"));
+    const oauth = creds.claudeAiOauth;
+    if (!oauth?.accessToken || !oauth?.expiresAt) return null;
+
+    // Check expiry — reject if less than 5 minutes remaining
+    const remainingMs = oauth.expiresAt - Date.now();
+    if (remainingMs < 5 * 60 * 1000) {
+      console.error("forge: OAuth token expired or expiring soon, skipping");
+      return null;
+    }
+
+    return oauth.accessToken as string;
+  } catch {
+    return null;
+  }
+}
+
 export function getClient(): Anthropic {
   if (client) return client;
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "ANTHROPIC_API_KEY environment variable is not set. " +
-        "Set it in your shell before starting the MCP server: export ANTHROPIC_API_KEY=sk-...",
-    );
+  // 1. Try Claude OAuth token (primary — works with Claude Code Max subscription)
+  const oauthToken = readOAuthToken();
+  if (oauthToken) {
+    console.error("forge: using Claude OAuth token for API auth");
+    client = new Anthropic({ authToken: oauthToken });
+    return client;
   }
 
-  client = new Anthropic({ apiKey });
-  return client;
+  // 2. Fall back to ANTHROPIC_API_KEY (for standalone/CI use)
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (apiKey) {
+    console.error("forge: using ANTHROPIC_API_KEY for API auth");
+    client = new Anthropic({ apiKey });
+    return client;
+  }
+
+  throw new Error(
+    "No API credentials found. Either:\n" +
+      "  1. Log in to Claude Code (OAuth token in ~/.claude/.credentials.json), or\n" +
+      "  2. Set ANTHROPIC_API_KEY environment variable: export ANTHROPIC_API_KEY=sk-...",
+  );
 }
 
 export interface CallClaudeOptions {

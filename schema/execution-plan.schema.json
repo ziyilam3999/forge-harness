@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ziyilam3999/forge-harness/schema/execution-plan.schema.json",
+  "title": "Forge Execution Plan",
+  "description": "Contract between forge_plan (producer) and forge_generate/forge_evaluate (consumers)",
+  "type": "object",
+  "required": ["schemaVersion", "stories"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "3.0.0"
+    },
+    "prdPath": {
+      "type": "string",
+      "description": "Path to the source PRD or intent document"
+    },
+    "stories": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Story"
+      }
+    }
+  },
+  "$defs": {
+    "Story": {
+      "type": "object",
+      "required": ["id", "title", "acceptanceCriteria"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "dependencies": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AcceptanceCriterion" }
+        },
+        "affectedPaths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Directory prefixes this story modifies"
+        }
+      }
+    },
+    "AcceptanceCriterion": {
+      "type": "object",
+      "required": ["id", "description", "command"],
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "command": {
+          "type": "string",
+          "description": "Shell command producing exit 0 (PASS) or non-zero (FAIL)"
+        },
+        "flaky": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, retry on failure before marking FAIL"
+        }
+      }
+    }
+  }
+}

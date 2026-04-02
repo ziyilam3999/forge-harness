@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const DEFAULT_MODEL = "claude-sonnet-4-6-20250514";
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_MAX_TOKENS = 8192;
 
 let client: Anthropic | null = null;
@@ -42,22 +42,23 @@ export function getClient(): Anthropic {
   }
   if (client) return client;
 
-  // 1. Try Claude OAuth token (primary — works with Claude Code Max subscription).
-  //    The SDK sends it as `Authorization: Bearer <token>` which the inference API accepts.
-  const oauthCreds = readOAuthToken();
-  if (oauthCreds) {
-    console.error("forge: using Claude OAuth token for auth");
-    client = new Anthropic({ authToken: oauthCreds.accessToken });
-    clientExpiresAt = oauthCreds.expiresAt;
-    return client;
-  }
-
-  // 2. Fall back to ANTHROPIC_API_KEY (for standalone/CI use)
+  // 1. Try ANTHROPIC_API_KEY (works with direct API calls and CI)
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (apiKey) {
     console.error("forge: using ANTHROPIC_API_KEY for auth");
     client = new Anthropic({ apiKey });
     clientExpiresAt = null;
+    return client;
+  }
+
+  // 2. Fall back to Claude OAuth token (Claude Code Max subscription).
+  //    Note: OAuth tokens only work when proxied through Claude Code's infrastructure.
+  //    Direct API calls with OAuth return 401 "OAuth authentication is currently not supported."
+  const oauthCreds = readOAuthToken();
+  if (oauthCreds) {
+    console.error("forge: using Claude OAuth token for auth");
+    client = new Anthropic({ authToken: oauthCreds.accessToken });
+    clientExpiresAt = oauthCreds.expiresAt;
     return client;
   }
 

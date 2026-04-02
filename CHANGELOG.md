@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1](https://github.com/ziyilam3999/forge-harness/compare/v0.3.0...v0.3.1) (2026-04-02)
+
+### Bug Fixes
+
+* fix: exchange OAuth token for API key before inference calls (#14)
+  - OAuth access tokens cannot be used as Bearer tokens with api.anthropic.com
+  - Exchange via /api/oauth/claude_cli/create_api_key (same as Claude Code)
+  - Promise-based singleton to deduplicate concurrent cold-start requests
+  - Evict cached client 10 min before OAuth token expiry to prevent dead zone
+  - Clear rejected promise so callers retry on transient failure
+
 ## [0.3.0](https://github.com/ziyilam3999/forge-harness/compare/v0.2.0...v0.3.0) (2026-04-02)
 
 ### Features

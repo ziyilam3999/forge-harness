@@ -107,7 +107,11 @@ export function getClient(): Promise<Anthropic> {
     clientExpiresAt = null;
   }
   if (!clientPromise) {
-    clientPromise = buildClient();
+    clientPromise = buildClient().catch((err: unknown) => {
+      // Clear so the next call retries rather than returning a permanently-cached rejection
+      clientPromise = null;
+      throw err;
+    });
   }
   return clientPromise;
 }

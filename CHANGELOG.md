@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2](https://github.com/ziyilam3999/forge-harness/compare/v0.4.1...v0.4.2) (2026-04-03)
+
+### Bug Fixes
+
+- prioritize API key over OAuth and use model alias (#29)
+
+### Miscellaneous
+
+- remove CI code-review (replaced by /ship self-review)
+
 ## [0.4.1](https://github.com/ziyilam3999/forge-harness/compare/v0.4.0...v0.4.1) (2026-04-02)
 
 ### Bug Fixes

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1](https://github.com/ziyilam3999/forge-harness/compare/v0.3.0...v0.3.1) (2026-04-02)
+
+### Bug Fixes
+
+* fix: use OAuth token directly as Bearer token instead of exchanging for API key
+  - Removes `create_api_key` exchange which required `org:create_api_key` scope (not a valid OAuth scope)
+  - Uses Anthropic SDK `authToken` constructor param — sends `Authorization: Bearer` header
+  - OAuth token with `user:inference` scope is sufficient for inference calls
+
 ## [0.3.0](https://github.com/ziyilam3999/forge-harness/compare/v0.2.0...v0.3.0) (2026-04-02)
 
 ### Features

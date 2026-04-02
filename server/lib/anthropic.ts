@@ -6,22 +6,13 @@ import { homedir } from "node:os";
 const DEFAULT_MODEL = "claude-sonnet-4-6-20250514";
 const DEFAULT_MAX_TOKENS = 8192;
 
-// OAuth tokens from credentials.json are issued by the Claude.ai OAuth flow and cannot
-// be used directly as Bearer tokens with api.anthropic.com (returns 401 "OAuth
-// authentication is currently not supported"). Instead, we exchange them for a
-// short-lived API key via the claude_cli endpoint — the same flow Claude Code uses.
-const OAUTH_KEY_EXCHANGE_URL =
-  "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
-
 let client: Anthropic | null = null;
-// When the client was built from an OAuth-derived key, track the OAuth token's expiry
-// so we can evict the cache before the key goes stale.
+// Track the OAuth token's expiry so we can evict the cache before it goes stale.
 let clientExpiresAt: number | null = null;
 
 /**
  * Read the Claude OAuth access token from ~/.claude/.credentials.json.
  * Returns null if the file doesn't exist, is invalid, or the token is expired.
- * Also returns the expiresAt timestamp so callers can track key lifetime.
  */
 function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
   try {
@@ -43,29 +34,8 @@ function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
   }
 }
 
-/**
- * Exchange a Claude OAuth access token for a short-lived Anthropic API key.
- * The OAuth token itself is rejected by the inference API; only the derived key works.
- */
-async function exchangeOAuthForApiKey(oauthToken: string): Promise<string | null> {
-  try {
-    const response = await fetch(OAUTH_KEY_EXCHANGE_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${oauthToken}` },
-    });
-    if (!response.ok) {
-      console.error(`forge: OAuth key exchange failed (HTTP ${response.status})`);
-      return null;
-    }
-    const data = (await response.json()) as { raw_key?: string };
-    return data.raw_key ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export async function getClient(): Promise<Anthropic> {
-  // Evict cache if the OAuth-derived key is expiring within 5 minutes
+export function getClient(): Anthropic {
+  // Evict cache if the OAuth token is expiring within 5 minutes
   if (client && clientExpiresAt !== null && Date.now() >= clientExpiresAt - 5 * 60 * 1000) {
     client = null;
     clientExpiresAt = null;
@@ -73,23 +43,19 @@ export async function getClient(): Promise<Anthropic> {
   if (client) return client;
 
   // 1. Try Claude OAuth token (primary — works with Claude Code Max subscription).
-  //    Exchange it for a real API key; the OAuth token itself is rejected by the API.
+  //    The SDK sends it as `Authorization: Bearer <token>` which the inference API accepts.
   const oauthCreds = readOAuthToken();
   if (oauthCreds) {
-    const apiKey = await exchangeOAuthForApiKey(oauthCreds.accessToken);
-    if (apiKey) {
-      console.error("forge: using OAuth-derived API key for auth");
-      client = new Anthropic({ apiKey });
-      clientExpiresAt = oauthCreds.expiresAt;
-      return client;
-    }
-    console.error("forge: OAuth key exchange failed, falling back to ANTHROPIC_API_KEY");
+    console.error("forge: using Claude OAuth token for auth");
+    client = new Anthropic({ authToken: oauthCreds.accessToken });
+    clientExpiresAt = oauthCreds.expiresAt;
+    return client;
   }
 
   // 2. Fall back to ANTHROPIC_API_KEY (for standalone/CI use)
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (apiKey) {
-    console.error("forge: using ANTHROPIC_API_KEY for API auth");
+    console.error("forge: using ANTHROPIC_API_KEY for auth");
     client = new Anthropic({ apiKey });
     return client;
   }
@@ -168,7 +134,7 @@ export function extractJson(text: string): unknown {
  * Call Claude API with the given prompt. Handles JSON extraction when jsonMode is true.
  */
 export async function callClaude(options: CallClaudeOptions): Promise<CallClaudeResult> {
-  const anthropic = await getClient();
+  const anthropic = getClient();
 
   const response = await anthropic.messages.create({
     model: options.model ?? DEFAULT_MODEL,

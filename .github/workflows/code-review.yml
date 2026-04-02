@@ -1,0 +1,50 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  code-review:
+    if: |
+      github.event.pull_request.draft == false &&
+      !startsWith(github.head_ref, 'release-please--') &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-review')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Bash(gh pr:*)",
+                  "Bash(gh api:*)",
+                  "Bash(git:*)",
+                  "Read",
+                  "Write",
+                  "Glob",
+                  "Grep"
+                ]
+              }
+            }
+          prompt: |
+            Review this PR for bugs, logic errors, security issues, and CLAUDE.md convention violations.
+            Be specific and actionable. Only flag issues with high confidence.
+            After completing your review, write it to /tmp/review.md using the Write tool,
+            then post it with: gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/review.md
+          claude_args: "--max-turns 25"

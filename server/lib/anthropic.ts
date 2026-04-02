@@ -14,12 +14,16 @@ const OAUTH_KEY_EXCHANGE_URL =
   "https://api.anthropic.com/api/oauth/claude_cli/create_api_key";
 
 let client: Anthropic | null = null;
+// When the client was built from an OAuth-derived key, track the OAuth token's expiry
+// so we can evict the cache before the key goes stale.
+let clientExpiresAt: number | null = null;
 
 /**
  * Read the Claude OAuth access token from ~/.claude/.credentials.json.
  * Returns null if the file doesn't exist, is invalid, or the token is expired.
+ * Also returns the expiresAt timestamp so callers can track key lifetime.
  */
-function readOAuthToken(): string | null {
+function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
   try {
     const credPath = join(homedir(), ".claude", ".credentials.json");
     const creds = JSON.parse(readFileSync(credPath, "utf-8"));
@@ -33,7 +37,7 @@ function readOAuthToken(): string | null {
       return null;
     }
 
-    return oauth.accessToken as string;
+    return { accessToken: oauth.accessToken as string, expiresAt: oauth.expiresAt as number };
   } catch {
     return null;
   }
@@ -61,16 +65,22 @@ async function exchangeOAuthForApiKey(oauthToken: string): Promise<string | null
 }
 
 export async function getClient(): Promise<Anthropic> {
+  // Evict cache if the OAuth-derived key is expiring within 5 minutes
+  if (client && clientExpiresAt !== null && Date.now() >= clientExpiresAt - 5 * 60 * 1000) {
+    client = null;
+    clientExpiresAt = null;
+  }
   if (client) return client;
 
   // 1. Try Claude OAuth token (primary — works with Claude Code Max subscription).
   //    Exchange it for a real API key; the OAuth token itself is rejected by the API.
-  const oauthToken = readOAuthToken();
-  if (oauthToken) {
-    const apiKey = await exchangeOAuthForApiKey(oauthToken);
+  const oauthCreds = readOAuthToken();
+  if (oauthCreds) {
+    const apiKey = await exchangeOAuthForApiKey(oauthCreds.accessToken);
     if (apiKey) {
       console.error("forge: using OAuth-derived API key for auth");
       client = new Anthropic({ apiKey });
+      clientExpiresAt = oauthCreds.expiresAt;
       return client;
     }
     console.error("forge: OAuth key exchange failed, falling back to ANTHROPIC_API_KEY");

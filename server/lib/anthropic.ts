@@ -57,6 +57,7 @@ export function getClient(): Anthropic {
   if (apiKey) {
     console.error("forge: using ANTHROPIC_API_KEY for auth");
     client = new Anthropic({ apiKey });
+    clientExpiresAt = null;
     return client;
   }
 

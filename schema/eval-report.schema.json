@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ziyilam3999/forge-harness/schema/eval-report.schema.json",
+  "title": "Forge Evaluation Report",
+  "description": "Output of forge_evaluate — per-criterion PASS/FAIL with evidence",
+  "type": "object",
+  "required": ["storyId", "verdict", "criteria"],
+  "properties": {
+    "storyId": { "type": "string" },
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "INCONCLUSIVE"]
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["PASS", "FAIL", "SKIPPED"]
+          },
+          "evidence": { "type": "string" }
+        }
+      }
+    }
+  }
+}

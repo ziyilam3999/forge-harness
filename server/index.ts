@@ -7,7 +7,7 @@ import { coordinateInputSchema, handleCoordinate } from "./tools/coordinate.js";
 
 const server = new McpServer({
   name: "forge",
-  version: "0.1.0",
+  version: "0.3.0",
 });
 
 server.registerTool(
@@ -27,9 +27,9 @@ server.registerTool(
   {
     title: "Forge Evaluate",
     description:
-      "Grade work against the execution plan contract. Returns PASS/FAIL per criterion with evidence. Stateless — never modifies code.",
+      "Run acceptance criteria shell commands for a story and produce a structured eval report with PASS/FAIL/INCONCLUSIVE per criterion.",
     inputSchema: evaluateInputSchema,
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: false },
   },
   handleEvaluate
 );

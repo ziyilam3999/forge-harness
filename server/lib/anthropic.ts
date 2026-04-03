@@ -79,6 +79,7 @@ export interface CallClaudeOptions {
 
 export interface CallClaudeResult {
   text: string;
+  parsed?: unknown;
   usage: { inputTokens: number; outputTokens: number };
 }
 
@@ -160,8 +161,8 @@ export async function callClaude(options: CallClaudeOptions): Promise<CallClaude
   };
 
   if (options.jsonMode) {
-    // Validate that the response is parseable JSON
-    extractJson(text); // throws if not valid
+    const parsed = extractJson(text);
+    return { text, parsed, usage };
   }
 
   return { text, usage };

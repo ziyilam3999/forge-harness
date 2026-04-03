@@ -42,7 +42,7 @@ All notable changes to this project will be documented in this file.
 
 ### Bug Fixes
 
-* fix: exchange OAuth token for API key before inference calls (#14)
+* exchange OAuth token for API key before inference calls (#14)
   - OAuth access tokens cannot be used as Bearer tokens with api.anthropic.com
   - Exchange via /api/oauth/claude_cli/create_api_key (same as Claude Code)
   - Promise-based singleton to deduplicate concurrent cold-start requests
@@ -53,7 +53,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-* feat: use Claude OAuth token as primary auth, fall back to API key (#11)
+* use Claude OAuth token as primary auth, fall back to API key (#11)
   - Reads OAuth token from ~/.claude/.credentials.json (Claude Code Max)
   - Falls back to ANTHROPIC_API_KEY for standalone/CI use
   - No separate API billing needed
@@ -62,7 +62,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-* feat: implement forge_plan with double-critique pipeline (#4)
+* implement forge_plan with double-critique pipeline (#4)
   - Claude API integration via @anthropic-ai/sdk
   - Planner/critic/corrector prompt pipeline
   - Schema validation with DFS cycle detection
@@ -74,4 +74,4 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-* feat: project initialization with ESM TypeScript scaffold
+* project initialization with ESM TypeScript scaffold

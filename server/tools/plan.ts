@@ -42,7 +42,7 @@ const BUGFIX_KEYWORDS = ["fix", "bug", "broken", "crash", "error"];
 function detectMode(intent: string): "feature" | "bugfix" {
   const lower = intent.toLowerCase();
   for (const keyword of BUGFIX_KEYWORDS) {
-    if (lower.includes(keyword)) return "bugfix";
+    if (new RegExp(`\\b${keyword}\\b`).test(lower)) return "bugfix";
   }
   return "feature";
 }

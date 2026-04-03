@@ -16,6 +16,7 @@ vi.mock("../lib/codebase-scan.js", () => ({
 const { callClaude, extractJson } = await import("../lib/anthropic.js");
 const { scanCodebase } = await import("../lib/codebase-scan.js");
 const { handlePlan } = await import("./plan.js");
+const { buildPlannerPrompt } = await import("../lib/prompts/planner.js");
 
 const mockedCallClaude = vi.mocked(callClaude);
 const mockedExtractJson = vi.mocked(extractJson);
@@ -289,30 +290,14 @@ describe("handlePlan", () => {
   });
 
   describe("planner prompt calibration rules", () => {
-    it("contains evidence format matching rule (D1)", async () => {
-      const plan = makeValidPlan();
-      mockedCallClaude
-        .mockResolvedValueOnce(makeCallResult(plan))
-        .mockResolvedValueOnce(makeCriticResult())
-        .mockResolvedValueOnce(makeCriticResult());
-
-      await handlePlan({ intent: "add button" });
-
-      const firstCall = mockedCallClaude.mock.calls[0][0];
-      expect(firstCall.system).toContain("exactly match");
+    it("contains evidence format matching rule (D1)", () => {
+      const prompt = buildPlannerPrompt("feature");
+      expect(prompt).toContain("exactly match");
     });
 
-    it("contains build prerequisite rule (D2)", async () => {
-      const plan = makeValidPlan();
-      mockedCallClaude
-        .mockResolvedValueOnce(makeCallResult(plan))
-        .mockResolvedValueOnce(makeCriticResult())
-        .mockResolvedValueOnce(makeCriticResult());
-
-      await handlePlan({ intent: "add button" });
-
-      const firstCall = mockedCallClaude.mock.calls[0][0];
-      expect(firstCall.system).toContain("build output directory");
+    it("contains build prerequisite rule (D2)", () => {
+      const prompt = buildPlannerPrompt("feature");
+      expect(prompt).toContain("build output directory");
     });
   });
 

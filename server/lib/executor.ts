@@ -67,7 +67,7 @@ export function executeCommand(
           resolve({
             id: "",
             status: "FAIL",
-            evidence: `Command timeout after ${timeoutMs}ms`,
+            evidence: truncateEvidence(`Command timeout after ${timeoutMs}ms`),
           });
           return;
         }
@@ -77,7 +77,7 @@ export function executeCommand(
           resolve({
             id: "",
             status: "INCONCLUSIVE",
-            evidence: `Command execution failed: ${error.message}`,
+            evidence: truncateEvidence(`Command execution failed: ${error.message}`),
           });
           return;
         }
@@ -96,7 +96,7 @@ export function executeCommand(
         resolve({
           id: "",
           status: "INCONCLUSIVE",
-          evidence: `Command execution failed: ${error.message}`,
+          evidence: truncateEvidence(`Command execution failed: ${error.message}`),
         });
       },
     );

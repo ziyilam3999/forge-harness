@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { readFileSync } from "node:fs";
-import { extractJson } from "../lib/anthropic.js";
 import { validateExecutionPlan } from "../validation/execution-plan.js";
 import { evaluateStory } from "../lib/evaluator.js";
 import type { ExecutionPlan } from "../types/execution-plan.js";
@@ -43,7 +42,7 @@ function loadPlan(planPath?: string, planJson?: string): ExecutionPlan {
 
   let parsed: unknown;
   try {
-    parsed = typeof rawJson === "string" ? JSON.parse(rawJson) : extractJson(rawJson);
+    parsed = JSON.parse(rawJson);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`Invalid plan JSON: ${message}`);

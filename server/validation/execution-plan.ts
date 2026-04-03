@@ -1,5 +1,3 @@
-import type { ExecutionPlan } from "../types/execution-plan.js";
-
 export interface ValidationResult {
   valid: boolean;
   errors?: string[];
@@ -214,17 +212,4 @@ function dfs(
 
   color.set(node, BLACK);
   return null;
-}
-
-/**
- * Type guard: check if validated data is an ExecutionPlan.
- */
-export function asExecutionPlan(data: unknown): ExecutionPlan {
-  const result = validateExecutionPlan(data);
-  if (!result.valid) {
-    throw new Error(
-      `Invalid execution plan: ${result.errors?.join("; ") ?? "unknown error"}`,
-    );
-  }
-  return data as ExecutionPlan;
 }

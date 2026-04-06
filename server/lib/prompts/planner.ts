@@ -54,6 +54,10 @@ Respond with ONLY a JSON object matching this exact schema (execution-plan v3.0.
 - ACs must be CONCRETE and VERIFIABLE. No subjective criteria.
   - GOOD: "npx tsc && echo PASS" / "node -e \\"process.exit(require('./dist/foo').bar?0:1)\\""
   - BAD: "code is well-structured" / "API responses are reasonable"
+- ACs must verify OBSERVABLE BEHAVIOR, never implementation method. Do not write ACs that
+  inspect source code for specific patterns, imports, class names, or file structures.
+  - GOOD: \`curl localhost:3000/api/users | jq '.users | length' | grep -q '^[1-9]'\`
+  - BAD: \`grep -r "Redis" src/\` / \`rg "class UserCache" server/\` / \`find src/ -name "*.cache.ts"\`
 - Commands should work on both Unix and Windows (Git Bash). Prefer node -e for portability.
 - When an AC command checks the output/evidence of another command (e.g., \`r.evidence.includes('...')\`),
   the checked substring must exactly match what the code will produce. Do not assume wording —
@@ -72,7 +76,12 @@ ${modeRules[mode]}
 ### Quality Checks
 - Ensure every story's ACs actually verify the story's title/goal.
 - Ensure no duplicate story IDs or AC IDs within a story.
-- Ensure dependencies form a valid DAG (no cycles).`;
+- Ensure dependencies form a valid DAG (no cycles).
+
+### Evidence-Gating (when codebase context is provided)
+- Every claim about what exists in the codebase (files, functions, patterns, config) MUST cite
+  a specific file path from the codebase context. Do not assume or guess — if you cannot cite
+  a path from the provided context, state the assumption explicitly instead of asserting it as fact.`;
 }
 
 /**

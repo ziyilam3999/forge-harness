@@ -15,8 +15,9 @@ vi.mock("../lib/codebase-scan.js", () => ({
 // Import after mocks
 const { callClaude, extractJson } = await import("../lib/anthropic.js");
 const { scanCodebase } = await import("../lib/codebase-scan.js");
-const { handlePlan } = await import("./plan.js");
+const { handlePlan, detectCoupledACs } = await import("./plan.js");
 const { buildPlannerPrompt } = await import("../lib/prompts/planner.js");
+const { buildCriticPrompt } = await import("../lib/prompts/critic.js");
 
 const mockedCallClaude = vi.mocked(callClaude);
 const mockedExtractJson = vi.mocked(extractJson);
@@ -312,5 +313,139 @@ describe("handlePlan", () => {
       await handlePlan({ intent: "add button" });
       expect(mockedCallClaude).toHaveBeenCalledTimes(3);
     });
+  });
+
+  describe("implementation coupling detection", () => {
+    it("includes coupling warnings in output when ACs inspect source code", async () => {
+      const plan = {
+        schemaVersion: "3.0.0" as const,
+        stories: [
+          {
+            id: "US-01",
+            title: "Add caching",
+            dependencies: [],
+            acceptanceCriteria: [
+              { id: "AC-01", description: "uses Redis", command: 'grep -r "Redis" src/' },
+            ],
+            affectedPaths: ["src/"],
+          },
+        ],
+      };
+      mockedCallClaude
+        .mockResolvedValueOnce(makeCallResult(plan)); // planner only (quick tier)
+
+      const result = await handlePlan({ intent: "add caching", tier: "quick" });
+      expect(result.content[0].text).toContain("IMPLEMENTATION COUPLING WARNINGS");
+      expect(result.content[0].text).toContain("US-01/AC-01");
+    });
+
+    it("does not include coupling warnings when ACs are clean", async () => {
+      const plan = makeValidPlan();
+      mockedCallClaude
+        .mockResolvedValueOnce(makeCallResult(plan)); // planner
+
+      const result = await handlePlan({ intent: "add button", tier: "quick" });
+      expect(result.content[0].text).not.toContain("IMPLEMENTATION COUPLING");
+    });
+  });
+});
+
+describe("detectCoupledACs", () => {
+  function makePlanWithAC(command: string) {
+    return {
+      schemaVersion: "3.0.0" as const,
+      stories: [
+        {
+          id: "US-01",
+          title: "Test",
+          dependencies: [],
+          acceptanceCriteria: [{ id: "AC-01", description: "test", command }],
+          affectedPaths: ["src/"],
+        },
+      ],
+    };
+  }
+
+  it("flags grep -r against src/", () => {
+    const violations = detectCoupledACs(makePlanWithAC('grep -r "Redis" src/'));
+    expect(violations).toHaveLength(1);
+    expect(violations[0].storyId).toBe("US-01");
+    expect(violations[0].acId).toBe("AC-01");
+  });
+
+  it("flags grep with flags against server/", () => {
+    const violations = detectCoupledACs(makePlanWithAC('grep -rn "class Cache" server/lib/'));
+    expect(violations).toHaveLength(1);
+  });
+
+  it("flags rg against src/", () => {
+    const violations = detectCoupledACs(makePlanWithAC('rg "import.*Redis" src/'));
+    expect(violations).toHaveLength(1);
+  });
+
+  it("flags rg against server/", () => {
+    const violations = detectCoupledACs(makePlanWithAC('rg "class UserCache" server/'));
+    expect(violations).toHaveLength(1);
+  });
+
+  it("flags find src/ -name", () => {
+    const violations = detectCoupledACs(makePlanWithAC('find src/ -name "*.cache.ts"'));
+    expect(violations).toHaveLength(1);
+  });
+
+  it("flags find server/ -name", () => {
+    const violations = detectCoupledACs(makePlanWithAC('find server/ -type f -name "*.ts"'));
+    expect(violations).toHaveLength(1);
+  });
+
+  it("does not flag behavioral commands", () => {
+    expect(detectCoupledACs(makePlanWithAC("echo PASS"))).toHaveLength(0);
+    expect(detectCoupledACs(makePlanWithAC("npx tsc && echo PASS"))).toHaveLength(0);
+    expect(detectCoupledACs(makePlanWithAC("curl localhost:3000/api | jq '.status'"))).toHaveLength(0);
+    expect(detectCoupledACs(makePlanWithAC("npm test"))).toHaveLength(0);
+  });
+
+  it("does not flag grep used on command output (not source dirs)", () => {
+    expect(detectCoupledACs(makePlanWithAC("node app.js | grep 'started'"))).toHaveLength(0);
+    expect(detectCoupledACs(makePlanWithAC("npm run build 2>&1 | grep -q 'success'"))).toHaveLength(0);
+  });
+
+  it("reports one violation per AC even if multiple patterns match", () => {
+    // This command matches both grep and rg patterns conceptually, but only one pattern can match at a time
+    const violations = detectCoupledACs(makePlanWithAC('grep -r "foo" src/ && rg "bar" server/'));
+    // grep pattern matches first, so only 1 violation
+    expect(violations).toHaveLength(1);
+  });
+});
+
+describe("planner prompt rules", () => {
+  it("contains functional AC rule — observable behavior (D3)", () => {
+    const prompt = buildPlannerPrompt("feature");
+    expect(prompt).toContain("OBSERVABLE BEHAVIOR");
+    expect(prompt).toContain("never implementation method");
+  });
+
+  it("contains evidence-gating rule for codebase claims", () => {
+    const prompt = buildPlannerPrompt("feature");
+    expect(prompt).toContain("Evidence-Gating");
+    expect(prompt).toContain("cite");
+  });
+});
+
+describe("critic prompt rules", () => {
+  it("contains implementation coupling check dimension", () => {
+    const prompt = buildCriticPrompt(1);
+    expect(prompt).toContain("Implementation Coupling");
+    expect(prompt).toContain("observable behavior");
+  });
+
+  it("contains evidence-gating check dimension", () => {
+    const prompt = buildCriticPrompt(1);
+    expect(prompt).toContain("Evidence-Gating");
+  });
+
+  it("includes implementation coupling dimension in round 2 as well", () => {
+    const prompt = buildCriticPrompt(2);
+    expect(prompt).toContain("Implementation Coupling");
   });
 });

@@ -20,10 +20,17 @@ You see ONLY the execution plan JSON. Review it for quality and correctness.
    - Flag any AC that is subjective, vague, or not a real shell command.
 2. **AC Verifiability:** Would each AC actually verify what the story claims to do?
    - Flag any AC that could pass even if the story's goal is NOT met.
-3. **Dependencies:** Are they correct? No circular deps, no missing refs?
-4. **Story Scope:** Is each story too broad (should be split) or too narrow (should be merged)?
-5. **Coverage:** Does the plan cover all aspects of the intent described in the stories?
-6. **affectedPaths:** Do they make sense for each story?
+3. **Implementation Coupling:** Does any AC verify implementation method instead of observable behavior?
+   - Flag any AC that greps/searches source code for specific patterns, class names, imports, or file structures.
+   - ACs should test WHAT the system does (API responses, CLI output, exit codes), not HOW it's built.
+   - Examples of coupled ACs: \`grep -r "Redis" src/\`, \`rg "class.*Cache" server/\`, \`find src/ -name "*.ts" | xargs grep "import"\`
+4. **Dependencies:** Are they correct? No circular deps, no missing refs?
+5. **Story Scope:** Is each story too broad (should be split) or too narrow (should be merged)?
+6. **Coverage:** Does the plan cover all aspects of the intent described in the stories?
+7. **affectedPaths:** Do they make sense for each story?
+8. **Evidence-Gating:** If the plan references specific files, functions, or patterns in the codebase,
+   are those references grounded in the codebase context? Flag any claim about the codebase that
+   appears to be assumed rather than cited from provided context.
 
 ## Output Format
 

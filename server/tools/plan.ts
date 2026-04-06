@@ -7,6 +7,53 @@ import { buildCorrectorPrompt, buildCorrectorUserMessage } from "../lib/prompts/
 import { validateExecutionPlan } from "../validation/execution-plan.js";
 import type { ExecutionPlan } from "../types/execution-plan.js";
 
+/**
+ * Regex patterns that indicate an AC inspects source code rather than
+ * verifying observable behavior. These are Tier 1 mechanical checks —
+ * deterministic, no LLM judgment involved.
+ */
+const IMPLEMENTATION_COUPLING_PATTERNS: RegExp[] = [
+  /\bgrep\b.*\bsrc\//,      // grep ... src/
+  /\bgrep\b.*\bserver\//,   // grep ... server/
+  /\brg\b.*\bsrc\//,        // rg ... src/
+  /\brg\b.*\bserver\//,     // rg ... server/
+  /\bfind\s+src\/.*-name/,  // find src/ ... -name
+  /\bfind\s+server\/.*-name/,  // find server/ ... -name
+];
+
+/**
+ * Scan all AC commands in a plan for implementation-coupled patterns.
+ * Returns a list of { storyId, acId, command, pattern } for each violation.
+ */
+export function detectCoupledACs(
+  plan: ExecutionPlan,
+): Array<{ storyId: string; acId: string; command: string; pattern: string }> {
+  const violations: Array<{
+    storyId: string;
+    acId: string;
+    command: string;
+    pattern: string;
+  }> = [];
+
+  for (const story of plan.stories) {
+    for (const ac of story.acceptanceCriteria) {
+      for (const pattern of IMPLEMENTATION_COUPLING_PATTERNS) {
+        if (pattern.test(ac.command)) {
+          violations.push({
+            storyId: story.id,
+            acId: ac.id,
+            command: ac.command,
+            pattern: pattern.source,
+          });
+          break; // one match per AC is enough
+        }
+      }
+    }
+  }
+
+  return violations;
+}
+
 export const planInputSchema = {
   intent: z.string().describe("What to build — a PRD, description, or goal statement"),
   projectPath: z
@@ -297,11 +344,31 @@ export async function handlePlan({
     }
   }
 
-  // Step 4: Build output
+  // Step 4: Tier 1 — scan final plan for implementation coupling
+  const coupledACs = detectCoupledACs(plan);
+  if (coupledACs.length > 0) {
+    console.error(
+      `forge_plan: ${coupledACs.length} AC(s) inspect source code instead of verifying behavior:`,
+      coupledACs.map((v) => `${v.storyId}/${v.acId}`).join(", "),
+    );
+  }
+
+  // Step 5: Build output
   const sections: string[] = [
     "=== EXECUTION PLAN ===",
     JSON.stringify(plan, null, 2),
   ];
+
+  if (coupledACs.length > 0) {
+    const lines = [
+      `=== IMPLEMENTATION COUPLING WARNINGS (${coupledACs.length}) ===`,
+      ...coupledACs.map(
+        (v) =>
+          `${v.storyId}/${v.acId}: AC inspects source code — should verify observable behavior instead.\n  command: ${v.command}`,
+      ),
+    ];
+    sections.push(lines.join("\n"));
+  }
 
   const critiqueSummary = formatCritiqueSummary(critiqueRounds);
   if (critiqueSummary) {

@@ -84,17 +84,65 @@ ${modeRules[mode]}
   a path from the provided context, state the assumption explicitly instead of asserting it as fact.`;
 }
 
+/** A labeled context entry injected by the calling agent. */
+export interface ContextEntry {
+  label: string;
+  content: string;
+}
+
+/** Default maximum character budget for injected context. */
+export const DEFAULT_MAX_CONTEXT_CHARS = 50_000;
+
 /**
- * Build the user message for the planner, including intent and optional codebase context.
+ * Truncate context entries to fit within a character budget.
+ * Entries are dropped whole (last first) — never mid-truncated.
+ * The calling agent controls priority via array order: first = highest priority.
+ */
+export function truncateContext(
+  entries: ContextEntry[],
+  maxChars: number,
+): ContextEntry[] {
+  const result: ContextEntry[] = [];
+  let remaining = maxChars;
+
+  for (const entry of entries) {
+    const entrySize = entry.label.length + entry.content.length + 10; // overhead for formatting
+    if (entrySize > remaining) break;
+    result.push(entry);
+    remaining -= entrySize;
+  }
+
+  return result;
+}
+
+/**
+ * Build the user message for the planner, including intent, optional codebase context,
+ * and optional injected context entries.
  */
 export function buildPlannerUserMessage(
   intent: string,
   codebaseSummary?: string,
+  context?: ContextEntry[],
+  maxContextChars?: number,
 ): string {
   let message = `## Intent\n\n${intent}`;
 
   if (codebaseSummary) {
     message += `\n\n## Codebase Context\n\n${codebaseSummary}`;
+  }
+
+  if (context && context.length > 0) {
+    const budget = maxContextChars ?? DEFAULT_MAX_CONTEXT_CHARS;
+    const truncated = truncateContext(context, budget);
+
+    message += `\n\n## Additional Context`;
+    for (const entry of truncated) {
+      message += `\n\n### ${entry.label}\n\n${entry.content}`;
+    }
+
+    if (truncated.length < context.length) {
+      message += `\n\n*[${context.length - truncated.length} context entries omitted due to size limit]*`;
+    }
   }
 
   return message;

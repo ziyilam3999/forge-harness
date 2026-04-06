@@ -12,9 +12,15 @@ vi.mock("../lib/codebase-scan.js", () => ({
   scanCodebase: vi.fn(async () => "## Directory Structure\n```\nsrc/\n```"),
 }));
 
+// Mock run-record — don't write real files during tests
+vi.mock("../lib/run-record.js", () => ({
+  writeRunRecord: vi.fn(async () => {}),
+}));
+
 // Import after mocks
 const { callClaude, extractJson } = await import("../lib/anthropic.js");
 const { scanCodebase } = await import("../lib/codebase-scan.js");
+const { writeRunRecord } = await import("../lib/run-record.js");
 const { handlePlan, detectCoupledACs } = await import("./plan.js");
 const { buildPlannerPrompt } = await import("../lib/prompts/planner.js");
 const { buildCriticPrompt } = await import("../lib/prompts/critic.js");
@@ -22,6 +28,7 @@ const { buildCriticPrompt } = await import("../lib/prompts/critic.js");
 const mockedCallClaude = vi.mocked(callClaude);
 const mockedExtractJson = vi.mocked(extractJson);
 const mockedScanCodebase = vi.mocked(scanCodebase);
+const mockedWriteRunRecord = vi.mocked(writeRunRecord);
 
 function makeValidPlan() {
   return {
@@ -447,5 +454,107 @@ describe("critic prompt rules", () => {
   it("includes implementation coupling dimension in round 2 as well", () => {
     const prompt = buildCriticPrompt(2);
     expect(prompt).toContain("Implementation Coupling");
+  });
+});
+
+describe("context injection", () => {
+  it("passes context entries to the planner prompt", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan)); // planner only
+
+    await handlePlan({
+      intent: "add button",
+      tier: "quick",
+      context: [
+        { label: "Proven patterns", content: "P27: tight scope" },
+        { label: "Anti-patterns", content: "F2: no consequences" },
+      ],
+    });
+
+    const firstCall = mockedCallClaude.mock.calls[0][0];
+    expect(firstCall.messages[0].content).toContain("Proven patterns");
+    expect(firstCall.messages[0].content).toContain("P27: tight scope");
+    expect(firstCall.messages[0].content).toContain("Anti-patterns");
+  });
+
+  it("respects maxContextChars by dropping last entries first", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan));
+
+    await handlePlan({
+      intent: "add button",
+      tier: "quick",
+      context: [
+        { label: "Small", content: "fits" },
+        { label: "Big", content: "X".repeat(10000) },
+      ],
+      maxContextChars: 100,
+    });
+
+    const firstCall = mockedCallClaude.mock.calls[0][0];
+    expect(firstCall.messages[0].content).toContain("Small");
+    expect(firstCall.messages[0].content).not.toContain("Big");
+  });
+
+  it("does not add context section when context is empty or omitted", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan));
+
+    await handlePlan({ intent: "add button", tier: "quick" });
+
+    const firstCall = mockedCallClaude.mock.calls[0][0];
+    expect(firstCall.messages[0].content).not.toContain("Additional Context");
+  });
+});
+
+describe("run records", () => {
+  it("writes a run record when projectPath is provided", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan)); // planner only
+
+    await handlePlan({ intent: "add button", tier: "quick", projectPath: "/some/path" });
+
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const [projectPath, record] = mockedWriteRunRecord.mock.calls[0];
+    expect(projectPath).toBe("/some/path");
+    expect(record.tool).toBe("forge_plan");
+    expect(record.outcome).toBe("success");
+    expect(record.metrics.inputTokens).toBeGreaterThan(0);
+    expect(record.metrics.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("does not write a run record when projectPath is omitted", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan));
+
+    await handlePlan({ intent: "add button", tier: "quick" });
+
+    expect(mockedWriteRunRecord).not.toHaveBeenCalled();
+  });
+
+  it("includes critique metrics in run record", async () => {
+    const plan = makeValidPlan();
+    const findings = [
+      { severity: "MINOR", storyId: "US-01", acId: null, description: "d", suggestedFix: "f" },
+    ];
+
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan)) // planner
+      .mockResolvedValueOnce(makeCriticResult(findings)) // critic-1
+      .mockResolvedValueOnce(makeCorrectorResult(plan, [{ findingIndex: 0, applied: true, reason: "ok" }])) // corrector-1
+      .mockResolvedValueOnce(makeCriticResult()); // critic-2
+
+    await handlePlan({ intent: "add button", projectPath: "/some/path" });
+
+    const [, record] = mockedWriteRunRecord.mock.calls[0];
+    expect(record.metrics.critiqueRounds).toBe(2);
+    expect(record.metrics.findingsTotal).toBe(1);
+    expect(record.metrics.findingsApplied).toBe(1);
+    expect(record.metrics.findingsRejected).toBe(0);
   });
 });

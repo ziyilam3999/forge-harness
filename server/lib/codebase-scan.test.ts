@@ -39,6 +39,28 @@ describe("scanCodebase", () => {
     expect(result).toContain("my-project");
   });
 
+  it("extracts structured dependency info from package.json", async () => {
+    await writeFile(
+      join(tempDir, "package.json"),
+      JSON.stringify({
+        name: "test-project",
+        version: "2.0.0",
+        dependencies: { express: "^4.18.0", zod: "^3.25.0" },
+        devDependencies: { vitest: "^4.0.0" },
+        scripts: { test: "vitest run", build: "tsc" },
+      }),
+    );
+
+    const result = await scanCodebase(tempDir);
+    expect(result).toContain("dependencies:");
+    expect(result).toContain("express: ^4.18.0");
+    expect(result).toContain("zod: ^3.25.0");
+    expect(result).toContain("devDependencies:");
+    expect(result).toContain("vitest: ^4.0.0");
+    expect(result).toContain("scripts:");
+    expect(result).toContain("test: vitest run");
+  });
+
   it("skips node_modules", async () => {
     await mkdir(join(tempDir, "node_modules", "some-pkg"), { recursive: true });
     await writeFile(

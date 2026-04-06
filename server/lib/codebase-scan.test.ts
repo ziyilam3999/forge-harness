@@ -104,7 +104,9 @@ describe("scanCodebase", () => {
   });
 
   it("throws for non-existent path", async () => {
-    await expect(scanCodebase("/nonexistent/path/xyz")).rejects.toThrow(
+    // Use an absolute path that doesn't exist on any platform
+    const fakePath = join(tmpdir(), "nonexistent-forge-test-" + Date.now());
+    await expect(scanCodebase(fakePath)).rejects.toThrow(
       "does not exist",
     );
   });

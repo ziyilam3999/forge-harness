@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { CallClaudeResult } from "../lib/anthropic.js";
+import { extractPlanJson, findCallByContent } from "../lib/test-utils.js";
 
 // ── Mocks (same pattern as plan.test.ts / evaluate.test.ts) ──
 
@@ -218,26 +219,6 @@ function makePhasePlan(phaseId: string) {
   };
 }
 
-/**
- * Extract JSON from forge_plan output text.
- * Output format: "=== HEADER ===\n\n{json}\n\n=== NEXT SECTION ==="
- * The JSON is the first valid JSON object/array after the header.
- */
-function extractPlanJson(text: string): string {
-  // Find the first { that starts a JSON object in the output
-  const jsonStart = text.indexOf("{");
-  if (jsonStart === -1) throw new Error("No JSON found in output");
-
-  // Walk forward to find the matching closing brace
-  let depth = 0;
-  for (let i = jsonStart; i < text.length; i++) {
-    if (text[i] === "{") depth++;
-    else if (text[i] === "}") depth--;
-    if (depth === 0) return text.slice(jsonStart, i + 1);
-  }
-  throw new Error("Unbalanced JSON in output");
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -319,7 +300,11 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     expect(evalReport.gaps).toHaveLength(0);
 
     // Verify the coherence LLM call received all three tiers
-    const coherenceCall = mockedCallClaude.mock.calls[2][0]; // 3rd LLM call
+    const coherenceCall = findCallByContent(mockedCallClaude.mock.calls, [
+      "Product Requirements Document",
+      "Master Plan",
+      "Phase PH-01",
+    ]);
     expect(coherenceCall.messages[0].content).toContain("Product Requirements Document");
     expect(coherenceCall.messages[0].content).toContain("Master Plan");
     expect(coherenceCall.messages[0].content).toContain("Phase PH-01");
@@ -527,7 +512,10 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     expect(evalReport.gaps).toHaveLength(0);
 
     // Verify both phases were included in the LLM prompt
-    const coherenceCall = mockedCallClaude.mock.calls[3][0]; // 4th call
+    const coherenceCall = findCallByContent(mockedCallClaude.mock.calls, [
+      "Phase PH-01",
+      "Phase PH-04",
+    ]);
     expect(coherenceCall.messages[0].content).toContain("Phase PH-01");
     expect(coherenceCall.messages[0].content).toContain("Phase PH-04");
   });

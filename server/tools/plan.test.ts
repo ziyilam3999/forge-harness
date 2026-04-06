@@ -607,3 +607,364 @@ describe("run records", () => {
     expect(record.metrics.findingsRejected).toBe(0);
   });
 });
+
+// ── Three-tier document system tests ──
+
+function makeValidMasterPlan() {
+  return {
+    schemaVersion: "1.0.0",
+    documentTier: "master",
+    title: "Build the feature",
+    summary: "Implement the feature in two phases.",
+    phases: [
+      {
+        id: "PH-01",
+        title: "Types and validation",
+        description: "Create types and validators",
+        dependencies: [],
+        inputs: [],
+        outputs: ["server/types/"],
+        estimatedStories: 2,
+      },
+      {
+        id: "PH-02",
+        title: "Pipeline integration",
+        description: "Wire into the main handler",
+        dependencies: ["PH-01"],
+        inputs: ["server/types/"],
+        outputs: ["server/tools/plan.ts"],
+        estimatedStories: 3,
+      },
+    ],
+    crossCuttingConcerns: ["Test coverage"],
+  };
+}
+
+describe("documentTier: master", () => {
+  it("produces a valid master plan with phases", async () => {
+    const masterPlan = makeValidMasterPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(masterPlan)); // master planner
+
+    const result = await handlePlan({
+      intent: "build the feature",
+      documentTier: "master",
+      visionDoc: "Build a thing with two parts",
+      tier: "quick",
+    });
+
+    expect(result.content[0].text).toContain("MASTER PLAN");
+    expect(result.content[0].text).toContain('"schemaVersion": "1.0.0"');
+    expect(result.content[0].text).toContain("PH-01");
+    expect(result.content[0].text).toContain("PH-02");
+  });
+
+  it("returns error when visionDoc is missing", async () => {
+    const result = await handlePlan({
+      intent: "build the feature",
+      documentTier: "master",
+    });
+
+    expect(result.content[0].text).toContain("Error");
+    expect(result.content[0].text).toContain("visionDoc");
+    expect((result as any).isError).toBe(true);
+  });
+
+  it("runs master critique loop on thorough tier", async () => {
+    const masterPlan = makeValidMasterPlan();
+    const findings = [
+      { severity: "MINOR", phaseId: "PH-01", description: "d", suggestedFix: "f" },
+    ];
+
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(masterPlan)) // master planner
+      .mockResolvedValueOnce(makeCallResult({ findings })) // master critic-1
+      .mockResolvedValueOnce(makeCallResult({ plan: masterPlan, dispositions: [{ findingIndex: 0, applied: true, reason: "ok" }] })) // master corrector-1
+      .mockResolvedValueOnce(makeCallResult({ findings: [] })); // master critic-2
+
+    const result = await handlePlan({
+      intent: "build the feature",
+      documentTier: "master",
+      visionDoc: "Build a thing",
+      tier: "thorough",
+    });
+
+    expect(result.content[0].text).toContain("CRITIQUE SUMMARY");
+    expect(mockedCallClaude).toHaveBeenCalledTimes(4);
+  });
+
+  it("retries master planner on validation failure", async () => {
+    const invalidPlan = { schemaVersion: "1.0.0", documentTier: "master", title: "t", summary: "s", phases: [] };
+    const validPlan = makeValidMasterPlan();
+
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(invalidPlan)) // first attempt fails validation
+      .mockResolvedValueOnce(makeCallResult(validPlan)); // retry succeeds
+
+    const result = await handlePlan({
+      intent: "build the feature",
+      documentTier: "master",
+      visionDoc: "Build a thing",
+      tier: "quick",
+    });
+
+    expect(result.content[0].text).toContain("MASTER PLAN");
+    expect(mockedCallClaude).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes run record with documentTier 'master'", async () => {
+    const masterPlan = makeValidMasterPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(masterPlan));
+
+    await handlePlan({
+      intent: "build",
+      documentTier: "master",
+      visionDoc: "Build a thing",
+      tier: "quick",
+      projectPath: "/some/path",
+    });
+
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const [, record] = mockedWriteRunRecord.mock.calls[0];
+    expect(record.documentTier).toBe("master");
+  });
+
+  it("passes vision doc to master critic for coverage checking", async () => {
+    const masterPlan = makeValidMasterPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(masterPlan)) // planner
+      .mockResolvedValueOnce(makeCallResult({ findings: [] })); // critic
+
+    await handlePlan({
+      intent: "build",
+      documentTier: "master",
+      visionDoc: "Build a thing with requirements",
+      tier: "standard",
+    });
+
+    // The critic call (second call) should contain the vision doc
+    const criticCall = mockedCallClaude.mock.calls[1][0];
+    expect(criticCall.messages[0].content).toContain("Build a thing with requirements");
+  });
+});
+
+describe("documentTier: phase", () => {
+  it("produces a valid execution plan for a phase", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan)); // phase planner
+
+    const result = await handlePlan({
+      intent: "expand phase",
+      documentTier: "phase",
+      visionDoc: "Build a thing",
+      masterPlan: JSON.stringify(makeValidMasterPlan()),
+      phaseId: "PH-01",
+      tier: "quick",
+    });
+
+    expect(result.content[0].text).toContain("PHASE PLAN (PH-01)");
+    expect(result.content[0].text).toContain('"schemaVersion": "3.0.0"');
+  });
+
+  it("returns error when required params are missing", async () => {
+    const result = await handlePlan({
+      intent: "expand phase",
+      documentTier: "phase",
+      visionDoc: "Build a thing",
+      // missing masterPlan and phaseId
+    });
+
+    expect(result.content[0].text).toContain("Error");
+    expect((result as any).isError).toBe(true);
+  });
+
+  it("includes phase context rules in the planner prompt", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan));
+
+    await handlePlan({
+      intent: "expand phase",
+      documentTier: "phase",
+      visionDoc: "Build a thing",
+      masterPlan: JSON.stringify(makeValidMasterPlan()),
+      phaseId: "PH-01",
+      tier: "quick",
+    });
+
+    // The planner prompt should include phase-specific rules
+    const plannerCall = mockedCallClaude.mock.calls[0][0];
+    expect(plannerCall.system).toContain("Phase Context Rules");
+    expect(plannerCall.system).toContain("ONE phase");
+  });
+
+  it("includes vision doc and master plan in user message", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan));
+
+    await handlePlan({
+      intent: "expand phase",
+      documentTier: "phase",
+      visionDoc: "My PRD content",
+      masterPlan: '{"phases": []}',
+      phaseId: "PH-01",
+      tier: "quick",
+    });
+
+    const plannerCall = mockedCallClaude.mock.calls[0][0];
+    expect(plannerCall.messages[0].content).toContain("My PRD content");
+    expect(plannerCall.messages[0].content).toContain("Master Plan");
+    expect(plannerCall.messages[0].content).toContain("PH-01");
+  });
+
+  it("runs implementation coupling check on phase plans", async () => {
+    const coupledPlan = {
+      schemaVersion: "3.0.0" as const,
+      stories: [{
+        id: "US-01",
+        title: "Coupled story",
+        dependencies: [],
+        acceptanceCriteria: [{ id: "AC-01", description: "bad", command: 'grep -r "Cache" src/' }],
+        affectedPaths: ["src/"],
+      }],
+    };
+    mockedCallClaude.mockResolvedValueOnce(makeCallResult(coupledPlan));
+
+    const result = await handlePlan({
+      intent: "expand phase",
+      documentTier: "phase",
+      visionDoc: "Build",
+      masterPlan: "{}",
+      phaseId: "PH-01",
+      tier: "quick",
+    });
+
+    expect(result.content[0].text).toContain("IMPLEMENTATION COUPLING WARNINGS");
+  });
+
+  it("writes run record with documentTier 'phase'", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude.mockResolvedValueOnce(makeCallResult(plan));
+
+    await handlePlan({
+      intent: "expand",
+      documentTier: "phase",
+      visionDoc: "Build",
+      masterPlan: "{}",
+      phaseId: "PH-01",
+      tier: "quick",
+      projectPath: "/some/path",
+    });
+
+    const [, record] = mockedWriteRunRecord.mock.calls[0];
+    expect(record.documentTier).toBe("phase");
+  });
+});
+
+describe("documentTier: update", () => {
+  it("produces an updated execution plan", async () => {
+    const updatedPlan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(updatedPlan)); // update planner
+
+    const result = await handlePlan({
+      intent: "update plan",
+      documentTier: "update",
+      currentPlan: JSON.stringify(makeValidPlan()),
+      implementationNotes: "Used a different caching strategy",
+      tier: "quick",
+    });
+
+    expect(result.content[0].text).toContain("UPDATED PLAN");
+    expect(result.content[0].text).toContain('"schemaVersion": "3.0.0"');
+  });
+
+  it("returns error when required params are missing", async () => {
+    const result = await handlePlan({
+      intent: "update plan",
+      documentTier: "update",
+      // missing currentPlan and implementationNotes
+    });
+
+    expect(result.content[0].text).toContain("Error");
+    expect((result as any).isError).toBe(true);
+  });
+
+  it("defaults to standard tier (1 critique round) for updates", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan)) // update planner
+      .mockResolvedValueOnce(makeCriticResult()); // critic-1
+
+    await handlePlan({
+      intent: "update plan",
+      documentTier: "update",
+      currentPlan: JSON.stringify(makeValidPlan()),
+      implementationNotes: "Changed approach",
+      // no tier specified — should default to standard
+    });
+
+    expect(mockedCallClaude).toHaveBeenCalledTimes(2); // planner + 1 critic
+  });
+
+  it("includes implementation notes in update planner prompt", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude.mockResolvedValueOnce(makeCallResult(plan));
+
+    await handlePlan({
+      intent: "update plan",
+      documentTier: "update",
+      currentPlan: JSON.stringify(makeValidPlan()),
+      implementationNotes: "Switched from Redis to in-memory cache",
+      tier: "quick",
+    });
+
+    const plannerCall = mockedCallClaude.mock.calls[0][0];
+    expect(plannerCall.messages[0].content).toContain("Switched from Redis to in-memory cache");
+    expect(plannerCall.messages[0].content).toContain("Implementation Notes");
+  });
+
+  it("writes run record with documentTier 'update'", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude.mockResolvedValueOnce(makeCallResult(plan));
+
+    await handlePlan({
+      intent: "update",
+      documentTier: "update",
+      currentPlan: "{}",
+      implementationNotes: "notes",
+      tier: "quick",
+      projectPath: "/some/path",
+    });
+
+    const [, record] = mockedWriteRunRecord.mock.calls[0];
+    expect(record.documentTier).toBe("update");
+  });
+});
+
+describe("backward compatibility (no documentTier)", () => {
+  it("produces execution plan when documentTier is omitted", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan))
+      .mockResolvedValueOnce(makeCriticResult())
+      .mockResolvedValueOnce(makeCriticResult());
+
+    const result = await handlePlan({ intent: "add dark mode" });
+    expect(result.content[0].text).toContain("EXECUTION PLAN");
+    expect(result.content[0].text).toContain('"schemaVersion": "3.0.0"');
+  });
+
+  it("writes run record with documentTier null", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude.mockResolvedValueOnce(makeCallResult(plan));
+
+    await handlePlan({ intent: "add button", tier: "quick", projectPath: "/p" });
+
+    const [, record] = mockedWriteRunRecord.mock.calls[0];
+    expect(record.documentTier).toBeNull();
+  });
+});

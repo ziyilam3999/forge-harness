@@ -1,5 +1,75 @@
 /**
- * Build the system prompt for a critic agent.
+ * Build the system prompt for a master plan critic agent.
+ * Reviews a master plan for vision coverage and phase sequencing quality.
+ */
+export function buildMasterCriticPrompt(round: 1 | 2): string {
+  const regressionCheck =
+    round === 2
+      ? `\n\n### Regression Check (Round 2 Only)
+- This plan was already reviewed and corrected once.
+- Check whether the corrections introduced NEW problems.
+- Tag any regression finding with [REGRESSION] at the start of the finding.`
+      : "";
+
+  return `You are an independent plan reviewer. You have never seen how this master plan was created.
+You see ONLY the master plan JSON and the vision document. Review for quality and correctness.
+
+## What to Check
+
+1. **Vision Coverage:** Does the master plan cover ALL requirements from the vision document?
+   - Flag any requirement that has no corresponding phase.
+2. **Phase Sequencing:** Are dependencies correct? Do inputs/outputs chain properly?
+   - Flag any phase whose inputs are not produced by a listed dependency's outputs.
+3. **Dependency Graph:** No circular deps, no missing refs, sensible ordering?
+4. **Phase Scope:** Is each phase appropriately scoped — not too broad, not too narrow?
+   - Phases should be independently deliverable. A phase with 15+ estimated stories may need splitting.
+5. **Cross-Cutting Concerns:** Are shared concerns properly identified?
+   - Flag concerns embedded in phases that should be cross-cutting.
+6. **No Implementation Details:** Master plans describe WHAT, not HOW.
+   - Flag any reference to specific files, function names, or code patterns.
+7. **Context Contradiction:** If additional context was provided, does the plan contradict any context entry?
+   - Flag if the planner contradicts context without citing the precedence rule (PRD > KB > memory > prior plans).
+
+## Output Format
+
+Respond with ONLY a JSON object:
+
+{
+  "findings": [
+    {
+      "severity": "CRITICAL" | "MAJOR" | "MINOR",
+      "phaseId": "PH-01 or null if plan-level",
+      "description": "What's wrong",
+      "suggestedFix": "How to fix it"
+    }
+  ]
+}
+
+If the plan is sound, respond with: { "findings": [] }
+
+## Rules
+
+- Every finding MUST cite a specific phase ID (or null for plan-level issues).
+- Classify severity: CRITICAL = plan won't work, MAJOR = significant gap, MINOR = improvement.
+- Be thorough but not pedantic. Only flag real problems.${regressionCheck}`;
+}
+
+/**
+ * Build the user message for the master plan critic.
+ */
+export function buildMasterCriticUserMessage(
+  planJson: string,
+  visionDoc?: string,
+): string {
+  let message = `Review this master plan:\n\n${planJson}`;
+  if (visionDoc) {
+    message += `\n\n## Vision Document (for coverage checking)\n\n${visionDoc}`;
+  }
+  return message;
+}
+
+/**
+ * Build the system prompt for a critic agent (execution plan / default mode).
  * Critics see ONLY the execution plan — no planner context (isolation principle).
  */
 export function buildCriticPrompt(round: 1 | 2): string {

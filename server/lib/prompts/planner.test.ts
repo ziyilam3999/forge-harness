@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   buildPlannerUserMessage,
+  buildMasterPlannerPrompt,
+  buildMasterPlannerUserMessage,
+  buildPhasePlannerPrompt,
+  buildPhasePlannerUserMessage,
+  buildUpdatePlannerPrompt,
+  buildUpdatePlannerUserMessage,
   truncateContext,
   DEFAULT_MAX_CONTEXT_CHARS,
   type ContextEntry,
@@ -102,5 +108,99 @@ describe("buildPlannerUserMessage", () => {
   it("uses DEFAULT_MAX_CONTEXT_CHARS when maxContextChars not specified", () => {
     // Verify the default exists and is a reasonable value
     expect(DEFAULT_MAX_CONTEXT_CHARS).toBe(50_000);
+  });
+});
+
+describe("buildMasterPlannerPrompt", () => {
+  it("specifies master-plan v1.0.0 schema", () => {
+    const prompt = buildMasterPlannerPrompt();
+    expect(prompt).toContain('"schemaVersion": "1.0.0"');
+    expect(prompt).toContain('"documentTier": "master"');
+  });
+
+  it("includes phase decomposition rules", () => {
+    const prompt = buildMasterPlannerPrompt();
+    expect(prompt).toContain("Phase Rules");
+    expect(prompt).toContain("PH-01");
+    expect(prompt).toContain("estimatedStories");
+  });
+
+  it("prohibits implementation details", () => {
+    const prompt = buildMasterPlannerPrompt();
+    expect(prompt).toContain("No implementation details");
+  });
+
+  it("includes evidence-gating rule", () => {
+    const prompt = buildMasterPlannerPrompt();
+    expect(prompt).toContain("Evidence-Gating");
+  });
+});
+
+describe("buildMasterPlannerUserMessage", () => {
+  it("includes vision document", () => {
+    const msg = buildMasterPlannerUserMessage("Build a feature");
+    expect(msg).toContain("## Vision Document");
+    expect(msg).toContain("Build a feature");
+  });
+
+  it("includes codebase context when provided", () => {
+    const msg = buildMasterPlannerUserMessage("Build", "## Dir\nsrc/");
+    expect(msg).toContain("## Codebase Context");
+  });
+
+  it("injects context entries", () => {
+    const msg = buildMasterPlannerUserMessage("Build", undefined, [
+      { label: "KB", content: "patterns" },
+    ]);
+    expect(msg).toContain("### KB");
+    expect(msg).toContain("patterns");
+  });
+});
+
+describe("buildPhasePlannerPrompt", () => {
+  it("extends the base planner prompt", () => {
+    const prompt = buildPhasePlannerPrompt("feature");
+    expect(prompt).toContain("Prefer a single story"); // from base
+    expect(prompt).toContain("Phase Context Rules"); // phase extension
+  });
+
+  it("includes phase-specific constraints", () => {
+    const prompt = buildPhasePlannerPrompt("full-project");
+    expect(prompt).toContain("ONE phase");
+    expect(prompt).toContain("documentTier");
+    expect(prompt).toContain("phaseId");
+  });
+});
+
+describe("buildPhasePlannerUserMessage", () => {
+  it("includes vision doc, master plan, and phase ID", () => {
+    const msg = buildPhasePlannerUserMessage("PRD here", '{"phases":[]}', "PH-01");
+    expect(msg).toContain("## Vision Document");
+    expect(msg).toContain("PRD here");
+    expect(msg).toContain("## Master Plan");
+    expect(msg).toContain("## Target Phase");
+    expect(msg).toContain("PH-01");
+  });
+});
+
+describe("buildUpdatePlannerPrompt", () => {
+  it("describes method vs functional divergence handling", () => {
+    const prompt = buildUpdatePlannerPrompt();
+    expect(prompt).toContain("Method Divergence");
+    expect(prompt).toContain("Functional Divergence");
+  });
+
+  it("requires observable behavior ACs", () => {
+    const prompt = buildUpdatePlannerPrompt();
+    expect(prompt).toContain("OBSERVABLE BEHAVIOR");
+  });
+});
+
+describe("buildUpdatePlannerUserMessage", () => {
+  it("includes current plan and implementation notes", () => {
+    const msg = buildUpdatePlannerUserMessage('{"stories":[]}', "Used Redis instead of Memcached");
+    expect(msg).toContain("## Current Plan");
+    expect(msg).toContain("## Implementation Notes");
+    expect(msg).toContain("Used Redis instead of Memcached");
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { CallClaudeResult } from "../lib/anthropic.js";
 
-// Mock the anthropic module before importing plan
+// Mock the anthropic module
 vi.mock("../lib/anthropic.js", () => ({
   callClaude: vi.fn(),
   extractJson: vi.fn((text: string) => JSON.parse(text)),
@@ -17,10 +17,59 @@ vi.mock("../lib/run-record.js", () => ({
   writeRunRecord: vi.fn(async () => {}),
 }));
 
+// Mock run-context — trackedCallClaude delegates to the mocked callClaude
+// and accumulates tokens for cost.summarize()
+vi.mock("../lib/run-context.js", async () => {
+  const { callClaude: mockedClaude } = await import("../lib/anthropic.js");
+
+  class MockRunContext {
+    _inputTokens = 0;
+    _outputTokens = 0;
+    cost = {
+      summarize: () => ({
+        inputTokens: (this as any)._inputTokens ?? 0,
+        outputTokens: (this as any)._outputTokens ?? 0,
+        estimatedCostUsd: 0.001,
+        breakdown: [],
+        isOAuthAuth: false,
+      }),
+      recordUsage: vi.fn(),
+    };
+    progress = { begin: vi.fn(), complete: vi.fn(), skip: vi.fn(), fail: vi.fn(), getResults: () => [] };
+    audit = { log: vi.fn(async () => {}) };
+    toolName = "forge_plan";
+
+    constructor() {
+      // Bind summarize to the instance
+      const self = this;
+      this.cost.summarize = () => ({
+        inputTokens: self._inputTokens,
+        outputTokens: self._outputTokens,
+        estimatedCostUsd: 0.001,
+        breakdown: [],
+        isOAuthAuth: false,
+      });
+    }
+  }
+
+  return {
+    RunContext: MockRunContext,
+    trackedCallClaude: vi.fn(async (ctx: any, _stage: string, _role: string, options: any) => {
+      const result = await mockedClaude(options);
+      if (ctx && result.usage) {
+        ctx._inputTokens = (ctx._inputTokens ?? 0) + result.usage.inputTokens;
+        ctx._outputTokens = (ctx._outputTokens ?? 0) + result.usage.outputTokens;
+      }
+      return result;
+    }),
+  };
+});
+
 // Import after mocks
 const { callClaude, extractJson } = await import("../lib/anthropic.js");
 const { scanCodebase } = await import("../lib/codebase-scan.js");
 const { writeRunRecord } = await import("../lib/run-record.js");
+// trackedCallClaude is mocked — import not needed for direct use
 const { handlePlan, detectCoupledACs } = await import("./plan.js");
 const { buildPlannerPrompt } = await import("../lib/prompts/planner.js");
 const { buildCriticPrompt } = await import("../lib/prompts/critic.js");

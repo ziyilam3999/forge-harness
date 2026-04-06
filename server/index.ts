@@ -15,7 +15,9 @@ server.registerTool(
   {
     title: "Forge Plan",
     description:
-      "Transform intent (PRD, description, or goal) into a structured execution plan with stories and binary acceptance criteria. Uses double-critique pattern.",
+      "Transform intent into structured plans. Supports three document tiers: " +
+      "master (vision → phases), phase (phase → stories with ACs), update (revise plan from implementation notes). " +
+      "When documentTier is omitted, produces a standalone execution plan (backward compatible). Uses double-critique pattern.",
     inputSchema: planInputSchema,
     annotations: { readOnlyHint: true },
   },

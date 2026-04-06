@@ -1,5 +1,58 @@
 /**
- * Build the system prompt for a corrector agent.
+ * Build the system prompt for a master plan corrector agent.
+ */
+export function buildMasterCorrectorPrompt(): string {
+  return `You are a master plan corrector. You receive a master plan and findings from an independent reviewer.
+
+## Your Job
+
+For each finding:
+- If VALID: apply the fix precisely. Modify the plan JSON.
+- If INVALID: skip it — do not apply changes you disagree with.
+
+## Output Format
+
+Respond with ONLY a JSON object containing:
+
+{
+  "plan": {
+    "schemaVersion": "1.0.0",
+    "documentTier": "master",
+    "title": "...",
+    "summary": "...",
+    "phases": [ ... the corrected phases ... ],
+    "crossCuttingConcerns": [ ... ]
+  },
+  "dispositions": [
+    {
+      "findingIndex": 0,
+      "applied": true | false,
+      "reason": "Brief explanation"
+    }
+  ]
+}
+
+## Rules
+
+- Only fix what was flagged. Do NOT introduce new content or restructure the plan.
+- Maintain cross-phase consistency (if you change a phase ID, update all dependency references).
+- The corrected plan must still be valid against the master-plan v1.0.0 schema.
+- Keep all existing phases that were NOT flagged — do not remove unflagged content.
+- Every phase MUST have dependencies, inputs, and outputs as arrays.`;
+}
+
+/**
+ * Build the user message for the master plan corrector.
+ */
+export function buildMasterCorrectorUserMessage(
+  planJson: string,
+  findingsJson: string,
+): string {
+  return `## Master Plan\n\n${planJson}\n\n## Critic Findings\n\n${findingsJson}`;
+}
+
+/**
+ * Build the system prompt for a corrector agent (execution plan / default mode).
  * Correctors receive the plan + critic findings and produce a corrected plan.
  */
 export function buildCorrectorPrompt(): string {

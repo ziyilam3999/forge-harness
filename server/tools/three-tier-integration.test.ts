@@ -265,7 +265,7 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     });
 
     // Verify master plan was produced
-    expect(masterResult.isError).toBeUndefined();
+    expect((masterResult as any).isError).toBeUndefined();
     expect(masterResult.content[0].text).toContain("MASTER PLAN");
     expect(masterResult.content[0].text).toContain('"schemaVersion": "1.0.0"');
 
@@ -288,7 +288,7 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     });
 
     // Verify phase plan was produced
-    expect(phaseResult.isError).toBeUndefined();
+    expect((phaseResult as any).isError).toBeUndefined();
     expect(phaseResult.content[0].text).toContain("PHASE PLAN (PH-01)");
     expect(phaseResult.content[0].text).toContain('"schemaVersion": "3.0.0"');
 
@@ -312,7 +312,7 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     });
 
     // Verify coherence eval succeeded with no gaps
-    expect(evalResult.isError).toBeUndefined();
+    expect((evalResult as any).isError).toBeUndefined();
     const evalReport = JSON.parse(evalResult.content[0].text);
     expect(evalReport.evaluationMode).toBe("coherence");
     expect(evalReport.status).toBe("complete");
@@ -440,7 +440,7 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     });
 
     // Should degrade gracefully, not crash
-    expect(evalResult.isError).toBeUndefined();
+    expect((evalResult as any).isError).toBeUndefined();
     const evalReport = JSON.parse(evalResult.content[0].text);
     expect(evalReport.evaluationMode).toBe("coherence");
     expect(evalReport.status).toBe("eval-failed");

@@ -1,6 +1,8 @@
 export interface ExecutionPlan {
   schemaVersion: "3.0.0";
   prdPath?: string; // Reserved for future use; not populated by the planner in Phase 1.
+  documentTier?: "phase"; // Three-tier system: marks this plan as a phase-level document.
+  phaseId?: string; // PH-XX reference linking this plan to a MasterPlan phase.
   stories: Story[];
 }
 

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0](https://github.com/ziyilam3999/forge-harness/compare/v0.5.0...v0.6.0) (2026-04-06)
+
+### Features
+
+- context injection parameter for forge_plan — inject memory, KB, and prior plans via `context` array with whole-entry truncation at `maxContextChars` (#42)
+- enhanced codebase scanner extracts structured dependency names+versions from package.json (#42)
+- run records written to `.forge/runs/` after each forge_plan invocation for self-improvement analytics (#42)
+
 ## [0.5.0](https://github.com/ziyilam3999/forge-harness/compare/v0.4.2...v0.5.0) (2026-04-06)
 
 ### Features

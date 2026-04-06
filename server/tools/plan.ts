@@ -697,8 +697,8 @@ function buildStageList(documentTier: string | undefined, effectiveTier: string)
   if (effectiveTier !== "quick") {
     const maxRounds = effectiveTier === "thorough" ? 2 : 1;
     for (let r = 1; r <= maxRounds; r++) {
-      stages.push(`Running ${tierLabel ? "master " : ""}critic round ${r}`);
-      stages.push(`Running ${tierLabel ? "master " : ""}corrector`);
+      stages.push(`Running ${documentTier === "master" ? "master " : ""}critic round ${r}`);
+      stages.push(`Running ${documentTier === "master" ? "master " : ""}corrector`);
     }
   }
   return stages;

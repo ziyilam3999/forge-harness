@@ -29,7 +29,10 @@ server.registerTool(
   {
     title: "Forge Evaluate",
     description:
-      "Run acceptance criteria shell commands for a story and produce a structured eval report with PASS/FAIL/INCONCLUSIVE per criterion.",
+      "Evaluate plans and implementations. Three modes: " +
+      '"story" (default) runs AC shell commands for a story. ' +
+      '"coherence" checks alignment between PRD, master plan, and phase plans (LLM-judged). ' +
+      '"divergence" detects forward (AC failures) and reverse (unplanned capabilities) divergence.',
     inputSchema: evaluateInputSchema,
     annotations: { readOnlyHint: false },
   },

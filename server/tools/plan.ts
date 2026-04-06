@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { callClaude, extractJson } from "../lib/anthropic.js";
+import { extractJson } from "../lib/anthropic.js";
 import { scanCodebase } from "../lib/codebase-scan.js";
 import {
   buildPlannerPrompt,
@@ -10,6 +10,7 @@ import { buildCriticPrompt, buildCriticUserMessage } from "../lib/prompts/critic
 import { buildCorrectorPrompt, buildCorrectorUserMessage } from "../lib/prompts/corrector.js";
 import { validateExecutionPlan } from "../validation/execution-plan.js";
 import { writeRunRecord, type RunRecord } from "../lib/run-record.js";
+import { RunContext, trackedCallClaude } from "../lib/run-context.js";
 import type { ExecutionPlan } from "../types/execution-plan.js";
 
 /**
@@ -139,11 +140,6 @@ interface CorrectorOutput {
   }>;
 }
 
-interface UsageAccumulator {
-  inputTokens: number;
-  outputTokens: number;
-}
-
 /**
  * Run the planner agent to produce a draft execution plan.
  */
@@ -152,21 +148,19 @@ async function runPlanner(
   mode: "feature" | "full-project" | "bugfix",
   codebaseSummary: string | undefined,
   model: string | undefined,
-  usage: UsageAccumulator,
+  ctx: RunContext,
   context?: ContextEntry[],
   maxContextChars?: number,
 ): Promise<{ plan: ExecutionPlan; validationRetries: number }> {
   const system = buildPlannerPrompt(mode);
   const userMessage = buildPlannerUserMessage(intent, codebaseSummary, context, maxContextChars);
 
-  const result = await callClaude({
+  const result = await trackedCallClaude(ctx, "Running planner", "planner", {
     system,
     messages: [{ role: "user", content: userMessage }],
     model,
     jsonMode: true,
   });
-  usage.inputTokens += result.usage.inputTokens;
-  usage.outputTokens += result.usage.outputTokens;
 
   const parsed = extractJson(result.text);
   const validation = validateExecutionPlan(parsed);
@@ -177,7 +171,7 @@ async function runPlanner(
       "forge_plan: planner output failed validation, retrying with feedback:",
       validation.errors,
     );
-    const retryResult = await callClaude({
+    const retryResult = await trackedCallClaude(ctx, "Retrying planner (validation)", "planner", {
       system,
       messages: [
         { role: "user", content: userMessage },
@@ -190,8 +184,6 @@ async function runPlanner(
       model,
       jsonMode: true,
     });
-    usage.inputTokens += retryResult.usage.inputTokens;
-    usage.outputTokens += retryResult.usage.outputTokens;
 
     const retryParsed = extractJson(retryResult.text);
     const retryValidation = validateExecutionPlan(retryParsed);
@@ -213,20 +205,18 @@ async function runCritic(
   plan: ExecutionPlan,
   round: 1 | 2,
   model: string | undefined,
-  usage: UsageAccumulator,
+  ctx: RunContext,
 ): Promise<CritiqueFindings> {
   const system = buildCriticPrompt(round);
   const planJson = JSON.stringify(plan, null, 2);
 
   try {
-    const result = await callClaude({
+    const result = await trackedCallClaude(ctx, `Running critic round ${round}`, "critic", {
       system,
       messages: [{ role: "user", content: buildCriticUserMessage(planJson) }],
       model,
       jsonMode: true,
     });
-    usage.inputTokens += result.usage.inputTokens;
-    usage.outputTokens += result.usage.outputTokens;
 
     const parsed = extractJson(result.text) as CritiqueFindings;
     if (!parsed.findings || !Array.isArray(parsed.findings)) {
@@ -250,14 +240,14 @@ async function runCorrector(
   plan: ExecutionPlan,
   findings: CritiqueFindings,
   model: string | undefined,
-  usage: UsageAccumulator,
+  ctx: RunContext,
 ): Promise<{ plan: ExecutionPlan; dispositions: CorrectorOutput["dispositions"] }> {
   const system = buildCorrectorPrompt();
   const planJson = JSON.stringify(plan, null, 2);
   const findingsJson = JSON.stringify(findings, null, 2);
 
   try {
-    const result = await callClaude({
+    const result = await trackedCallClaude(ctx, "Running corrector", "corrector", {
       system,
       messages: [
         { role: "user", content: buildCorrectorUserMessage(planJson, findingsJson) },
@@ -265,8 +255,6 @@ async function runCorrector(
       model,
       jsonMode: true,
     });
-    usage.inputTokens += result.usage.inputTokens;
-    usage.outputTokens += result.usage.outputTokens;
 
     const parsed = extractJson(result.text) as CorrectorOutput;
 
@@ -338,17 +326,35 @@ export async function handlePlan({
   const effectiveMode = mode ?? detectMode(intent);
   const effectiveTier = tier ?? "thorough";
 
-  const usage: UsageAccumulator = { inputTokens: 0, outputTokens: 0 };
+  // Build dynamic stage list based on tier
+  const stages = ["Scanning codebase", "Running planner"];
+  if (effectiveTier !== "quick") {
+    const maxRounds = effectiveTier === "thorough" ? 2 : 1;
+    for (let r = 1; r <= maxRounds; r++) {
+      stages.push(`Running critic round ${r}`);
+      stages.push("Running corrector");
+    }
+  }
+
+  const ctx = new RunContext({
+    toolName: "forge_plan",
+    projectPath,
+    stages,
+  });
 
   // Step 1: Optional codebase scan
   let codebaseSummary: string | undefined;
   if (projectPath) {
+    ctx.progress.begin("Scanning codebase");
     codebaseSummary = await scanCodebase(projectPath);
+    ctx.progress.complete("Scanning codebase");
+  } else {
+    ctx.progress.skip("Scanning codebase");
   }
 
   // Step 2: Run planner (with context injection)
   const plannerResult = await runPlanner(
-    intent, effectiveMode, codebaseSummary, undefined, usage, context, maxContextChars,
+    intent, effectiveMode, codebaseSummary, undefined, ctx, context, maxContextChars,
   );
   let plan = plannerResult.plan;
   const validationRetries = plannerResult.validationRetries;
@@ -363,7 +369,7 @@ export async function handlePlan({
     const maxRounds = effectiveTier === "thorough" ? 2 : 1;
 
     for (let round = 1; round <= maxRounds; round++) {
-      const findings = await runCritic(plan, round as 1 | 2, undefined, usage);
+      const findings = await runCritic(plan, round as 1 | 2, undefined, ctx);
 
       if (findings.findings.length === 0) {
         critiqueRounds.push({ findings, dispositions: [] });
@@ -374,7 +380,7 @@ export async function handlePlan({
         plan,
         findings,
         undefined,
-        usage,
+        ctx,
       );
       plan = correctedPlan;
       critiqueRounds.push({ findings, dispositions });
@@ -412,8 +418,14 @@ export async function handlePlan({
     sections.push(critiqueSummary);
   }
 
+  const costSummary = ctx.cost.summarize();
+  const costLabel = costSummary.isOAuthAuth ? "equivalent API cost" : "estimated cost";
+  const costStr = costSummary.estimatedCostUsd !== null
+    ? `$${costSummary.estimatedCostUsd.toFixed(4)} ${costLabel}`
+    : "cost unknown (missing token data)";
+
   sections.push(
-    `=== USAGE ===\nTotal tokens: ${usage.inputTokens} input / ${usage.outputTokens} output`,
+    `=== USAGE ===\nTotal tokens: ${costSummary.inputTokens} input / ${costSummary.outputTokens} output\n${costStr}`,
   );
 
   // Step 6: Write run record
@@ -430,8 +442,8 @@ export async function handlePlan({
       mode: effectiveMode,
       tier: effectiveTier,
       metrics: {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
+        inputTokens: costSummary.inputTokens,
+        outputTokens: costSummary.outputTokens,
         critiqueRounds: critiqueRounds.length,
         findingsTotal,
         findingsApplied,

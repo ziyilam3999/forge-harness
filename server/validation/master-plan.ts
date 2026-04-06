@@ -57,7 +57,7 @@ export function validateMasterPlan(data: unknown): ValidationResult {
   // 5. phases must be non-empty array
   if (!Array.isArray(plan.phases)) {
     errors.push("phases must be an array");
-    return { valid: errors.length === 0, errors: errors.length > 0 ? errors : undefined };
+    return { valid: false, errors };
   }
 
   if (plan.phases.length === 0) {

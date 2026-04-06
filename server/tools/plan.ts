@@ -779,7 +779,7 @@ async function handleMasterPlan(options: HandlePlanOptions) {
  * Handle phase plan generation: expand one master plan phase into stories with ACs.
  */
 async function handlePhasePlan(options: HandlePlanOptions) {
-  const { intent, visionDoc, masterPlan, phaseId, projectPath, mode, tier, context, maxContextChars } = options;
+  const { visionDoc, masterPlan, phaseId, projectPath, mode, tier, context, maxContextChars } = options;
   if (!visionDoc || !masterPlan || !phaseId) {
     return {
       content: [{ type: "text" as const, text: "Error: visionDoc, masterPlan, and phaseId are required for documentTier 'phase'." }],

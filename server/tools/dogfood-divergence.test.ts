@@ -169,7 +169,7 @@ const DOGFOOD_PLAN: ExecutionPlan = {
           id: "AC-02",
           description: "Integration tests pass",
           command:
-            "npx vitest run server/tools/three-tier-integration.test.ts --reporter=verbose 2>&1 | tail -5 | head -1",
+            "npx vitest run server/tools/three-tier-integration.test.ts --reporter=verbose",
         },
       ],
       affectedPaths: ["server/tools/three-tier-integration.test.ts"],
@@ -182,12 +182,12 @@ const DOGFOOD_PLAN: ExecutionPlan = {
         {
           id: "AC-01",
           description: "plan.test.ts passes (core regression gate)",
-          command: "npx vitest run server/tools/plan.test.ts 2>&1 | tail -3 | head -1",
+          command: "npx vitest run server/tools/plan.test.ts --reporter=verbose",
         },
         {
           id: "AC-02",
           description: "evaluate.test.ts passes (eval regression gate)",
-          command: "npx vitest run server/tools/evaluate.test.ts 2>&1 | tail -3 | head -1",
+          command: "npx vitest run server/tools/evaluate.test.ts --reporter=verbose",
         },
       ],
       affectedPaths: [],

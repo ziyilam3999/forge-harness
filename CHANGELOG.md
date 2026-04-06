@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0](https://github.com/ziyilam3999/forge-harness/compare/v0.4.2...v0.5.0) (2026-04-06)
+
+### Features
+
+- functional AC rules, implementation coupling detection (Tier 1 regex), and evidence-gating for planner claims (#38)
+- improve mode auto-detection with word boundaries (#32)
+
+### Refactors
+
+- callClaude jsonMode returns parsed JSON (#31)
+- test planner prompt rules with direct buildPlannerPrompt() calls (#37)
+- route timeout/error evidence through truncateEvidence (#36)
+- remove dead extractJson branch in loadPlan (#35)
+
+### Miscellaneous
+
+- align CHANGELOG style to plain prose (#34)
+- remove unused asExecutionPlan export (#33)
+
 ## [0.4.2](https://github.com/ziyilam3999/forge-harness/compare/v0.4.1...v0.4.2) (2026-04-03)
 
 ### Bug Fixes

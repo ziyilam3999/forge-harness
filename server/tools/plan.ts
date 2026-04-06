@@ -316,15 +316,6 @@ export async function handlePlan({
   // Step 2: Run planner
   let plan = await runPlanner(intent, effectiveMode, codebaseSummary, undefined, usage);
 
-  // Step 2b: Tier 1 — scan ACs for implementation coupling
-  const coupledACs = detectCoupledACs(plan);
-  if (coupledACs.length > 0) {
-    console.error(
-      `forge_plan: ${coupledACs.length} AC(s) inspect source code instead of verifying behavior:`,
-      coupledACs.map((v) => `${v.storyId}/${v.acId}`).join(", "),
-    );
-  }
-
   // Step 3: Critique loop
   const critiqueRounds: Array<{
     findings: CritiqueFindings;
@@ -353,7 +344,16 @@ export async function handlePlan({
     }
   }
 
-  // Step 4: Build output
+  // Step 4: Tier 1 — scan final plan for implementation coupling
+  const coupledACs = detectCoupledACs(plan);
+  if (coupledACs.length > 0) {
+    console.error(
+      `forge_plan: ${coupledACs.length} AC(s) inspect source code instead of verifying behavior:`,
+      coupledACs.map((v) => `${v.storyId}/${v.acId}`).join(", "),
+    );
+  }
+
+  // Step 5: Build output
   const sections: string[] = [
     "=== EXECUTION PLAN ===",
     JSON.stringify(plan, null, 2),

@@ -78,6 +78,47 @@ async function readHead(filePath: string, maxLines: number): Promise<string> {
 }
 
 /**
+ * Extract dependency names and versions from package.json as structured data.
+ * Returns a formatted section or null if package.json doesn't exist.
+ */
+async function extractDependencies(projectPath: string): Promise<string | null> {
+  try {
+    const content = await readFile(join(projectPath, "package.json"), "utf-8");
+    const pkg = JSON.parse(content);
+    const lines: string[] = [];
+
+    lines.push(`## package.json`);
+    if (pkg.name) lines.push(`name: ${pkg.name}`);
+    if (pkg.version) lines.push(`version: ${pkg.version}`);
+
+    if (pkg.dependencies && Object.keys(pkg.dependencies).length > 0) {
+      lines.push(`\ndependencies:`);
+      for (const [name, version] of Object.entries(pkg.dependencies)) {
+        lines.push(`  ${name}: ${version}`);
+      }
+    }
+
+    if (pkg.devDependencies && Object.keys(pkg.devDependencies).length > 0) {
+      lines.push(`\ndevDependencies:`);
+      for (const [name, version] of Object.entries(pkg.devDependencies)) {
+        lines.push(`  ${name}: ${version}`);
+      }
+    }
+
+    if (pkg.scripts && Object.keys(pkg.scripts).length > 0) {
+      lines.push(`\nscripts:`);
+      for (const [name, cmd] of Object.entries(pkg.scripts)) {
+        lines.push(`  ${name}: ${cmd}`);
+      }
+    }
+
+    return lines.join("\n");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Scan a project directory and return a text summary for LLM context.
  *
  * @param projectPath - Absolute path to the project root
@@ -105,8 +146,15 @@ export async function scanCodebase(projectPath: string): Promise<string> {
   await listDir(projectPath, projectPath, 0, dirLines);
   sections.push("## Directory Structure\n```\n" + dirLines.join("\n") + "\n```");
 
-  // 2. Key file contents
+  // 2. Structured dependency extraction from package.json
+  const depSection = await extractDependencies(projectPath);
+  if (depSection) {
+    sections.push(depSection);
+  }
+
+  // 3. Key file contents (excluding package.json — already extracted above)
   for (const fileName of KEY_FILES) {
+    if (fileName === "package.json" && depSection) continue;
     const content = await readHead(join(projectPath, fileName), 100);
     if (content) {
       sections.push(
@@ -117,7 +165,7 @@ export async function scanCodebase(projectPath: string): Promise<string> {
 
   let output = sections.join("\n\n");
 
-  // 3. Truncate to cap
+  // 4. Truncate to cap
   if (output.length > SCANNER_CHAR_CAP) {
     output = output.slice(0, SCANNER_CHAR_CAP) + "\n[truncated]";
   }

@@ -1,10 +1,15 @@
 import { z } from "zod";
 import { callClaude, extractJson } from "../lib/anthropic.js";
 import { scanCodebase } from "../lib/codebase-scan.js";
-import { buildPlannerPrompt, buildPlannerUserMessage } from "../lib/prompts/planner.js";
+import {
+  buildPlannerPrompt,
+  buildPlannerUserMessage,
+  type ContextEntry,
+} from "../lib/prompts/planner.js";
 import { buildCriticPrompt, buildCriticUserMessage } from "../lib/prompts/critic.js";
 import { buildCorrectorPrompt, buildCorrectorUserMessage } from "../lib/prompts/corrector.js";
 import { validateExecutionPlan } from "../validation/execution-plan.js";
+import { writeRunRecord, type RunRecord } from "../lib/run-record.js";
 import type { ExecutionPlan } from "../types/execution-plan.js";
 
 /**
@@ -74,6 +79,27 @@ export const planInputSchema = {
     .describe(
       "Critique depth. quick=no critique, standard=1 round, thorough=2 rounds. Default: thorough.",
     ),
+  context: z
+    .array(
+      z.object({
+        label: z.string().describe("Label for this context entry (e.g., 'Proven patterns')"),
+        content: z.string().describe("Content of the context entry"),
+      }),
+    )
+    .optional()
+    .describe(
+      "Additional context entries injected by the calling agent. " +
+      "Array order = priority (first = highest). Entries are dropped whole (last first) " +
+      "when exceeding maxContextChars.",
+    ),
+  maxContextChars: z
+    .number()
+    .positive()
+    .optional()
+    .describe(
+      "Maximum character budget for injected context. Default: 50000. " +
+      "Entries are dropped whole (last first) to stay within budget.",
+    ),
 };
 
 /** Keywords that trigger bugfix mode auto-detection. */
@@ -127,9 +153,11 @@ async function runPlanner(
   codebaseSummary: string | undefined,
   model: string | undefined,
   usage: UsageAccumulator,
-): Promise<ExecutionPlan> {
+  context?: ContextEntry[],
+  maxContextChars?: number,
+): Promise<{ plan: ExecutionPlan; validationRetries: number }> {
   const system = buildPlannerPrompt(mode);
-  const userMessage = buildPlannerUserMessage(intent, codebaseSummary);
+  const userMessage = buildPlannerUserMessage(intent, codebaseSummary, context, maxContextChars);
 
   const result = await callClaude({
     system,
@@ -172,10 +200,10 @@ async function runPlanner(
         `Planner output failed validation after retry: ${retryValidation.errors?.join("; ")}`,
       );
     }
-    return retryParsed as ExecutionPlan;
+    return { plan: retryParsed as ExecutionPlan, validationRetries: 1 };
   }
 
-  return parsed as ExecutionPlan;
+  return { plan: parsed as ExecutionPlan, validationRetries: 0 };
 }
 
 /**
@@ -296,12 +324,17 @@ export async function handlePlan({
   projectPath,
   mode,
   tier,
+  context,
+  maxContextChars,
 }: {
   intent: string;
   projectPath?: string;
   mode?: "feature" | "full-project" | "bugfix";
   tier?: "quick" | "standard" | "thorough";
+  context?: Array<{ label: string; content: string }>;
+  maxContextChars?: number;
 }) {
+  const startTime = Date.now();
   const effectiveMode = mode ?? detectMode(intent);
   const effectiveTier = tier ?? "thorough";
 
@@ -313,8 +346,12 @@ export async function handlePlan({
     codebaseSummary = await scanCodebase(projectPath);
   }
 
-  // Step 2: Run planner
-  let plan = await runPlanner(intent, effectiveMode, codebaseSummary, undefined, usage);
+  // Step 2: Run planner (with context injection)
+  const plannerResult = await runPlanner(
+    intent, effectiveMode, codebaseSummary, undefined, usage, context, maxContextChars,
+  );
+  let plan = plannerResult.plan;
+  const validationRetries = plannerResult.validationRetries;
 
   // Step 3: Critique loop
   const critiqueRounds: Array<{
@@ -378,6 +415,34 @@ export async function handlePlan({
   sections.push(
     `=== USAGE ===\nTotal tokens: ${usage.inputTokens} input / ${usage.outputTokens} output`,
   );
+
+  // Step 6: Write run record
+  const findingsTotal = critiqueRounds.reduce((sum, r) => sum + r.findings.findings.length, 0);
+  const findingsApplied = critiqueRounds.reduce(
+    (sum, r) => sum + r.dispositions.filter((d) => d.applied).length, 0,
+  );
+
+  if (projectPath) {
+    const runRecord: RunRecord = {
+      timestamp: new Date(startTime).toISOString(),
+      tool: "forge_plan",
+      documentTier: null,
+      mode: effectiveMode,
+      tier: effectiveTier,
+      metrics: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        critiqueRounds: critiqueRounds.length,
+        findingsTotal,
+        findingsApplied,
+        findingsRejected: findingsTotal - findingsApplied,
+        validationRetries,
+        durationMs: Date.now() - startTime,
+      },
+      outcome: "success",
+    };
+    await writeRunRecord(projectPath, runRecord);
+  }
 
   return {
     content: [

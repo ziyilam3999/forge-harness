@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { scanCodebase } from "./codebase-scan.js";
 import { loadPlan } from "./plan-loader.js";
@@ -15,6 +15,7 @@ import type {
   EscalationReason,
   EscalationDiagnostics,
   DiffManifest,
+  DocumentContext,
   CostEstimate,
 } from "../types/generate-result.js";
 
@@ -48,6 +49,20 @@ export interface AssembleInput {
   };
   /** When true (default), projected costs are $0 (no API calls from Max). */
   isMaxUser?: boolean;
+  // ── PH-03: Three-tier document inputs (REQ-09) ──
+  prdContent?: string;
+  masterPlanContent?: string;
+  phasePlanContent?: string;
+  // ── PH-03: Context injection (REQ-10) ──
+  contextFiles?: string[];
+}
+
+/** Options for buildBrief that carry PH-03 document/context fields. */
+export interface BuildBriefOptions {
+  prdContent?: string;
+  masterPlanContent?: string;
+  phasePlanContent?: string;
+  contextFiles?: string[];
 }
 
 // ── US04: Init brief assembly (REQ-01) ──────
@@ -56,6 +71,7 @@ export async function buildBrief(
   plan: ExecutionPlan,
   storyId: string,
   projectPath?: string,
+  options?: BuildBriefOptions,
 ): Promise<GenerationBrief> {
   const story = findStory(plan, storyId);
 
@@ -64,13 +80,27 @@ export async function buildBrief(
     codebaseContext = await scanCodebase(projectPath);
   }
 
-  return {
+  const brief: GenerationBrief = {
     story,
     codebaseContext,
     gitBranch: `feat/${storyId}`,
     baselineCheck: plan.baselineCheck ?? DEFAULT_BASELINE_CHECK,
     lineage: story.lineage,
   };
+
+  // PH-03 US01: Three-tier document context (REQ-09)
+  const documentContext = buildDocumentContext(options);
+  if (documentContext) {
+    brief.documentContext = documentContext;
+  }
+
+  // PH-03 US02: Context injection (REQ-10)
+  const injectedContext = await readContextFiles(options?.contextFiles);
+  if (injectedContext) {
+    brief.injectedContext = injectedContext;
+  }
+
+  return brief;
 }
 
 // ── US05: Fix brief assembly (REQ-02, REQ-13) ──
@@ -278,7 +308,12 @@ export async function assembleGenerateResult(
 
   // Init path: no eval report means first call
   if (!input.evalReport) {
-    const brief = await buildBrief(plan, input.storyId, input.projectPath);
+    const brief = await buildBrief(plan, input.storyId, input.projectPath, {
+      prdContent: input.prdContent,
+      masterPlanContent: input.masterPlanContent,
+      phasePlanContent: input.phasePlanContent,
+      contextFiles: input.contextFiles,
+    });
     return { ...base, action: "implement", brief };
   }
 
@@ -476,6 +511,42 @@ export function computeCostEstimate(
     projectedIterationCostUsd,
     projectedRemainingCostUsd,
   };
+}
+
+// ── PH-03 Helpers ───────────────────────────
+
+/** Build DocumentContext from options. Returns undefined when no docs provided. */
+function buildDocumentContext(
+  options?: BuildBriefOptions,
+): DocumentContext | undefined {
+  if (!options) return undefined;
+  const { prdContent, masterPlanContent, phasePlanContent } = options;
+  if (!prdContent && !masterPlanContent && !phasePlanContent) return undefined;
+
+  const ctx: DocumentContext = {};
+  if (prdContent) ctx.prdContent = prdContent;
+  if (masterPlanContent) ctx.masterPlanContent = masterPlanContent;
+  if (phasePlanContent) ctx.phasePlanContent = phasePlanContent;
+  return ctx;
+}
+
+/** Read context files, skipping missing ones with a warning. Returns undefined when empty. */
+async function readContextFiles(
+  contextFiles?: string[],
+): Promise<string[] | undefined> {
+  if (!contextFiles || contextFiles.length === 0) return undefined;
+
+  const contents: string[] = [];
+  for (const filePath of contextFiles) {
+    try {
+      const content = await readFile(filePath, "utf-8");
+      contents.push(content);
+    } catch {
+      console.warn(`forge_generate: context file not found, skipping: ${filePath}`);
+    }
+  }
+
+  return contents.length > 0 ? contents : undefined;
 }
 
 // ── Helpers ──────────────────────────────────

@@ -108,7 +108,7 @@
 
 ---
 
-## `/generate` (Generator) — PH-01 shipped, PH-02/03/04 in progress
+## `/generate` (Generator) — PH-01/02/03 shipped, PH-04 in progress
 
 ### Already Implemented
 - GenerateResult, GenerationBrief, FixBrief, Escalation, CostEstimate, DiffManifest, EvalHint types (`server/types/generate-result.ts`) (v0.13.0, PH-01)
@@ -119,6 +119,12 @@
 - Core orchestrator: `assembleGenerateResult` — no evalReport → implement, PASS → pass, stopping condition → escalate, FAIL → fix (`server/lib/generator.ts`) (v0.13.0, PH-01)
 - `baselineCheck?: string` on ExecutionPlan, `lineage?: StoryLineage` on Story — optional, backward compatible (`server/types/execution-plan.ts`) (v0.13.0, PH-01)
 - Shared `loadPlan` extracted from evaluate.ts → `server/lib/plan-loader.ts` (v0.13.0, PH-01)
+- RunContext wiring: `assembleGenerateResultWithContext` wraps pure core with toolName `forge_generate`, ProgressReporter stages (`init`/`iterate`), AuditLog entries, CostTracker at $0 (`server/lib/generator.ts`) (v0.14.0, PH-02)
+- JSONL self-tracking: append-only run records to `.forge/runs/data.jsonl` with timestamp, storyId, iteration, action, score, durationMs — graceful on failure (`server/lib/generator.ts`) (v0.14.0, PH-02)
+- Cost estimation: `computeCostEstimate` — briefTokens (char_count/4), projectedIterationCostUsd (Opus pricing, $0 for Max users), projectedRemainingCostUsd (`server/lib/generator.ts`) (v0.14.0, PH-02)
+- Three-tier document inputs: `buildBrief` accepts optional `prdContent`, `masterPlanContent`, `phasePlanContent` → `brief.documentContext` structured object, omitted when none provided (`server/lib/generator.ts`) (v0.15.0, PH-03)
+- Context injection: `buildBrief` accepts optional `contextFiles` string array → reads each file into `brief.injectedContext`, skips missing with warning (`server/lib/generator.ts`) (v0.15.0, PH-03)
+- Lineage pass-through: `story.lineage` from plan passes through to `brief.lineage` — read-only, not inferred (`server/lib/generator.ts`) (v0.15.0, PH-03)
 
 ### In Design Doc — To Be Implemented
 - GAN loop: implement → evaluate → fix → evaluate, max 3 rounds (design doc lines 280-310)
@@ -128,8 +134,6 @@
 - Per-story git branches (feat/{story-id}), squash-merge on finalization
 - Git-native rollback on fail
 - Command blocklist + path-scoped writes (design doc line 290)
-- RunContext wiring, JSONL self-tracking, cost estimation output (PH-02)
-- Three-tier document inputs + context injection + lineage pass-through (PH-03)
 - MCP handler expansion + integration tests + dogfood (PH-04)
 
 ### New Improvement Ideas
@@ -138,7 +142,8 @@
 - **Max-iteration exit policy**: mark story failed, return last eval report
 - **Git failure handling**: abort iteration, record in audit, report as failed
 - **Tool-use API**: Claude tool_use for generator agent to decide files to create/modify
-- **CostTracker, ProgressReporter, AuditLog, RunContext** (same as /plan)
+- **Cost estimation output token multiplier**: current assumes output ≈ input; real-world is 2-4x (#78)
+- **extractScore escalation capture**: use last scoreHistory value instead of null on escalate (#79)
 
 ---
 

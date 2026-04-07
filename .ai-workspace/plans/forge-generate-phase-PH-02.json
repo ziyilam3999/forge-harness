@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "3.0.0",
+  "documentTier": "phase",
+  "phaseId": "PH-02",
+  "stories": [
+    {
+      "id": "PH02-US01",
+      "title": "Wire RunContext with ProgressReporter and AuditLog for forge_generate (REQ-12)",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH02-US01-AC01",
+          "description": "RunContext created with toolName 'forge_generate' and stages for init/iterate",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'RunContext.*forge_generate\\|forge_generate.*RunContext' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US01-AC02",
+          "description": "ProgressReporter stages reported: at minimum 'init' or 'iterate'",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'progress.*stage\\|stage.*progress' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US01-AC03",
+          "description": "AuditLog entry written with the action taken (implement/fix/escalate)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'audit.*entry\\|audit.*log' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US01-AC04",
+          "description": "CostTracker records $0 cost (no API calls) but is wired for aggregation",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'cost.*zero\\|CostTracker.*0' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US01-AC05",
+          "description": "Audit file created at .forge/audit/forge_generate-*.jsonl after call with projectPath",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'audit.*file\\|audit.*jsonl' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/"]
+    },
+    {
+      "id": "PH02-US02",
+      "title": "Implement JSONL self-tracking to .forge/runs/data.jsonl (REQ-08)",
+      "dependencies": ["PH02-US01"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH02-US02-AC01",
+          "description": "After forge_generate call with projectPath, .forge/runs/data.jsonl contains a new JSONL line",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'JSONL.*data\\|self-tracking\\|data.jsonl' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US02-AC02",
+          "description": "Each JSONL line contains timestamp, storyId, iteration, action, score, and durationMs",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'JSONL.*fields\\|JSONL.*timestamp\\|run record.*fields' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US02-AC03",
+          "description": "JSONL file is append-only (multiple calls add lines, never overwrite)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'JSONL.*append\\|append-only' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US02-AC04",
+          "description": "When projectPath is not set, no JSONL is written and no error occurs",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'JSONL.*no.*projectPath\\|no.*projectPath.*JSONL\\|skip.*JSONL' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US02-AC05",
+          "description": "JSONL write failure does not block the core brief/decision response (NFR-05)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'JSONL.*graceful\\|graceful.*JSONL\\|JSONL.*fail.*degrade' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/"]
+    },
+    {
+      "id": "PH02-US03",
+      "title": "Implement cost estimation output with character-count heuristic (REQ-16)",
+      "dependencies": ["PH02-US01"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH02-US03-AC01",
+          "description": "Result includes costEstimate with briefTokens computed as character_count / 4",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'costEstimate.*briefTokens\\|briefTokens.*heuristic' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US03-AC02",
+          "description": "projectedIterationCostUsd estimates based on brief size and Opus pricing",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'projectedIterationCostUsd\\|iteration.*cost' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US03-AC03",
+          "description": "projectedRemainingCostUsd equals projectedIterationCostUsd * (maxIterations - iteration)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'projectedRemainingCostUsd\\|remaining.*cost' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US03-AC04",
+          "description": "Cost estimation failure does not block core response (NFR-05)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'cost.*graceful\\|graceful.*cost\\|cost.*degrade' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US03-AC05",
+          "description": "For Claude Code Max users (no API calls), projectedIterationCostUsd reflects $0 with a note about coordinator API costs",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'Max.*cost.*zero\\|Max.*user.*0\\|costEstimate.*Max' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/"]
+    }
+  ]
+}

@@ -1,0 +1,144 @@
+{
+  "schemaVersion": "3.0.0",
+  "documentTier": "phase",
+  "phaseId": "PH-04",
+  "stories": [
+    {
+      "id": "PH04-US01",
+      "title": "Expand generate.ts input schema to accept all parameters",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US01-AC01",
+          "description": "generateInputSchema includes planJson, planPath, evalReport, iteration, maxIterations, previousScores, fileHashes, projectPath params",
+          "command": "grep -q 'planJson' server/tools/generate.ts && grep -q 'planPath' server/tools/generate.ts && grep -q 'evalReport' server/tools/generate.ts && grep -q 'iteration' server/tools/generate.ts && grep -q 'maxIterations' server/tools/generate.ts && grep -q 'previousScores' server/tools/generate.ts && grep -q 'fileHashes' server/tools/generate.ts && grep -q 'projectPath' server/tools/generate.ts"
+        },
+        {
+          "id": "PH04-US01-AC02",
+          "description": "generateInputSchema includes prdContent, masterPlanContent, phasePlanContent, contextFiles params",
+          "command": "grep -q 'prdContent' server/tools/generate.ts && grep -q 'masterPlanContent' server/tools/generate.ts && grep -q 'phasePlanContent' server/tools/generate.ts && grep -q 'contextFiles' server/tools/generate.ts"
+        },
+        {
+          "id": "PH04-US01-AC03",
+          "description": "TypeScript compilation succeeds with expanded schema",
+          "command": "npx tsc --noEmit"
+        }
+      ],
+      "affectedPaths": ["server/tools/"]
+    },
+    {
+      "id": "PH04-US02",
+      "title": "Wire handleGenerate to call core logic from PH-01/02/03",
+      "dependencies": ["PH04-US01"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US02-AC01",
+          "description": "handleGenerate with storyId and planJson returns action 'implement' with brief",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'init returns implement\\|init.*implement' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US02-AC02",
+          "description": "handleGenerate with evalReport returns action 'fix' with fixBrief when conditions allow",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'iterate returns fix\\|fix.*iteration' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US02-AC03",
+          "description": "handleGenerate returns action 'escalate' when stopping conditions met",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'escalate' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US02-AC04",
+          "description": "handleGenerate returns isError when neither planPath nor planJson provided",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'no plan\\|missing.*plan\\|error.*no.*plan' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US02-AC05",
+          "description": "forge_generate tool description updated in index.ts to reflect full capabilities",
+          "command": "grep -q 'brief assembler' server/index.ts || grep -q 'GAN loop controller' server/index.ts || grep -q 'stopping conditions' server/index.ts"
+        }
+      ],
+      "affectedPaths": ["server/tools/", "server/index.ts"]
+    },
+    {
+      "id": "PH04-US03",
+      "title": "Integration tests: full init-fix-escalate cycle and NFR verification",
+      "dependencies": ["PH04-US02"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US03-AC01",
+          "description": "Integration test covers full cycle: init → fix → escalate (plateau after 3 identical scores)",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'full cycle\\|init.*fix.*escalate\\|integration' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US03-AC02",
+          "description": "NFR-01: Zero callClaude imports in forge_generate's full dependency chain (all non-test source files)",
+          "command": "! grep -rn 'callClaude' server/tools/generate.ts server/lib/generator.ts server/lib/plan-loader.ts server/types/generate-result.ts $(find server/lib -name '*.ts' ! -name '*.test.ts' | sort) 2>/dev/null | grep -v '\\.test\\.' | grep -q 'callClaude'"
+        },
+        {
+          "id": "PH04-US03-AC03",
+          "description": "NFR-02: forge_generate init call completes in under 5 seconds",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'response time\\|under.*5.*second\\|performance' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US03-AC04",
+          "description": "NFR-03: Windows path safety — no colons in generated filenames, forward-slash safe",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'Windows\\|windows.*path\\|path.*safe' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US03-AC05",
+          "description": "NFR-04: forge_generate does not modify execution plan, project files, or git state (read-only)",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'read.only\\|idempotent\\|no.*mutation' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US03-AC06",
+          "description": "NFR-06: forge_generate accepts execution plans with schemaVersion 3.0.0",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'schemaVersion.*3.0.0\\|schema.*compat' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US03-AC07",
+          "description": "Full test suite passes (npm test)",
+          "command": "npm test 2>&1 | grep -qE '(passed|Tests.*[1-9].*pass)'"
+        },
+        {
+          "id": "PH04-US03-AC08",
+          "description": "TypeScript compilation succeeds with zero errors",
+          "command": "npx tsc --noEmit"
+        },
+        {
+          "id": "PH04-US03-AC09",
+          "description": "NFR-02: forge_generate iteration call completes in under 2 seconds",
+          "command": "npx vitest run server/tools/generate.test.ts -t 'iteration.*under.*2.*second\\|iteration.*response.*time\\|fix.*performance' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/tools/"]
+    },
+    {
+      "id": "PH04-US04",
+      "title": "Dogfood: run forge_generate against a real execution plan with real ACs",
+      "dependencies": ["PH04-US03"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US04-AC01",
+          "description": "Dogfood report exists documenting a real forge_generate init call result",
+          "command": "test -f .ai-workspace/plans/forge-generate-dogfood-report.md && grep -q 'init' .ai-workspace/plans/forge-generate-dogfood-report.md"
+        },
+        {
+          "id": "PH04-US04-AC02",
+          "description": "Dogfood report documents a real forge_generate fix iteration call result",
+          "command": "grep -q 'fix\\|iterate' .ai-workspace/plans/forge-generate-dogfood-report.md"
+        },
+        {
+          "id": "PH04-US04-AC03",
+          "description": "Dogfood report documents a real forge_generate escalation call result",
+          "command": "grep -q 'escalat' .ai-workspace/plans/forge-generate-dogfood-report.md"
+        },
+        {
+          "id": "PH04-US04-AC04",
+          "description": "SC-01 verified: forge_generate is registered as an MCP tool and callable",
+          "command": "grep -q 'forge_generate' server/index.ts && grep -q 'handleGenerate' server/index.ts"
+        }
+      ],
+      "affectedPaths": [".ai-workspace/plans/"]
+    }
+  ]
+}

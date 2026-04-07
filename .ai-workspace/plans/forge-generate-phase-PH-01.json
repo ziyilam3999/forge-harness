@@ -1,0 +1,306 @@
+{
+  "schemaVersion": "3.0.0",
+  "documentTier": "phase",
+  "phaseId": "PH-01",
+  "stories": [
+    {
+      "id": "PH01-US01",
+      "title": "Add optional baselineCheck and lineage fields to ExecutionPlan schema",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH01-US01-AC01",
+          "description": "ExecutionPlan interface has optional baselineCheck field of type string",
+          "command": "grep -q 'baselineCheck?.*string' server/types/execution-plan.ts"
+        },
+        {
+          "id": "PH01-US01-AC02",
+          "description": "Story interface has optional lineage field with tier and sourceId",
+          "command": "grep -q 'lineage?' server/types/execution-plan.ts && grep -q 'tier.*sourceId\\|sourceId.*tier' server/types/execution-plan.ts"
+        },
+        {
+          "id": "PH01-US01-AC03",
+          "description": "Validation accepts plans with baselineCheck field without errors",
+          "command": "npx vitest run server/validation/execution-plan.test.ts -t 'baselineCheck' 2>&1 | grep -qE '(passed|Tests.*[1-9])'"
+        },
+        {
+          "id": "PH01-US01-AC04",
+          "description": "Validation accepts stories with lineage field without errors",
+          "command": "npx vitest run server/validation/execution-plan.test.ts -t 'lineage' 2>&1 | grep -qE '(passed|Tests.*[1-9])'"
+        },
+        {
+          "id": "PH01-US01-AC05",
+          "description": "Existing validation tests still pass (backward compatibility)",
+          "command": "npx vitest run server/validation/execution-plan.test.ts 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US01-AC06",
+          "description": "TypeScript compilation succeeds with new fields",
+          "command": "npx tsc --noEmit"
+        }
+      ],
+      "affectedPaths": ["server/types/", "server/validation/"]
+    },
+    {
+      "id": "PH01-US02",
+      "title": "Define GenerateResult, GenerationBrief, FixBrief, and Escalation type interfaces",
+      "dependencies": ["PH01-US01"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH01-US02-AC01",
+          "description": "GenerateResult interface exported with action, storyId, iteration, maxIterations fields",
+          "command": "grep -q 'export interface GenerateResult' server/types/generate-result.ts && grep -q 'action:' server/types/generate-result.ts"
+        },
+        {
+          "id": "PH01-US02-AC02",
+          "description": "GenerationBrief interface exported with story, codebaseContext, gitBranch, baselineCheck fields",
+          "command": "grep -q 'export interface GenerationBrief' server/types/generate-result.ts && grep -q 'gitBranch' server/types/generate-result.ts"
+        },
+        {
+          "id": "PH01-US02-AC03",
+          "description": "FixBrief interface exported with failedCriteria, score, evalHint, guidance fields",
+          "command": "grep -q 'export interface FixBrief' server/types/generate-result.ts && grep -q 'evalHint' server/types/generate-result.ts"
+        },
+        {
+          "id": "PH01-US02-AC04",
+          "description": "Escalation interface exported with reason enum, description, hypothesis, lastEvalVerdict, scoreHistory, diagnostics fields",
+          "command": "grep -q 'export interface Escalation' server/types/generate-result.ts && grep -q 'scoreHistory' server/types/generate-result.ts"
+        },
+        {
+          "id": "PH01-US02-AC05",
+          "description": "EscalationDiagnostics interface exported with exitCode, stderr, failingTests fields (REQ-15)",
+          "command": "grep -q 'exitCode' server/types/generate-result.ts && grep -q 'failingTests' server/types/generate-result.ts"
+        },
+        {
+          "id": "PH01-US02-AC06",
+          "description": "CostEstimate interface exported with briefTokens, projectedIterationCostUsd, projectedRemainingCostUsd fields",
+          "command": "grep -q 'export interface CostEstimate' server/types/generate-result.ts && grep -q 'projectedIterationCostUsd' server/types/generate-result.ts"
+        },
+        {
+          "id": "PH01-US02-AC07",
+          "description": "DiffManifest interface exported with changed, unchanged, new fields (REQ-14)",
+          "command": "grep -q 'export interface DiffManifest' server/types/generate-result.ts && grep -q 'changed.*string' server/types/generate-result.ts"
+        },
+        {
+          "id": "PH01-US02-AC08",
+          "description": "TypeScript compilation succeeds",
+          "command": "npx tsc --noEmit"
+        }
+      ],
+      "affectedPaths": ["server/types/"]
+    },
+    {
+      "id": "PH01-US03",
+      "title": "Extract shared plan-loader from evaluate.ts",
+      "dependencies": ["PH01-US01"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH01-US03-AC01",
+          "description": "loadPlan function exported from server/lib/plan-loader.ts",
+          "command": "grep -q 'export.*function loadPlan\\|export.*loadPlan' server/lib/plan-loader.ts"
+        },
+        {
+          "id": "PH01-US03-AC02",
+          "description": "evaluate.ts imports loadPlan from plan-loader (no longer defines its own)",
+          "command": "grep -q 'plan-loader' server/tools/evaluate.ts"
+        },
+        {
+          "id": "PH01-US03-AC03",
+          "description": "loadPlan handles planJson precedence over planPath",
+          "command": "npx vitest run server/lib/plan-loader.test.ts -t 'precedence' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US03-AC04",
+          "description": "Existing evaluate tests still pass after extraction",
+          "command": "npx vitest run server/tools/evaluate.test.ts 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US03-AC05",
+          "description": "TypeScript compilation succeeds",
+          "command": "npx tsc --noEmit"
+        }
+      ],
+      "affectedPaths": ["server/lib/", "server/tools/"]
+    },
+    {
+      "id": "PH01-US04",
+      "title": "Implement init brief assembly (REQ-01)",
+      "dependencies": ["PH01-US02", "PH01-US03"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH01-US04-AC01",
+          "description": "buildBrief returns GenerationBrief with story object from plan matching storyId",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*story' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US04-AC02",
+          "description": "buildBrief returns codebaseContext string from scanCodebase",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*codebaseContext' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US04-AC03",
+          "description": "buildBrief returns gitBranch as feat/{storyId} (e.g. feat/US-01 for storyId US-01)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*gitBranch' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US04-AC04",
+          "description": "buildBrief returns baselineCheck from plan or defaults to 'npm run build && npm test'",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*baselineCheck' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US04-AC05",
+          "description": "buildBrief throws or returns error for non-existent storyId",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*not found\\|buildBrief.*invalid' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/"]
+    },
+    {
+      "id": "PH01-US05",
+      "title": "Implement fix brief assembly with eval hints and diff manifest (REQ-02, REQ-13, REQ-14)",
+      "dependencies": ["PH01-US02"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH01-US05-AC01",
+          "description": "buildFixBrief extracts only FAIL criteria from eval report (skips PASS and SKIPPED)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*failedCriteria' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US05-AC02",
+          "description": "computeScore returns PASS/non-SKIPPED ratio (e.g. 2 PASS, 1 FAIL, 1 SKIPPED = 0.667)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'computeScore' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US05-AC03",
+          "description": "fixBrief.evalHint.failFastIds lists AC IDs ordered by priority (functionality first)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'evalHint\\|failFast' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US05-AC04",
+          "description": "buildDiffManifest computes changed/unchanged/new arrays from current vs previous fileHashes",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'diffManifest\\|DiffManifest' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US05-AC05",
+          "description": "diffManifest is omitted when iteration is 0 (init call)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'diffManifest.*init\\|init.*diffManifest\\|omitted.*iteration.0' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US05-AC06",
+          "description": "Each failed criterion includes id, description, and evidence fields",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*evidence\\|failed.*evidence' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/"]
+    },
+    {
+      "id": "PH01-US06",
+      "title": "Implement all 5 stopping conditions (REQ-03, REQ-04, REQ-05, REQ-07, REQ-15)",
+      "dependencies": ["PH01-US02"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH01-US06-AC01",
+          "description": "Plateau detection: previousScores [0.5, 0.5, 0.5] triggers escalation with reason 'plateau'",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'plateau' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US06-AC02",
+          "description": "No-op detection: matching fileHashes triggers escalation with reason 'no-op'",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'no-op' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US06-AC03",
+          "description": "Max iterations: iteration >= maxIterations triggers escalation with reason 'max-iterations'",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'max-iterations' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US06-AC04",
+          "description": "INCONCLUSIVE: verdict INCONCLUSIVE triggers immediate escalation regardless of other conditions",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'inconclusive' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US06-AC05",
+          "description": "Baseline-failed: escalation includes diagnostics with exitCode, stderr (truncated to 2000 chars), and failingTests",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'baseline-failed\\|baseline.*diagnostics' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US06-AC06",
+          "description": "Continue when improving: previousScores [0.3, 0.5] does NOT trigger any stopping condition",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'continue when improving\\|continue.*improving' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US06-AC07",
+          "description": "INCONCLUSIVE takes precedence over all other stopping conditions",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'INCONCLUSIVE.*precedence\\|precedence.*INCONCLUSIVE' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US06-AC08",
+          "description": "Plateau boundary case: previousScores [0.3, 0.5, 0.5] triggers plateau (improving then stuck)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'plateau.*boundary\\|improving.*plateau\\|0.3.*0.5.*0.5' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/"]
+    },
+    {
+      "id": "PH01-US07",
+      "title": "Implement structured escalation reports (REQ-06)",
+      "dependencies": ["PH01-US06"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH01-US07-AC01",
+          "description": "Every escalation contains reason, description, hypothesis, lastEvalVerdict, and scoreHistory",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'escalation.*report\\|structured.*escalation' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US07-AC02",
+          "description": "Escalation description is specific to the failure reason (not generic)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'escalation.*description\\|description.*specific' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US07-AC03",
+          "description": "Baseline-failed escalation has diagnostics; other reasons do not",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'diagnostics.*only.*baseline\\|baseline.*only.*diagnostics' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/"]
+    },
+    {
+      "id": "PH01-US08",
+      "title": "Core orchestrator function: assembleGenerateResult",
+      "dependencies": ["PH01-US04", "PH01-US05", "PH01-US06", "PH01-US07"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH01-US08-AC01",
+          "description": "assembleGenerateResult with no evalReport returns action 'implement' with GenerationBrief",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*implement\\|orchestrator.*implement' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US08-AC02",
+          "description": "assembleGenerateResult with FAIL evalReport returns action 'fix' with FixBrief when no stopping conditions met",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*fix\\|orchestrator.*fix' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US08-AC03",
+          "description": "assembleGenerateResult with PASS evalReport returns action 'pass'",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*pass\\|orchestrator.*pass' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US08-AC04",
+          "description": "assembleGenerateResult with stopping condition returns action 'escalate' with Escalation",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*escalate\\|orchestrator.*escalate' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US08-AC05",
+          "description": "All PH-01 unit tests pass together",
+          "command": "npx vitest run server/lib/generator.test.ts server/lib/plan-loader.test.ts 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH01-US08-AC06",
+          "description": "TypeScript compilation succeeds with all PH-01 code",
+          "command": "npx tsc --noEmit"
+        }
+      ],
+      "affectedPaths": ["server/lib/"]
+    }
+  ]
+}

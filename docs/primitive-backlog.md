@@ -4,7 +4,7 @@
 > The plan file captures the current scope; this file captures the full backlog.
 > When rewriting plans, check this file to ensure nothing is lost.
 >
-> Last updated: 2026-04-06
+> Last updated: 2026-04-07
 
 ---
 
@@ -108,24 +108,29 @@
 
 ---
 
-## `/generate` (Generator) — STUB, Phase 3-4
+## `/generate` (Generator) — PH-01 shipped, PH-02/03/04 in progress
+
+### Already Implemented
+- GenerateResult, GenerationBrief, FixBrief, Escalation, CostEstimate, DiffManifest, EvalHint types (`server/types/generate-result.ts`) (v0.13.0, PH-01)
+- Init brief assembly: `buildBrief` — plan + storyId + projectPath → GenerationBrief with codebaseContext, gitBranch, baselineCheck (`server/lib/generator.ts`) (v0.13.0, PH-01)
+- Fix brief assembly: `buildFixBrief` — extract FAIL criteria from eval report, `computeScore` (PASS/non-SKIPPED ratio), `buildDiffManifest` (changed/unchanged/new files), `evalHint` with failFastIds (`server/lib/generator.ts`) (v0.13.0, PH-01)
+- 5 stopping conditions in `checkStoppingConditions`: plateau (last 2 of 3+ scores equal), no-op (matching fileHashes), max-iterations, inconclusive (highest precedence), baseline-failed with diagnostics (`server/lib/generator.ts`) (v0.13.0, PH-01)
+- Structured escalation reports: reason-specific descriptions, hypothesis, scoreHistory, diagnostics on baseline-failed (`server/lib/generator.ts`) (v0.13.0, PH-01)
+- Core orchestrator: `assembleGenerateResult` — no evalReport → implement, PASS → pass, stopping condition → escalate, FAIL → fix (`server/lib/generator.ts`) (v0.13.0, PH-01)
+- `baselineCheck?: string` on ExecutionPlan, `lineage?: StoryLineage` on Story — optional, backward compatible (`server/types/execution-plan.ts`) (v0.13.0, PH-01)
+- Shared `loadPlan` extracted from evaluate.ts → `server/lib/plan-loader.ts` (v0.13.0, PH-01)
 
 ### In Design Doc — To Be Implemented
 - GAN loop: implement → evaluate → fix → evaluate, max 3 rounds (design doc lines 280-310)
-- 8 production-grade GAN elements:
-  1. Separation of concerns (generator vs evaluator)
-  2. Binary eval with honest reliability
+- 8 production-grade GAN elements (core logic done in PH-01; remaining: git branching, command blocklist, two-tier feedback wiring):
   3. Two-tier feedback: fast (hooks exit-code-2) + slow (/evaluate subagent)
-  4. Hash-based no-op detection (code unchanged between iterations)
-  5. Confidence-based short-circuit (all ACs pass with high confidence)
-  6. Last-failure-only context (only send last failing AC, not entire history)
-  7. Escalation when stuck (2 consecutive no-change iterations)
-  8. Structured escalation (what was tried, why it failed, hypothesis)
+  4. Hash-based no-op detection — **logic done** (PH-01), git integration pending (PH-04)
 - Per-story git branches (feat/{story-id}), squash-merge on finalization
-- Dynamic stopping: delta=0 for 2 consecutive iterations → escalate
 - Git-native rollback on fail
 - Command blocklist + path-scoped writes (design doc line 290)
-- Baseline check: build+test before starting (Phase 3 plan line 76)
+- RunContext wiring, JSONL self-tracking, cost estimation output (PH-02)
+- Three-tier document inputs + context injection + lineage pass-through (PH-03)
+- MCP handler expansion + integration tests + dogfood (PH-04)
 
 ### New Improvement Ideas
 - **file-ops.ts**: sandboxed file read/write (project directory only, defense-in-depth)
@@ -138,6 +143,12 @@
 ---
 
 ## `/coordinate` (Coordinator) — STUB, Phase 4-5
+
+### Architecture Decision: Intelligent Clipboard by Default
+
+forge_coordinate follows the **Intelligent Clipboard pattern** — it assembles a "phase transition brief" containing all signals (divergence report, coherence report, replanning notes, cost/budget status) and returns it with a recommended action. The calling Claude Code session (free inference) makes the triage decision.
+
+**Escape hatch:** `coordinateMode: "autonomous" | "advisory"` parameter. Default = "advisory" ($0, returns recommendations). Autonomous = makes own LLM calls for triage when ambiguous state requires judgment (e.g., multiple divergences + coherence gaps — should next phase proceed?).
 
 ### In Design Doc — To Be Implemented
 - execution-plan.json IS the state; status fields updated by /generate (design doc line 320)
@@ -159,9 +170,30 @@
 - **Consolidated dashboard**: per-story status, accumulated cost, progress, aggregated audit
 - **Budget enforcement point**: CostTracker is advisory, Coordinate enforces
 - **Audit file discovery**: glob .forge/audit/{tool}-*.jsonl
-- **Three-tier integration**: after each phase, call forge_plan(documentTier: "update") to reconcile both the completed phase plan AND the master plan with implementation reality. Propagate discoveries to upcoming phase plans. (Validated by manual workflow: sessions plan updated after each session, /coherent-plan catches drift.)
+- **Three-tier integration**: after each phase, call forge_plan(documentTier: "update") to reconcile both the completed phase plan AND the master plan with implementation reality. Collect **structured replanning notes** from three sources: (a) divergence findings from forge_evaluate, (b) escalation reports from forge_generate, (c) implementation notes from the session. Feed as `replanningNotes: ReplanningNote[]` alongside existing `implementationNotes` string. Route mechanically: `ac-drift`/`assumption-changed` → master plan update; `partial-completion`/`dependency-satisfied` → phase plan update; `gap-found` → logged, deferred. (Validated by manual workflow: sessions plan updated after each session, /coherent-plan catches drift.)
 - **Self-healing loop**: divergence detection → plan update → continue
 - **CostTracker, ProgressReporter, AuditLog, RunContext** (same as /plan)
+
+### ReplanningNote Type (Design Sketch)
+
+Structured notes for post-phase plan reconciliation. Created when forge_coordinate is implemented.
+
+```typescript
+interface ReplanningNote {
+  category: "ac-drift" | "partial-completion" | "dependency-satisfied" | "gap-found" | "assumption-changed";
+  description: string;                // free text for LLM to reason over
+  affectedPhases?: string[];          // ["PH-02", "PH-04"]
+  affectedStories?: string[];         // ["PH02-US01", "PH03-US03"]
+  severity: "blocking" | "should-address" | "informational";
+}
+```
+
+**Routing rules (mechanical, no LLM needed):**
+- `ac-drift` + `assumption-changed` → master plan update via forge_plan(update)
+- `partial-completion` + `dependency-satisfied` → phase plan update via forge_plan(update)
+- `gap-found` → logged to audit, deferred to next planning session
+- `severity: "blocking"` → halt phase progression (`if (notes.some(n => n.severity === "blocking")) { halt }`)
+- `affectedPhases` → targeted updates (only re-plan affected phases, not all remaining)
 
 ---
 

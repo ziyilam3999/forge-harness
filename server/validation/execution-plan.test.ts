@@ -211,6 +211,30 @@ describe("validateExecutionPlan", () => {
     expect(result.errors?.some((e) => e.includes("flaky must be a boolean"))).toBe(true);
   });
 
+  it("accepts plan with baselineCheck field", () => {
+    const result = validateExecutionPlan({
+      ...validPlan(),
+      baselineCheck: "npm run build && npm test",
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts story with lineage field", () => {
+    const result = validateExecutionPlan(
+      validPlan({
+        stories: [
+          {
+            id: "US-01",
+            title: "A",
+            acceptanceCriteria: [{ id: "AC-01", description: "d", command: "c" }],
+            lineage: { tier: "phase-plan", sourceId: "PH-01" },
+          },
+        ],
+      }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
   it("accepts valid boolean flaky field", () => {
     const result = validateExecutionPlan(
       validPlan({

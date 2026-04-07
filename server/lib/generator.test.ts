@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -755,5 +755,231 @@ describe("costEstimate computation", () => {
     });
     expect(result.costEstimate).toBeDefined();
     expect(result.costEstimate!.briefTokens).toBeGreaterThan(0);
+  });
+});
+
+// ══════════════════════════════════════════════
+// PH-03: Three-Tier Document Integration
+// ══════════════════════════════════════════════
+
+// ── PH03-US01: documentContext ─────────────
+
+describe("PH03-US01: three-tier document inputs → documentContext", () => {
+  it("buildBrief accepts prdContent and surfaces it in documentContext", async () => {
+    const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {
+      prdContent: "# My PRD\nRequirements here",
+    });
+    expect(brief.documentContext).toBeDefined();
+    expect(brief.documentContext!.prdContent).toBe("# My PRD\nRequirements here");
+  });
+
+  it("all three document fields appear in documentContext as structured object", async () => {
+    const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {
+      prdContent: "prd-content",
+      masterPlanContent: "master-plan-content",
+      phasePlanContent: "phase-plan-content",
+    });
+    expect(brief.documentContext).toEqual({
+      prdContent: "prd-content",
+      masterPlanContent: "master-plan-content",
+      phasePlanContent: "phase-plan-content",
+    });
+    // Not dumped into codebaseContext
+    expect(brief.codebaseContext).not.toContain("prd-content");
+  });
+
+  it("documentContext omitted when no document fields provided — no error", async () => {
+    const brief = await buildBrief(VALID_PLAN, "US-01");
+    expect(brief.documentContext).toBeUndefined();
+  });
+
+  it("documentContext omitted when options object has no doc fields", async () => {
+    const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {});
+    expect(brief.documentContext).toBeUndefined();
+  });
+
+  it("partial document fields: only provided ones appear", async () => {
+    const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {
+      masterPlanContent: "master only",
+    });
+    expect(brief.documentContext).toEqual({ masterPlanContent: "master only" });
+    expect(brief.documentContext!.prdContent).toBeUndefined();
+    expect(brief.documentContext!.phasePlanContent).toBeUndefined();
+  });
+
+  it("assembleGenerateResult forwards document fields to brief", async () => {
+    const result = await assembleGenerateResult({
+      storyId: "US-01",
+      planJson: VALID_PLAN_JSON,
+      prdContent: "prd-via-input",
+      masterPlanContent: "master-via-input",
+      phasePlanContent: "phase-via-input",
+    });
+    expect(result.brief?.documentContext).toEqual({
+      prdContent: "prd-via-input",
+      masterPlanContent: "master-via-input",
+      phasePlanContent: "phase-via-input",
+    });
+  });
+});
+
+// ── PH03-US02: injectedContext via contextFiles ──
+
+describe("PH03-US02: context injection via contextFiles → injectedContext", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "forge-ctx-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("buildBrief reads contextFiles and populates injectedContext", async () => {
+    const filePath = join(tempDir, "context.md");
+    await writeFile(filePath, "# Context\nSome context here", "utf-8");
+    const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {
+      contextFiles: [filePath],
+    });
+    expect(brief.injectedContext).toBeDefined();
+    expect(brief.injectedContext!.length).toBe(1);
+    expect(brief.injectedContext![0]).toBe("# Context\nSome context here");
+  });
+
+  it("multiple contextFiles: contents of each included in order", async () => {
+    const file1 = join(tempDir, "a.md");
+    const file2 = join(tempDir, "b.md");
+    await writeFile(file1, "file-a-content", "utf-8");
+    await writeFile(file2, "file-b-content", "utf-8");
+    const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {
+      contextFiles: [file1, file2],
+    });
+    expect(brief.injectedContext).toEqual(["file-a-content", "file-b-content"]);
+  });
+
+  it("non-existent files skipped with warning — not an error", async () => {
+    const existingFile = join(tempDir, "exists.md");
+    await writeFile(existingFile, "real-content", "utf-8");
+    const missingFile = join(tempDir, "does-not-exist.md");
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {
+        contextFiles: [existingFile, missingFile],
+      });
+      expect(brief.injectedContext).toEqual(["real-content"]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("does-not-exist.md"),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("all files missing: injectedContext is undefined, not empty array", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {
+        contextFiles: [join(tempDir, "ghost.md")],
+      });
+      expect(brief.injectedContext).toBeUndefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("empty contextFiles array: no injected context, no error", async () => {
+    const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {
+      contextFiles: [],
+    });
+    expect(brief.injectedContext).toBeUndefined();
+  });
+
+  it("omitted contextFiles: no injected context, no error", async () => {
+    const brief = await buildBrief(VALID_PLAN, "US-01", undefined, {});
+    expect(brief.injectedContext).toBeUndefined();
+  });
+
+  it("assembleGenerateResult forwards contextFiles to brief", async () => {
+    const filePath = join(tempDir, "ctx.txt");
+    await writeFile(filePath, "injected-via-input", "utf-8");
+    const result = await assembleGenerateResult({
+      storyId: "US-01",
+      planJson: VALID_PLAN_JSON,
+      contextFiles: [filePath],
+    });
+    expect(result.brief?.injectedContext).toEqual(["injected-via-input"]);
+  });
+});
+
+// ── PH03-US03: lineage pass-through ───────────
+
+describe("PH03-US03: lineage pass-through from plan to brief", () => {
+  it("brief.lineage contains tier and sourceId when story has lineage", async () => {
+    const planWithLineage: ExecutionPlan = {
+      schemaVersion: "3.0.0",
+      stories: [
+        {
+          id: "US-01",
+          title: "Test story",
+          acceptanceCriteria: [
+            { id: "AC-01", description: "d", command: "c" },
+          ],
+          lineage: { tier: "prd", sourceId: "REQ-09" },
+        },
+      ],
+    };
+    const brief = await buildBrief(planWithLineage, "US-01");
+    expect(brief.lineage).toEqual({ tier: "prd", sourceId: "REQ-09" });
+  });
+
+  it("brief.lineage omitted when story has no lineage — no error", async () => {
+    const brief = await buildBrief(VALID_PLAN, "US-01");
+    expect(brief.lineage).toBeUndefined();
+  });
+
+  it("lineage is read from plan data, not inferred — pass-through only", async () => {
+    const customLineage = { tier: "master-plan" as const, sourceId: "PH-03" };
+    const planWithLineage: ExecutionPlan = {
+      schemaVersion: "3.0.0",
+      stories: [
+        {
+          id: "US-01",
+          title: "Test",
+          acceptanceCriteria: [
+            { id: "AC-01", description: "d", command: "c" },
+          ],
+          lineage: customLineage,
+        },
+      ],
+    };
+    const brief = await buildBrief(planWithLineage, "US-01");
+    // Exact same object reference proves pass-through, not inference
+    expect(brief.lineage).toBe(customLineage);
+  });
+
+  it("lineage passes through via assembleGenerateResult", async () => {
+    const planWithLineage: ExecutionPlan = {
+      schemaVersion: "3.0.0",
+      stories: [
+        {
+          id: "US-01",
+          title: "Test",
+          acceptanceCriteria: [
+            { id: "AC-01", description: "d", command: "c" },
+          ],
+          lineage: { tier: "phase-plan", sourceId: "PH-01" },
+        },
+      ],
+    };
+    const result = await assembleGenerateResult({
+      storyId: "US-01",
+      planJson: JSON.stringify(planWithLineage),
+    });
+    expect(result.brief?.lineage).toEqual({
+      tier: "phase-plan",
+      sourceId: "PH-01",
+    });
   });
 });

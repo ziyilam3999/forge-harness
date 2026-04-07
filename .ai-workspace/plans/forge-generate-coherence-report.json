@@ -1,0 +1,73 @@
+{
+  "evaluationMode": "coherence",
+  "status": "complete",
+  "iteration": 2,
+  "iterationHistory": [
+    {
+      "iteration": 1,
+      "gapCount": 5,
+      "severities": { "CRITICAL": 0, "MAJOR": 0, "MINOR": 5 },
+      "action": "Fixed 4 gaps (GAP-02 through GAP-05), GAP-01 was a non-gap"
+    },
+    {
+      "iteration": 2,
+      "gapCount": 0,
+      "severities": { "CRITICAL": 0, "MAJOR": 0, "MINOR": 0 },
+      "action": "Clean pass — zero gaps"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "GAP-01",
+      "severity": "MINOR",
+      "sourceDocument": "masterPlan",
+      "targetDocument": "phasePlan",
+      "description": "PH-01 master plan estimates 8 stories; the phase plan contains exactly 8 stories. This is within tolerance, but worth confirming the estimate was accurate.",
+      "missingRequirement": "No gap — story count matches exactly (8 estimated, 8 delivered). Reporting for completeness.",
+      "resolution": "Non-gap. No action needed."
+    },
+    {
+      "id": "GAP-02",
+      "severity": "MINOR",
+      "sourceDocument": "prd",
+      "targetDocument": "phasePlan",
+      "description": "NFR-02 (response time: <5s for init, <2s for iteration calls) is only tested in PH-04 integration tests (PH04-US03-AC03 covers init <5s) but the <2s constraint for iteration calls has no explicit test coverage.",
+      "missingRequirement": "NFR-02 iteration call performance (<2 seconds) has no corresponding acceptance criterion.",
+      "resolution": "FIXED: Added PH04-US03-AC09 for iteration call <2s performance test."
+    },
+    {
+      "id": "GAP-03",
+      "severity": "MINOR",
+      "sourceDocument": "prd",
+      "targetDocument": "phasePlan",
+      "description": "REQ-16 specifies that when on Claude Code Max, projectedIterationCostUsd should reflect $0 for Max users 'with a note that coordinator API calls would cost more'.",
+      "missingRequirement": "The note/annotation distinguishing $0 Max-user cost from coordinator API call cost is not explicitly tested.",
+      "resolution": "FIXED: Added PH02-US03-AC05 for Max-user $0 cost note in output."
+    },
+    {
+      "id": "GAP-04",
+      "severity": "MINOR",
+      "sourceDocument": "prd",
+      "targetDocument": "phasePlan",
+      "description": "SC-09 grep for callClaude only covers 4 specific files, not the full dependency chain.",
+      "missingRequirement": "PH04-US03-AC02's grep scope is narrower than SC-09's full dependency chain requirement.",
+      "resolution": "FIXED: Updated PH04-US03-AC02 grep to use recursive search excluding only test files."
+    },
+    {
+      "id": "GAP-05",
+      "severity": "MINOR",
+      "sourceDocument": "prd",
+      "targetDocument": "phasePlan",
+      "description": "REQ-03 plateau detection boundary case previousScores=[0.3, 0.5, 0.5] not explicitly tested.",
+      "missingRequirement": "The improving-then-plateauing boundary case is not named in PH01-US06 ACs.",
+      "resolution": "FIXED: Added PH01-US06-AC08 for the [0.3, 0.5, 0.5] boundary case."
+    }
+  ],
+  "summary": "Zero CRITICAL gaps. Zero MAJOR gaps. 5 MINOR gaps found — 1 non-gap (story count match), 4 fixed by adding targeted ACs. All 16 REQs, 9 SCs, and 6 NFRs have coverage across the combined phase plans.",
+  "thresholds": {
+    "criticalGaps": { "found": 0, "max": 0, "status": "PASS" },
+    "majorGaps": { "found": 0, "max": 2, "status": "PASS" },
+    "reqCoverage": { "covered": 16, "total": 16, "status": "PASS" },
+    "scTraceability": { "covered": 9, "total": 9, "status": "PASS" }
+  }
+}

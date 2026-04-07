@@ -1,0 +1,81 @@
+{
+  "schemaVersion": "3.0.0",
+  "documentTier": "phase",
+  "phaseId": "PH-03",
+  "stories": [
+    {
+      "id": "PH03-US01",
+      "title": "Accept three-tier document inputs and surface in brief.documentContext (REQ-09)",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH03-US01-AC01",
+          "description": "buildBrief accepts optional prdContent, masterPlanContent, phasePlanContent string params",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'documentContext.*prdContent\\|prdContent.*documentContext\\|three-tier.*input' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US01-AC02",
+          "description": "When provided, document content appears in brief.documentContext as structured object (not dumped into codebaseContext)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'documentContext.*structured\\|documentContext.*separate' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US01-AC03",
+          "description": "When none are provided, brief.documentContext is omitted or null (no error)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'documentContext.*omitted\\|documentContext.*null\\|no.*document.*no.*error' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/", "server/types/"]
+    },
+    {
+      "id": "PH03-US02",
+      "title": "Implement context injection via contextFiles parameter (REQ-10)",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH03-US02-AC01",
+          "description": "buildBrief accepts optional contextFiles string array parameter",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'contextFiles.*param\\|injectedContext.*contextFiles' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US02-AC02",
+          "description": "Contents of each existing file included in brief.injectedContext",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'injectedContext.*content\\|contextFiles.*read' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US02-AC03",
+          "description": "Non-existent files are skipped with a warning (not an error)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'contextFiles.*missing\\|missing.*file.*skip\\|non-existent.*skip' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US02-AC04",
+          "description": "Empty array or omitted contextFiles: no injected context, no error",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'contextFiles.*empty\\|no.*contextFiles\\|omitted.*contextFiles' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/", "server/types/"]
+    },
+    {
+      "id": "PH03-US03",
+      "title": "Pass through document lineage from execution plan to brief (REQ-11)",
+      "dependencies": ["PH03-US01"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH03-US03-AC01",
+          "description": "When story has lineage metadata in plan, brief.lineage contains tier and sourceId",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'lineage.*pass-through\\|lineage.*tier\\|brief.*lineage' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US03-AC02",
+          "description": "When story has no lineage metadata, brief.lineage is omitted (no error)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'lineage.*omitted\\|no.*lineage.*no.*error\\|lineage.*absent' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US03-AC03",
+          "description": "Lineage is read from plan data, not inferred (pass-through only)",
+          "command": "npx vitest run server/lib/generator.test.ts -t 'lineage.*pass.through\\|lineage.*read.*plan' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/", "server/types/"]
+    }
+  ]
+}

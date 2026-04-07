@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "1.0.0",
+  "documentTier": "master",
+  "title": "forge_generate — GAN Loop Controller & Brief Assembler",
+  "summary": "Implements forge_generate as the third forge-harness MCP tool primitive, completing the plan-generate-evaluate pipeline. Decomposes into 4 phases: core types and loop logic (PH-01), infrastructure integration (PH-02), three-tier document support (PH-03), and MCP handler with integration tests (PH-04).",
+  "phases": [
+    {
+      "id": "PH-01",
+      "title": "Types, Schema, and Core Loop",
+      "description": "Define all forge_generate types (GenerateResult, GenerationBrief, FixBrief, Escalation, CostEstimate, DiffManifest). Add optional baselineCheck field to ExecutionPlan and optional lineage field to Story with validation updates. Extract shared plan-loader from evaluate.ts. Implement core brief assembly (REQ-01 init, REQ-02 fix), all 5 stopping conditions (REQ-03 plateau, REQ-04 no-op, REQ-05 max-iterations, REQ-07 inconclusive, REQ-15 baseline-failed), structured escalation reports (REQ-06), and fix-path output additions (REQ-13 fail-fast eval hints, REQ-14 diff manifest). This is the largest phase — all domain types and pure-logic functions are defined here.",
+      "dependencies": [],
+      "inputs": [
+        "server/types/execution-plan.ts (current ExecutionPlan/Story interfaces)",
+        "server/validation/execution-plan.ts (current validation rules)",
+        "server/tools/evaluate.ts (loadPlan logic to extract)",
+        "server/lib/codebase-scan.ts (scanCodebase for brief assembly)",
+        "docs/forge-generate-prd.md (REQ-01 through REQ-07, REQ-13 through REQ-15)"
+      ],
+      "outputs": [
+        "server/types/execution-plan.ts (updated with baselineCheck, lineage)",
+        "server/types/generate-result.ts (GenerateResult, GenerationBrief, FixBrief, Escalation, etc.)",
+        "server/validation/execution-plan.ts (updated validation for new optional fields)",
+        "server/lib/plan-loader.ts (shared loadPlan extracted from evaluate.ts)",
+        "server/lib/generator.ts (buildBrief, buildFixBrief, checkStoppingConditions, computeScore)",
+        "server/lib/generator.test.ts (unit tests for all core logic)",
+        "server/lib/plan-loader.test.ts (unit tests for plan loader)"
+      ],
+      "estimatedStories": 8
+    },
+    {
+      "id": "PH-02",
+      "title": "Infrastructure Integration",
+      "description": "Wire forge_generate into the existing observability infrastructure. Create RunContext with toolName 'forge_generate', wire ProgressReporter stages, AuditLog entries, and CostTracker with $0 (REQ-12). Implement JSONL self-tracking to .forge/runs/data.jsonl (REQ-08). Implement cost estimation output with character-count heuristic for projectedIterationCostUsd (REQ-16). All observability failures must degrade gracefully per NFR-05.",
+      "dependencies": ["PH-01"],
+      "inputs": [
+        "server/lib/run-context.ts (RunContext class)",
+        "server/lib/progress.ts (ProgressReporter)",
+        "server/lib/audit.ts (AuditLog)",
+        "server/lib/cost.ts (CostTracker)",
+        "server/lib/generator.ts (core logic from PH-01)"
+      ],
+      "outputs": [
+        "server/lib/generator.ts (updated with RunContext integration, JSONL tracking, cost estimation)",
+        "server/lib/generator.test.ts (updated with infrastructure tests)"
+      ],
+      "estimatedStories": 3
+    },
+    {
+      "id": "PH-03",
+      "title": "Three-Tier Document Integration",
+      "description": "Add three-tier document inputs to forge_generate briefs. Accept optional prdContent, masterPlanContent, phasePlanContent string parameters and surface them in brief.documentContext (REQ-09). Accept optional contextFiles parameter for caller-controlled context injection into brief.injectedContext (REQ-10). Read story.lineage from the execution plan and pass through to brief.lineage (REQ-11). All document fields are optional — omission produces no error.",
+      "dependencies": ["PH-01"],
+      "inputs": [
+        "server/lib/generator.ts (core logic from PH-01)",
+        "server/types/generate-result.ts (types from PH-01)",
+        "server/types/execution-plan.ts (Story.lineage from PH-01 schema change)"
+      ],
+      "outputs": [
+        "server/lib/generator.ts (updated with document context, context injection, lineage pass-through)",
+        "server/lib/generator.test.ts (updated with three-tier tests)"
+      ],
+      "estimatedStories": 3
+    },
+    {
+      "id": "PH-04",
+      "title": "MCP Handler, Registration, and Integration Tests",
+      "description": "Expand the input schema in generate.ts to accept all parameters (planJson, planPath, evalReport, iteration, maxIterations, previousScores, fileHashes, projectPath, prdContent, masterPlanContent, phasePlanContent, contextFiles). Wire handleGenerate to call the core logic from PH-01/02/03. Write integration tests covering the full init-fix-escalate cycle. Verify NFRs: zero callClaude imports, <5s response time, Windows path safety. Dogfood forge_generate against a real execution plan with real ACs.",
+      "dependencies": ["PH-02", "PH-03"],
+      "inputs": [
+        "server/tools/generate.ts (current stub)",
+        "server/index.ts (tool registration)",
+        "server/lib/generator.ts (complete from PH-01/02/03)",
+        "server/types/generate-result.ts (complete from PH-01)"
+      ],
+      "outputs": [
+        "server/tools/generate.ts (full MCP handler with expanded input schema)",
+        "server/index.ts (updated tool description)",
+        "server/tools/generate.test.ts (integration tests: init, fix, escalate, NFRs)",
+        ".ai-workspace/plans/forge-generate-dogfood-report.md (dogfood results)"
+      ],
+      "estimatedStories": 4
+    }
+  ],
+  "crossCuttingConcerns": [
+    "NFR-01: Zero callClaude usage — forge_generate must not import or call callClaude. All LLM work happens in the calling Claude Code session.",
+    "NFR-03: Windows-safe paths and timestamps — no colons in filenames, forward-slash normalization, path.join for all file operations.",
+    "NFR-05: Graceful degradation for observability failures — JSONL, audit, cost estimation failures must not block the core brief/decision response."
+  ]
+}

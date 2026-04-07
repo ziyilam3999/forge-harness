@@ -1,5 +1,8 @@
+import { appendFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { scanCodebase } from "./codebase-scan.js";
 import { loadPlan } from "./plan-loader.js";
+import { RunContext } from "./run-context.js";
 import type { ExecutionPlan, Story } from "../types/execution-plan.js";
 import type { EvalReport, CriterionResult } from "../types/eval-report.js";
 import type {
@@ -12,6 +15,7 @@ import type {
   EscalationReason,
   EscalationDiagnostics,
   DiffManifest,
+  CostEstimate,
 } from "../types/generate-result.js";
 
 // ── Constants ────────────────────────────────
@@ -19,6 +23,10 @@ import type {
 const DEFAULT_MAX_ITERATIONS = 3;
 const DEFAULT_BASELINE_CHECK = "npm run build && npm test";
 const STDERR_TRUNCATION_LIMIT = 2000;
+
+/** Opus pricing per million tokens (USD). */
+const OPUS_INPUT_PER_MILLION = 15.0;
+const OPUS_OUTPUT_PER_MILLION = 75.0;
 
 // ── Input types ──────────────────────────────
 
@@ -38,6 +46,8 @@ export interface AssembleInput {
     stderr: string;
     failingTests: string[];
   };
+  /** When true (default), projected costs are $0 (no API calls from Max). */
+  isMaxUser?: boolean;
 }
 
 // ── US04: Init brief assembly (REQ-01) ──────
@@ -313,6 +323,161 @@ export async function assembleGenerateResult(
   return result;
 }
 
+// ── PH-02: Infrastructure wrapper ───────────
+
+/** JSONL run record written to .forge/runs/data.jsonl */
+export interface RunRecord {
+  timestamp: string;
+  storyId: string;
+  iteration: number;
+  action: string;
+  score: number | null;
+  durationMs: number;
+}
+
+/**
+ * Infrastructure-wrapped version of assembleGenerateResult.
+ * Adds RunContext (progress, audit, cost tracking), JSONL self-tracking,
+ * and cost estimation. All infrastructure failures degrade gracefully (NFR-05).
+ */
+export async function assembleGenerateResultWithContext(
+  input: AssembleInput,
+): Promise<GenerateResult> {
+  const startTime = Date.now();
+  const iteration = input.iteration ?? 0;
+  const stageName = iteration === 0 ? "init" : "iterate";
+
+  // Create RunContext (NFR-05: failure here is non-fatal)
+  let ctx: RunContext | null = null;
+  try {
+    ctx = new RunContext({
+      toolName: "forge_generate",
+      projectPath: input.projectPath,
+      stages: [stageName],
+    });
+    ctx.progress.begin(stageName);
+  } catch (err) {
+    console.error(
+      "forge_generate: failed to create RunContext (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // Run core logic (this must always succeed or throw)
+  const result = await assembleGenerateResult(input);
+
+  // Attach cost estimate (NFR-05: graceful)
+  try {
+    result.costEstimate = computeCostEstimate(result, input);
+  } catch (err) {
+    console.error(
+      "forge_generate: cost estimation failed (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  const durationMs = Date.now() - startTime;
+
+  // Complete progress (NFR-05: graceful)
+  try {
+    ctx?.progress.complete(stageName);
+  } catch {
+    // swallow
+  }
+
+  // Write audit entry (NFR-05: graceful)
+  try {
+    if (ctx) {
+      await ctx.audit.log({
+        stage: stageName,
+        agentRole: "generator",
+        decision: result.action,
+        reasoning: `iteration ${iteration}, action=${result.action}, durationMs=${durationMs}`,
+      });
+    }
+  } catch (err) {
+    console.error(
+      "forge_generate: audit log failed (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // Write JSONL run record (NFR-05: graceful)
+  try {
+    await writeRunRecord(input.projectPath, {
+      timestamp: new Date(startTime).toISOString(),
+      storyId: input.storyId,
+      iteration,
+      action: result.action,
+      score: extractScore(result),
+      durationMs,
+    });
+  } catch (err) {
+    console.error(
+      "forge_generate: JSONL write failed (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  return result;
+}
+
+// ── PH-02 US02: JSONL self-tracking ─────────
+
+/**
+ * Append a run record to .forge/runs/data.jsonl.
+ * No-op when projectPath is undefined. Failures are swallowed (NFR-05).
+ */
+export async function writeRunRecord(
+  projectPath: string | undefined,
+  record: RunRecord,
+): Promise<void> {
+  if (!projectPath) return;
+
+  const runsDir = join(projectPath, ".forge", "runs");
+  await mkdir(runsDir, { recursive: true });
+  const filePath = join(runsDir, "data.jsonl");
+  await appendFile(filePath, JSON.stringify(record) + "\n", "utf-8");
+}
+
+// ── PH-02 US03: Cost estimation ─────────────
+
+/**
+ * Compute a cost estimate for the generate result.
+ * briefTokens = character count of serialized payload / 4.
+ * projectedIterationCostUsd uses Opus pricing (input + output).
+ * For Max users (default), projected costs are $0.
+ */
+export function computeCostEstimate(
+  result: GenerateResult,
+  input: AssembleInput,
+): CostEstimate {
+  const payload = result.brief ?? result.fixBrief ?? result.escalation;
+  const serialized = payload ? JSON.stringify(payload) : "";
+  const briefTokens = Math.ceil(serialized.length / 4);
+
+  const isMaxUser = input.isMaxUser !== false; // default true
+  const iteration = input.iteration ?? 0;
+  const maxIterations = input.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+
+  let projectedIterationCostUsd = 0;
+  if (!isMaxUser) {
+    // Assume output tokens ≈ input tokens for a rough iteration estimate
+    projectedIterationCostUsd =
+      (briefTokens / 1_000_000) * OPUS_INPUT_PER_MILLION +
+      (briefTokens / 1_000_000) * OPUS_OUTPUT_PER_MILLION;
+  }
+
+  const remaining = Math.max(0, maxIterations - iteration);
+  const projectedRemainingCostUsd = projectedIterationCostUsd * remaining;
+
+  return {
+    briefTokens,
+    projectedIterationCostUsd,
+    projectedRemainingCostUsd,
+  };
+}
+
 // ── Helpers ──────────────────────────────────
 
 function findStory(plan: ExecutionPlan, storyId: string): Story {
@@ -321,4 +486,11 @@ function findStory(plan: ExecutionPlan, storyId: string): Story {
     throw new Error(`Story "${storyId}" not found in plan`);
   }
   return story;
+}
+
+/** Extract score from result for JSONL tracking. */
+function extractScore(result: GenerateResult): number | null {
+  if (result.fixBrief) return result.fixBrief.score;
+  if (result.action === "pass") return 1;
+  return null;
 }

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { readFileSync } from "node:fs";
-import { validateExecutionPlan } from "../validation/execution-plan.js";
 import { evaluateStory } from "../lib/evaluator.js";
 import { scanCodebase } from "../lib/codebase-scan.js";
+import { loadPlan } from "../lib/plan-loader.js";
 import { RunContext, trackedCallClaude } from "../lib/run-context.js";
 import { writeRunRecord, type RunRecord } from "../lib/run-record.js";
 import {
@@ -13,7 +13,6 @@ import {
   buildDivergenceEvalPrompt,
   buildDivergenceEvalUserMessage,
 } from "../lib/prompts/divergence-eval.js";
-import type { ExecutionPlan } from "../types/execution-plan.js";
 import type { CoherenceReport, CoherenceGap } from "../types/coherence-report.js";
 import type {
   DivergenceReport,
@@ -116,43 +115,6 @@ type McpResponse = {
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
 };
-
-// ── Plan loading (shared with story + divergence modes) ──
-
-function loadPlan(planPath?: string, planJson?: string): ExecutionPlan {
-  let rawJson: string;
-
-  if (planJson !== undefined) {
-    rawJson = planJson;
-  } else if (planPath !== undefined) {
-    try {
-      rawJson = readFileSync(planPath, "utf-8");
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : String(err);
-      throw new Error(`Plan file not found: ${planPath} (${message})`);
-    }
-  } else {
-    throw new Error("Either planPath or planJson is required");
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Invalid plan JSON: ${message}`);
-  }
-
-  const validation = validateExecutionPlan(parsed);
-  if (!validation.valid) {
-    throw new Error(
-      `Invalid execution plan: ${validation.errors?.join("; ") ?? "unknown error"}`,
-    );
-  }
-
-  return parsed as ExecutionPlan;
-}
 
 // ── Story Mode Handler ────────────────────────────────────
 

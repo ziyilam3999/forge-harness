@@ -44,9 +44,12 @@ server.registerTool(
   {
     title: "Forge Generate",
     description:
-      "Implement one story via GAN loop: implement, evaluate, fix, evaluate (max 3 rounds). Manages git branches per story.",
+      "GAN loop controller and brief assembler. On init (no evalReport): returns a GenerationBrief with story, " +
+      "codebase context, git branch, baseline check, and optional document context. On iteration (with evalReport): " +
+      "returns a FixBrief with failing criteria and eval hints, or escalates (plateau, no-op, max-iterations, " +
+      "inconclusive, baseline-failed). Read-only — never calls the Claude API or mutates project files.",
     inputSchema: generateInputSchema,
-    annotations: { destructiveHint: true },
+    annotations: { readOnlyHint: true },
   },
   handleGenerate
 );

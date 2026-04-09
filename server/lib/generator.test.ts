@@ -457,11 +457,6 @@ describe("assembleGenerateResult", () => {
     });
     expect(result.diffManifest).toBeUndefined();
   });
-
-  it("all PH-01 tests pass together", () => {
-    // Meta-test: if we got here, the test file parsed and all prior tests ran
-    expect(true).toBe(true);
-  });
 });
 
 // ══════════════════════════════════════════════

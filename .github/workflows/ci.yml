@@ -8,10 +8,12 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node-version: [20]
 
     steps:
@@ -29,6 +31,7 @@ jobs:
 
       - name: Validate commit message
         if: github.event_name == 'push'
+        shell: bash
         run: |
           COMMIT_MSG=$(git log -1 --pretty=%s)
           if echo "$COMMIT_MSG" | grep -qE "^Merge "; then exit 0; fi

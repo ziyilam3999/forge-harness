@@ -141,6 +141,34 @@ export function validateExecutionPlan(data: unknown): ValidationResult {
         errors.push(`${acPrefix}: flaky must be a boolean if present`);
       }
     }
+
+    // 10. baselineCheck must be a string if present
+    if (story.baselineCheck !== undefined && typeof story.baselineCheck !== "string") {
+      errors.push(
+        `${prefix} (${story.id}): baselineCheck must be a string if present`,
+      );
+    }
+
+    // 11. lineage must be { tier: string, sourceId: string } if present
+    if (story.lineage !== undefined) {
+      if (story.lineage === null || typeof story.lineage !== "object" || Array.isArray(story.lineage)) {
+        errors.push(
+          `${prefix} (${story.id}): lineage must be an object with {tier, sourceId} if present`,
+        );
+      } else {
+        const lineage = story.lineage as Record<string, unknown>;
+        if (typeof lineage.tier !== "string" || lineage.tier.length === 0) {
+          errors.push(
+            `${prefix} (${story.id}): lineage.tier must be a non-empty string`,
+          );
+        }
+        if (typeof lineage.sourceId !== "string" || lineage.sourceId.length === 0) {
+          errors.push(
+            `${prefix} (${story.id}): lineage.sourceId must be a non-empty string`,
+          );
+        }
+      }
+    }
   }
 
   // 8. Circular dependency detection (DFS) — skip if missing refs found

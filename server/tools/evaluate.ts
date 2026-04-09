@@ -116,6 +116,35 @@ type McpResponse = {
   isError?: boolean;
 };
 
+// ── Shared helpers ────────────────────────────────────────
+
+/** Build a RunRecord for evaluate handlers (coherence / divergence share shape). */
+function buildRunRecord(
+  ctx: RunContext,
+  startTime: number,
+  findingsTotal: number,
+): RunRecord {
+  const costSummary = ctx.cost.summarize();
+  return {
+    timestamp: new Date().toISOString(),
+    tool: "forge_evaluate",
+    documentTier: null,
+    mode: null,
+    tier: null,
+    metrics: {
+      inputTokens: costSummary.inputTokens,
+      outputTokens: costSummary.outputTokens,
+      critiqueRounds: 0,
+      findingsTotal,
+      findingsApplied: 0,
+      findingsRejected: 0,
+      validationRetries: 0,
+      durationMs: Date.now() - startTime,
+    },
+    outcome: "success",
+  };
+}
+
 // ── Story Mode Handler ────────────────────────────────────
 
 async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
@@ -194,27 +223,10 @@ async function handleCoherenceEval(
 
     // Write run record if projectPath available
     if (input.projectPath) {
-      const durationMs = Date.now() - startTime;
-      const costSummary = ctx.cost.summarize();
-      const record: RunRecord = {
-        timestamp: new Date().toISOString(),
-        tool: "forge_evaluate",
-        documentTier: null,
-        mode: null,
-        tier: null,
-        metrics: {
-          inputTokens: costSummary.inputTokens,
-          outputTokens: costSummary.outputTokens,
-          critiqueRounds: 0,
-          findingsTotal: gaps.length,
-          findingsApplied: 0,
-          findingsRejected: 0,
-          validationRetries: 0,
-          durationMs,
-        },
-        outcome: "success",
-      };
-      await writeRunRecord(input.projectPath, record);
+      await writeRunRecord(
+        input.projectPath,
+        buildRunRecord(ctx, startTime, gaps.length),
+      );
     }
 
     return {
@@ -357,27 +369,10 @@ async function handleDivergenceEval(
 
   // Write run record if projectPath available
   if (input.projectPath) {
-    const durationMs = Date.now() - startTime;
-    const costSummary = ctx.cost.summarize();
-    const record: RunRecord = {
-      timestamp: new Date().toISOString(),
-      tool: "forge_evaluate",
-      documentTier: null,
-      mode: null,
-      tier: null,
-      metrics: {
-        inputTokens: costSummary.inputTokens,
-        outputTokens: costSummary.outputTokens,
-        critiqueRounds: 0,
-        findingsTotal: totalDivergences,
-        findingsApplied: 0,
-        findingsRejected: 0,
-        validationRetries: 0,
-        durationMs,
-      },
-      outcome: "success",
-    };
-    await writeRunRecord(input.projectPath, record);
+    await writeRunRecord(
+      input.projectPath,
+      buildRunRecord(ctx, startTime, totalDivergences),
+    );
   }
 
   return {

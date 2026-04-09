@@ -39,6 +39,15 @@ function makeRunFilename(tool: string, timestamp: string): string {
 /**
  * Write a run record to `.forge/runs/`. Creates the directory if needed.
  * Failure is logged and swallowed — never crashes the tool.
+ *
+ * CANONICAL: this is the RunRecord writer used by forge_plan, forge_evaluate,
+ * and (future) forge_coordinate. One JSON file per invocation, schema defined
+ * by the `RunRecord` interface above (includes `tool`, `metrics`, etc.).
+ *
+ * Not to be confused with `appendGeneratorIterationRecord` in
+ * `./generator.ts`, which is the separate JSONL iteration-stream writer used
+ * internally by forge_generate for per-iteration self-tracking (different
+ * schema, different file: `.forge/runs/data.jsonl`).
  */
 export async function writeRunRecord(
   projectPath: string,

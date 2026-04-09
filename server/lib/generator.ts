@@ -439,7 +439,7 @@ export async function assembleGenerateResultWithContext(
 
   // Write JSONL run record (NFR-05: graceful)
   try {
-    await writeRunRecord(input.projectPath, {
+    await appendGeneratorIterationRecord(input.projectPath, {
       timestamp: new Date(startTime).toISOString(),
       storyId: input.storyId,
       iteration,
@@ -460,10 +460,18 @@ export async function assembleGenerateResultWithContext(
 // ── PH-02 US02: JSONL self-tracking ─────────
 
 /**
- * Append a run record to .forge/runs/data.jsonl.
+ * Append a generator iteration record to .forge/runs/data.jsonl.
+ *
+ * NOTE: This is NOT the canonical RunRecord writer. It appends to a JSONL
+ * stream with a generator-specific schema (storyId/iteration/action/score/
+ * durationMs) used internally by forge_generate for self-tracking iterations.
+ * The canonical per-call RunRecord writer — used by forge_plan, forge_evaluate,
+ * and (future) forge_coordinate — lives in `./run-record.ts` and writes one
+ * JSON file per invocation under `.forge/runs/`.
+ *
  * No-op when projectPath is undefined. Failures are swallowed (NFR-05).
  */
-export async function writeRunRecord(
+export async function appendGeneratorIterationRecord(
   projectPath: string | undefined,
   record: RunRecord,
 ): Promise<void> {

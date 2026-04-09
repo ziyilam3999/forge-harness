@@ -16,7 +16,11 @@ export class ProgressReporter {
   private stages: string[];
   private currentIndex = 0;
   private results: StageResult[] = [];
-  private stageStartTime: number | null = null;
+  // Per-stage start times keyed by stage name. Using a Map (instead of a
+  // single shared field) means overlapping or re-entrant begin() calls
+  // preserve each stage's own start timestamp, so complete()/fail() can
+  // always compute the correct duration for the stage being closed.
+  private stageStartTimes = new Map<string, number>();
 
   constructor(toolName: string, stages: string[]) {
     this.toolName = toolName;
@@ -32,7 +36,7 @@ export class ProgressReporter {
       this.stages.push(stageName);
       this.currentIndex = this.stages.length - 1;
     }
-    this.stageStartTime = Date.now();
+    this.stageStartTimes.set(stageName, Date.now());
     const stageNum = this.currentIndex + 1;
     const total = this.stages.length;
     console.error(`${this.toolName}: [${stageNum}/${total}] ${stageName}...`);
@@ -40,16 +44,18 @@ export class ProgressReporter {
 
   /** Mark the current stage as completed. */
   complete(stageName: string): void {
-    const durationMs = this.stageStartTime ? Date.now() - this.stageStartTime : 0;
+    const startTime = this.stageStartTimes.get(stageName);
+    const durationMs = startTime !== undefined ? Date.now() - startTime : 0;
     this.results.push({ name: stageName, durationMs, status: "completed" });
-    this.stageStartTime = null;
+    this.stageStartTimes.delete(stageName);
   }
 
   /** Mark a stage as failed (partial progress on error). */
   fail(stageName: string): void {
-    const durationMs = this.stageStartTime ? Date.now() - this.stageStartTime : 0;
+    const startTime = this.stageStartTimes.get(stageName);
+    const durationMs = startTime !== undefined ? Date.now() - startTime : 0;
     this.results.push({ name: stageName, durationMs, status: "failed" });
-    this.stageStartTime = null;
+    this.stageStartTimes.delete(stageName);
   }
 
   /** Mark a stage as skipped (e.g., critique skipped in quick tier). */

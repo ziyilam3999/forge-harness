@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.4](https://github.com/ziyilam3999/forge-harness/compare/v0.16.3...v0.16.4) (2026-04-09)
+
+### Miscellaneous
+
+* forge_coordinate S2 plans — master plan + 4 phase plans (22 stories) + Option B hand-authored coherence report (PASS — 0 CRITICAL / 0 MAJOR / 3 MINOR; 16/16 REQ, 10/10 NFR, 8/8 SC coverage) ([#118](https://github.com/ziyilam3999/forge-harness/pull/118))
+
 ## [0.16.3](https://github.com/ziyilam3999/forge-harness/compare/v0.16.2...v0.16.3) (2026-04-09)
 
 ### Miscellaneous

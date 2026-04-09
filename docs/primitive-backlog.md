@@ -240,3 +240,56 @@ interface ReplanningNote {
 - Critic failure: block (design doc line 94) vs degrade (code plan.ts:162-168) — REC-8 dual-mode proposed
 - Cost tracking: PROVISIONAL per design doc line 327 — verify Claude API token exposure
 - Large codebase fallback: scanCodebase exists but no explicit handling for huge repos
+
+---
+
+## Scope Boundary Decisions
+
+> **Rule:** Multi-turn LLM + human approval loops + indeterminate duration → **skill**. Mechanical signal aggregation on per-project state in a single shot → **forge primitive**. Cross-project scope → **ecosystem infrastructure** (not a primitive).
+>
+> Apply this rule first, debate taste second. It has correctly classified all 8 current tools: `/prd` (skill), `/prototype` (skill), `/recall` (skill), `/project-index` (skill), `forge_plan` (primitive), `forge_generate` (primitive), `forge_evaluate` (primitive), `forge_coordinate` (primitive).
+
+### forge memory → External (skill + infrastructure)
+
+**Decision:** Memory retrieval with LLM-powered relevance ranking belongs as a `/recall` skill, not a forge primitive. Forge primitives remain $0 in advisory mode. Composition happens at the Claude Code session level (session calls `/recall`, then passes the context brief to forge primitives as input).
+
+**Why:** Cross-project scope (`.forge/runs/` across all projects → centralized SQL index) violates per-project primitive boundary. LLM-driven query expansion + relevance ranking violates NFR-C01 ($0 advisory mode). The working agent stays stateless per P56.
+
+**What stays inside forge:** Project-local history (`.forge/runs/`, `.forge/audit/`) and `graduateFindings` (PH-03 US-04) — both are mechanical, per-project, and fit the primitive contract. The graduation output feeds the external skill's KB, closing the loop without coupling.
+
+**Revisit if:** A concrete compose-need emerges where forge_generate must auto-inject P-patterns without session-level intervention. At that point, add a narrow $0 `forge_recall` primitive that does lexical-only retrieval (no LLM).
+
+**Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part B
+
+### UI prototype workflow → External (skill + forge types)
+
+**Decision:** Interactive UI prototype generation (LLM-powered, human-in-the-loop iteration, Playwright rendering) belongs as a `/prototype` skill. The output artifact is schematized in forge-harness types (`PrototypeArtifact`) so downstream primitives can consume it.
+
+**Why:** Fails 5/6 of the primitive invariant checks (needs LLM calls, multi-turn, indeterminate duration, visual verification, stateful across iterations). Matches `/prd` shape exactly: interactive upstream artifact generator that feeds forge primitives.
+
+**Integration points (post-coordinate):**
+- `forge_plan`: optional `prototypeArtifactPath` input
+- `forge_generate`: three-tier → four-tier doc assembly (optional)
+- `forge_evaluate`: optional `mode: "design-fidelity"` (Playwright pixel-diff)
+
+**Revisit if:** We ship autonomous mode (v2) and want the prototype loop to be programmatically callable. Even then, it's more likely a multi-step orchestration than a single primitive.
+
+**Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part C
+
+### Three-tier durability model (memory architecture)
+
+| Tier | Location | Role | Durability |
+|------|----------|------|-----------|
+| **T1 — Ephemeral per-project** | `.forge/runs/`, `.forge/audit/` (gitignored) | Raw records, canonical source | Local disk only |
+| **T2 — Indexed per-user** | `~/.forge-memory/index.db` (SQLite) | Cross-project query index, derived | Rebuildable from T1 |
+| **T3 — Durable cross-user** | `hive-mind-persist/` (git-tracked) | Ratified patterns (P1..P56+) | Versioned, shared |
+
+Key principle: **files canonical, SQL derived.** DB corruption is a non-event (`forge-indexer rebuild` regenerates). Graduation from T2→T3 requires human ratification to prevent pattern inflation.
+
+**Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part A + Part B
+
+### Public packaging → Monorepo
+
+**Decision:** Ship one public GitHub repo containing forge-harness MCP server + skills (`/prd`, `/prototype`, `/recall`) + indexer CLI + docs + examples. One-command install via `setup.sh`.
+
+**Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part C

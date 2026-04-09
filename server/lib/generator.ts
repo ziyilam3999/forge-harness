@@ -563,5 +563,11 @@ function findStory(plan: ExecutionPlan, storyId: string): Story {
 function extractScore(result: GenerateResult): number | null {
   if (result.fixBrief) return result.fixBrief.score;
   if (result.action === "pass") return 1;
+  if (result.action === "escalate" && result.escalation) {
+    const history = result.escalation.scoreHistory;
+    if (history && history.length > 0) {
+      return history[history.length - 1] ?? null;
+    }
+  }
   return null;
 }

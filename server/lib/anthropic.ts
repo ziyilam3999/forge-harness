@@ -34,6 +34,16 @@ function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
   }
 }
 
+/**
+ * Reset the cached Anthropic client. Intended for tests and key/token
+ * rotation scenarios where the module-level singleton needs to be
+ * re-initialized with fresh credentials.
+ */
+export function resetClient(): void {
+  client = null;
+  clientExpiresAt = null;
+}
+
 export function getClient(): Anthropic {
   // Evict cache if the OAuth token is expiring within 5 minutes
   if (client && clientExpiresAt !== null && Date.now() >= clientExpiresAt - 5 * 60 * 1000) {

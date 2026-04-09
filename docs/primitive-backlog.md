@@ -197,7 +197,7 @@ interface ReplanningNote {
 - `ac-drift` + `assumption-changed` → master plan update via forge_plan(update)
 - `partial-completion` + `dependency-satisfied` → phase plan update via forge_plan(update)
 - `gap-found` → logged to audit, deferred to next planning session
-- `severity: "blocking"` → halt phase progression (`if (notes.some(n => n.severity === "blocking")) { halt }`)
+- `severity: "blocking"` → halt phase progression (any note with severity `blocking` halts phase progression)
 - `affectedPhases` → targeted updates (only re-plan affected phases, not all remaining)
 
 ---

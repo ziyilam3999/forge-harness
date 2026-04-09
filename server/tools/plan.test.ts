@@ -466,7 +466,7 @@ describe("detectCoupledACs", () => {
     expect(detectCoupledACs(makePlanWithAC("npm run build 2>&1 | grep -q 'success'"))).toHaveLength(0);
   });
 
-  it("reports one violation per AC even if multiple patterns match", () => {
+  it("reports one violation per AC even with multiple offending subcommands in a single command string", () => {
     // This command matches both grep and rg patterns conceptually, but only one pattern can match at a time
     const violations = detectCoupledACs(makePlanWithAC('grep -r "foo" src/ && rg "bar" server/'));
     // grep pattern matches first, so only 1 violation

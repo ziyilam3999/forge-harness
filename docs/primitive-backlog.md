@@ -288,8 +288,105 @@ Key principle: **files canonical, SQL derived.** DB corruption is a non-event (`
 
 **Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part A + Part B
 
+### forge_evaluate mock-mode affordance → Post-coordinate follow-up
+
+**Decision:** Add an env-var mock gate (and optional fixture replay path) to `forge_evaluate` coherence/divergence modes. Not in forge_coordinate v1; filed as a post-S7 standalone plan after forge_coordinate ships. Do **not** fold into the S7 prompt — S7 is strictly divergence measurement against the 80-item baseline; infra mocking is a separate concern that deserves its own plan.
+
+**Why:** `server/tools/evaluate.ts` coherence handler path goes `trackedCallClaude → callClaude → @anthropic-ai/sdk` with **no mock gate anywhere**. Consequences:
+
+1. The standing "API calls only when no mock" rule **cannot be satisfied** for coherence/divergence today — a caller either burns live credits or skips the tool entirely.
+2. The `/double-critique`-as-`forge_plan`-test-harness calibration loop (see auto-memory `project_calibration_loop.md`) will hit this same wall every time it tries to evaluate forge_coordinate artifacts against the PRD.
+3. PH-04 integration tests (`PH04-US-03`) that exercise `forge_evaluate` indirectly will need a fixture path OR must document a live-API-key CI secret.
+
+**Evidence:** lucky-iris hit `401 OAuth authentication_error` during forge_coordinate S2 (2026-04-09) trying to run `forge_evaluate(mode: "coherence")` against the fresh master plan + phase plans. Grep confirmed the ungated call path. Pivoted to Option B (hand-authored markdown coherence report) — cost $0, produced 0 CRITICAL / 0 MAJOR / 3 MINOR verdict with full REQ/NFR/SC coverage — but the infra gap is now a known blocker for any future coherence/divergence use.
+
+**Options enumerated:**
+
+- **(a)** **Env-var mock gate on `client.messages.create`**. Example: when `FORGE_EVALUATE_MOCK=1`, the SDK call is replaced with a canned response matching the handler's expected JSON shape. Fastest path; works for any PRD/plan input. Weakness: canned responses can't exercise real coherence logic — the mock is purely a "did the orchestration wiring work?" test.
+- **(b)** **Fixture replay path keyed by PRD+plan hash**. Pre-record specific coherence/divergence responses for specific input artifact sets; hash the inputs, look up the fixture, return the recorded response. Stronger than (a) for calibration fixtures (you can replay a real Anthropic response byte-for-byte). Weakness: higher setup cost; fixtures go stale when PRDs change.
+- **(c)** **Accept the live-API cost; document a CI secret requirement**. Status quo + documentation. Cheapest to implement, most expensive to operate, leaks credits on every run.
+
+**Leaning disposition:** **(a) + (b) combined.** (a) provides fast unit-test coverage and unblocks the "rule compliance" concern with a single env-var flip. (b) provides calibration-grade replay for the specific double-critique test harness loop. (c) is rejected because it locks the project into burning credits on every `/double-critique` run.
+
+**Owner / timing:** Standalone plan **after** forge_coordinate v1 ships (post-S7 divergence measurement). Sequence: (1) ship S7 → (2) file a new `.ai-workspace/plans/{date}-forge-evaluate-mock-mode.md` plan → (3) scope + double-critique + ship.
+
+**Revisit if:** Any S3-S7 forge_coordinate session discovers a hard block where PH-04 integration tests require mock support before the standalone follow-up can ship. In that case, smallest viable env-var gate goes in as a prerequisite commit, not a full mock/fixture layer.
+
+**Related memory:** `project_calibration_loop.md` in forge-harness auto-memory — describes the planned re-enablement of double-critique as a forge_plan test harness post-forge_coordinate; this infra gap is the primary enabler.
+
+---
+
 ### Public packaging → Monorepo
 
 **Decision:** Ship one public GitHub repo containing forge-harness MCP server + skills (`/prd`, `/prototype`, `/recall`) + indexer CLI + docs + examples. One-command install via `setup.sh`.
 
 **Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part C
+
+---
+
+## Configuration File Design Decisions
+
+> Rationale for the `.forge/coordinate.config.json` schema shipped in forge_coordinate PH-04 US-01.5. Documents which fields landed in v1, which were rejected, and why — so future revisits have the full context and don't re-litigate settled scope.
+
+### The 4 fields that landed
+
+`.forge/coordinate.config.json` is an **optional, project-local, output-shaping** config. When absent or empty, it must be byte-identical to current behavior (NFR-C10). Four fields, all optional:
+
+| Field | Values | Default | Role |
+|---|---|---|---|
+| `storyOrdering` | `topological` / `depth-first` / `small-first` | `topological` | Reorders `topoSort` output within the valid Kahn topo order. Never violates dependency constraints |
+| `phaseBoundaryBehavior` | `auto-advance` / `halt-and-notify` / `halt-hard` | `auto-advance` | Controls what brief.status becomes when a phase completes. `halt-hard` additionally emits a brief-only synthetic blocking ReplanningNote, cleared via `haltClearedByHuman: true` input arg (idempotent, no persisted state) |
+| `briefVerbosity` | `concise` / `detailed` | `concise` | Shapes brief.recommendation string length (detailed adds rationale + caveats + alternatives) |
+| `observability.{logLevel,writeAuditLog,writeRunRecord}` | `debug`/`info`/`warn`/`silent` + booleans | `info` + `true` + `true` | Gates console + audit + run-record writes. **WARNING:** `writeRunRecord: false` voids NFR-C03 (crash recovery) — loader emits P45 warning and prepends `"WARNING: crash recovery disabled."` to brief.recommendation |
+
+**Common theme:** every landed field shapes the **output** of advisory-mode coordinate (what gets logged, how verbose the brief is, what story order is used for presentation). None of them cap resources, gate execution, or modify state. This is consistent with the Intelligent Clipboard pattern: coordinate is a read-only brief assembler, and the config file tunes presentation of the brief.
+
+### The 5 fields that were rejected
+
+All rejected fields are documented here with the rationale that killed them — so future work doesn't re-add them without reading the reasons.
+
+#### `budgetUsd` — rejected (resource cap)
+
+**Proposal:** Let users set a phase-wide dollar budget in the config file.
+
+**Why rejected:** Unsuitable for Max-plan supervised runs. A resource cap that halts mid-phase creates work instead of saving it — the human supervising the run is already watching costs live and would rather see the overrun than have coordinate abort. The existing MCP input arg `budgetUsd` remains accepted per-call (useful for automated/CI scenarios), but removing it from the config file prevents the "accidentally set a global low cap and forgot about it" footgun.
+
+**Promotion criteria:** A documented use case where project-wide cost enforcement is needed. Currently zero — every real forge-harness user is on Max plan with live supervision.
+
+#### `maxTimeMs` — rejected (resource cap)
+
+**Proposal:** Wall-clock budget enforced at config level.
+
+**Why rejected:** Same as `budgetUsd` — supervised runs don't benefit from mid-flight termination. Also vulnerable to clock jumps (NTP sync, DST). Remains accepted as MCP input arg.
+
+**Promotion criteria:** Same as `budgetUsd`.
+
+#### `escalationThresholds` — rejected (defensive automation)
+
+**Proposal:** Config field like `{ plateauCount: 3, maxIterations: 10 }` to auto-escalate stories that hit those thresholds.
+
+**Why rejected:** Hides signal the supervising human would catch live. The forge_generate iteration loop already escalates via its own EscalationReason enum (plateau, max-iterations, baseline-failed, etc.) — adding a second layer of defensive escalation creates confusing double-triggers and makes "why did this story stop?" harder to diagnose. Better to let the per-tool thresholds stay where they are and surface them unmodified to the human.
+
+**Promotion criteria:** Shipping autonomous mode (v2). Autonomous mode needs configurable escalation because there's no live human to catch signal — at that point, config-level thresholds become load-bearing.
+
+#### `phaseGates` — rejected (replaced by richer alternative)
+
+**Proposal:** Boolean `phaseGates: true/false` to halt at phase boundaries.
+
+**Why rejected:** Boolean is too coarse — users want different behaviors at phase boundaries (auto-advance vs halt vs halt-with-blocker). Replaced by the richer `phaseBoundaryBehavior` enum with three values, which subsumes the boolean's intent while allowing nuanced control.
+
+**Promotion criteria:** None — this proposal was wholly absorbed into `phaseBoundaryBehavior`.
+
+#### `excludePaths` — rejected (no concrete grounding)
+
+**Proposal:** Array of glob patterns to exclude from story path analysis.
+
+**Why rejected:** No concrete use case surfaced during design. Changing classification semantics based on path globs would also tangle `storyOrdering` logic with file-system concerns, muddying the Kahn topo sort's invariants. Without a grounded need, the feature would be speculative abstraction.
+
+**Promotion criteria:** A real workflow where path-based exclusion solves a real problem. Currently none.
+
+### Design principle (derived from these rejections)
+
+**Config fields in advisory-mode coordinate should shape output, not gate execution.** If a proposal caps a resource, defends against a failure mode, or modifies state, it doesn't belong in the config file — it belongs either in MCP input args (per-call control) or in a separate escalation primitive (autonomous mode v2). This principle held for all 5 rejected fields and can be applied to future proposals to avoid re-litigation.
+
+**Full implementation spec:** `.ai-workspace/plans/2026-04-09-forge-coordinate-implementation.md` PH-04 US-01.5 and the `Config File Schema` reference section.

@@ -89,7 +89,7 @@ Implement `forge_generate` as the third forge-harness MCP tool primitive that:
 
 **Acceptance criteria:**
 - `forge_generate({..., previousScores: [0.5, 0.5, 0.5]})` returns `action: "escalate"`, `escalation.reason: "plateau"`
-- Plateau triggers when score delta = 0 for 2 consecutive iterations (3 identical scores in the history)
+- Plateau triggers when score delta = 0 for 2 consecutive iterations (i.e., last two scores are equal)
 - `forge_generate({..., previousScores: [0.3, 0.5, 0.5]})` also triggers plateau (last 2 deltas are 0)
 - `forge_generate({..., previousScores: [0.3, 0.5]})` does NOT trigger plateau (only 1 zero-delta)
 

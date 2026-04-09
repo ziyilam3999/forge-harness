@@ -20,7 +20,8 @@ export class ProgressReporter {
 
   constructor(toolName: string, stages: string[]) {
     this.toolName = toolName;
-    this.stages = stages;
+    // Defensive copy so begin() appending unknown stages does not mutate caller's array.
+    this.stages = [...stages];
   }
 
   /** Begin a stage, logging progress to stderr. */

@@ -5,9 +5,8 @@
  * Failure policy: warn and continue, never crash the tool.
  */
 
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, opendir } from "node:fs/promises";
 import { join } from "node:path";
-import { readdir } from "node:fs/promises";
 
 export interface AuditEntry {
   timestamp: string;
@@ -64,10 +63,38 @@ export class AuditLog {
 
   private async checkFileCount(auditDir: string): Promise<void> {
     try {
-      const files = await readdir(auditDir);
-      if (files.length >= FILE_COUNT_WARNING_THRESHOLD) {
+      // Use opendir() + incremental counting instead of readdir(), which
+      // would buffer every filename into memory. We only need to know
+      // whether the count has crossed the warning threshold, so we can
+      // stop iterating as soon as we hit it.
+      const dir = await opendir(auditDir);
+      let count = 0;
+      let exceeded = false;
+      try {
+        for await (const _entry of dir) {
+          count++;
+          if (count >= FILE_COUNT_WARNING_THRESHOLD) {
+            exceeded = true;
+            break;
+          }
+        }
+      } finally {
+        // opendir's async iterator closes the handle automatically when
+        // exhausted, but an early `break` leaves it open — close it.
+        if (!exceeded) {
+          // Iterator already closed the handle on exhaustion; nothing to do.
+        } else {
+          try {
+            await dir.close();
+          } catch {
+            // Already closed — ignore.
+          }
+        }
+      }
+
+      if (exceeded) {
         console.error(
-          `forge: audit directory has ${files.length} files (~${Math.round(files.length * 2)}KB). ` +
+          `forge: audit directory has ${FILE_COUNT_WARNING_THRESHOLD}+ files (~${Math.round(FILE_COUNT_WARNING_THRESHOLD * 2)}KB). ` +
           `Consider archiving old files from .forge/audit/`,
         );
       }

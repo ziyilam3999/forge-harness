@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.3](https://github.com/ziyilam3999/forge-harness/compare/v0.16.2...v0.16.3) (2026-04-09)
+
+### Miscellaneous
+
+* rename generator writeRunRecord to appendGeneratorIterationRecord to eliminate auto-import name collision with canonical run-record.ts writer — prerequisite cleanup before forge_coordinate PH-01 US-00b (Surprise 5) ([#115](https://github.com/ziyilam3999/forge-harness/pull/115))
+
 ## [0.16.2](https://github.com/ziyilam3999/forge-harness/compare/v0.16.1...v0.16.2) (2026-04-09)
 
 ### Miscellaneous

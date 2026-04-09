@@ -30,7 +30,10 @@ export function findCallByContent(
   contentMatches: string[],
 ): any {
   const match = mockCalls.find(([arg]) => {
-    const text = arg?.messages?.[0]?.content ?? "";
+    const messages: Array<{ content?: unknown }> = arg?.messages ?? [];
+    const text = messages
+      .map((m) => (typeof m?.content === "string" ? m.content : ""))
+      .join("\n");
     return contentMatches.every((s) => text.includes(s));
   });
   if (!match) {

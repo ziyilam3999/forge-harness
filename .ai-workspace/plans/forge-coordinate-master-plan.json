@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "1.0.0",
+  "documentTier": "master",
+  "title": "forge_coordinate Implementation",
+  "prdPath": "docs/forge-coordinate-prd.md",
+  "summary": "Implements forge_coordinate as the fourth and final forge-harness MCP primitive — a dependency-aware dispatch and brief assembler that composes forge_plan, forge_generate, and forge_evaluate into a complete pipeline. Decomposes into 4 phases: types, topological sort, state readers, and the core 6-state dispatch loop (PH-01); safety, budget, and crash recovery (PH-02); ReplanningNote collection, plan-mutation reconciliation, and observability (PH-03); MCP handler, config loader, checkpoint gates, integration tests, and dogfood (PH-04). Advisory mode is $0 — every story is read-only brief assembly with no LLM calls. State is reconstructed from .forge/runs/*.json (primary RunRecords) and .forge/runs/data.jsonl (generator iteration records) on every call.",
+  "phases": [
+    {
+      "id": "PH-01",
+      "title": "Types, Topological Sort, State Readers, and Core Dispatch Loop",
+      "description": "Foundational phase. Extends RunRecord with optional storyId/evalVerdict/evalReport/estimatedCostUsd fields (REQ-01) and adds full RunContext infrastructure to handleStoryEval matching handleCoherenceEval. Populates estimatedCostUsd at every other canonical writeRunRecord call site (handleCoherenceEval, handleDivergenceEval, plan.ts wrapper). Defines the CoordinateResult / StoryStatusEntry / PhaseTransitionBrief / ReplanningNote / CoordinateMode type interfaces (REQ-05). Implements topoSort via Kahn's algorithm with stable lex tie-break and changes detectCycles signature to accept Story[] directly with JSDoc export (REQ-02, NFR-C02). Implements readRunRecords as a tagged discriminated union over PrimaryRecord and GeneratorRecord, sorted by timestamp, with graceful degradation on corrupt JSON / truncated JSONL / permission denied (REQ-03, NFR-C06). Implements assessPhase with the 6-state precedence chain done > dep-failed > failed > ready-for-retry > ready > pending, retryCount re-derived from non-PASS primary records (counts both FAIL and INCONCLUSIVE), priorEvalReport populated from the most recent non-PASS record's embedded evalReport (REQ-04). Implements assemblePhaseTransitionBrief with the 4-case status rule halted > complete > needs-replan > in-progress and the LAST RETRY recommendation substring (REQ-05). Adds unit tests across topo sort, run-reader, assessPhase, and brief assembly.",
+      "dependencies": [],
+      "inputs": [
+        "server/lib/run-record.ts (canonical writeRunRecord — extends RunRecord interface)",
+        "server/lib/generator.ts (appendGeneratorIterationRecord — JSONL stream, OUT OF SCOPE for cost population per REQ-01 AC-2)",
+        "server/tools/evaluate.ts (handleStoryEval lines 150-166 — needs RunContext infra; handleCoherenceEval line 226 + handleDivergenceEval line 372 — need estimatedCostUsd added to existing writeRunRecord calls)",
+        "server/tools/plan.ts (writeRunRecordIfNeeded wrapper at line 688 — needs estimatedCostUsd added)",
+        "server/validation/execution-plan.ts (private detectCycles — signature change to Story[] + export with JSDoc)",
+        "server/types/execution-plan.ts (Story interface — referenced by topoSort signature)",
+        "server/types/eval-report.ts (EvalReport — embedded in RunRecord per REQ-01)",
+        "docs/forge-coordinate-prd.md (REQ-01, REQ-02, REQ-03, REQ-04, REQ-05; NFR-C01, NFR-C02, NFR-C06, NFR-C08)"
+      ],
+      "outputs": [
+        "server/lib/run-record.ts (RunRecord interface extended with optional storyId, evalVerdict, evalReport, and metrics.estimatedCostUsd fields; CANONICAL marker preserved)",
+        "server/tools/evaluate.ts (handleStoryEval gains RunContext, CostTracker, AuditLog, writeRunRecord call with all four new fields populated; handleCoherenceEval and handleDivergenceEval writeRunRecord calls populate estimatedCostUsd)",
+        "server/tools/plan.ts (writeRunRecordIfNeeded wrapper populates estimatedCostUsd)",
+        "server/validation/execution-plan.ts (detectCycles signature changed to (stories: Story[]) and exported with JSDoc contract)",
+        "server/types/coordinate-result.ts (CoordinateResult, StoryStatusEntry, PhaseTransitionBrief, ReplanningNote, CoordinateMode interfaces)",
+        "server/lib/topo-sort.ts (topoSort via Kahn's with stable lex tie-break by story.id)",
+        "server/lib/run-reader.ts (readRunRecords returning ReadonlyArray<PrimaryRecord | GeneratorRecord>; readAuditEntries placeholder export for REQ-11)",
+        "server/lib/coordinator.ts (assessPhase with 6-state precedence chain; assemblePhaseTransitionBrief with 4-case status rule and LAST RETRY recommendation)",
+        "server/lib/topo-sort.test.ts (5+ tests including chained, reverse-input, empty, cycle, lex tie-break)",
+        "server/lib/run-reader.test.ts (5+ tests including corrupt JSON, truncated JSONL, schema mismatch, empty dir, permission-denied, normal, dual-source tagged output)",
+        "server/lib/coordinator.test.ts (5+ assessPhase + 3+ brief tests including done-after-retry precedence, dep-failed-dominates-failed, INCONCLUSIVE counted in retryCount, priorEvalReport provenance, LAST RETRY substring)"
+      ],
+      "estimatedStories": 8
+    },
+    {
+      "id": "PH-02",
+      "title": "Safety, Budget, Time, and Crash Recovery",
+      "description": "Adds the budget and time advisory layers and crash-safe state recovery. Implements checkBudget as a pure function over the tagged-union prior records, summing estimatedCostUsd across primary records only, with 80% approaching / 100% exceeded thresholds and incompleteData flagging when any primary record has null/missing cost (REQ-06, NFR-C09). Implements checkTimeBudget as a pure wall-clock comparison with 'unknown' warning when startTimeMs is missing (REQ-07). Wires INCONCLUSIVE through the retry counter (NOT a terminal state) per the v1.1 6-state machine, preserving story-level isolation while explicitly NOT preserving phase-brief-level forward progress (REQ-08). Implements recoverState as a pure function operating on the already-reconciled view, populating priorEvalReport from the most recent non-PASS primary record's embedded evalReport (REQ-09).",
+      "dependencies": ["PH-01"],
+      "inputs": [
+        "server/lib/coordinator.ts (assessPhase from PH-01)",
+        "server/lib/run-reader.ts (readRunRecords from PH-01)",
+        "server/types/coordinate-result.ts (PhaseTransitionBrief, StoryStatusEntry from PH-01)",
+        "docs/forge-coordinate-prd.md (REQ-06, REQ-07, REQ-08, REQ-09; NFR-C03, NFR-C04, NFR-C09)"
+      ],
+      "outputs": [
+        "server/lib/coordinator.ts (checkBudget, checkTimeBudget, recoverState added; assessPhase integrated with budget/time checks and INCONCLUSIVE-via-retry-counter behavior)",
+        "server/lib/coordinator.test.ts (budget 80%/100% thresholds, incompleteData flag, time-budget unknown state, INCONCLUSIVE counted in retryCount, recoverState idempotency, crash-safe re-run identical output)"
+      ],
+      "estimatedStories": 4
+    },
+    {
+      "id": "PH-03",
+      "title": "ReplanningNote, Reconciliation, Graduation, and Observability",
+      "description": "Adds the structured replanning note system and the reconciliation surface for plan mutations. Defines ReplanningNote with 5 categories (ac-drift, partial-completion, dependency-satisfied, gap-found, assumption-changed) and 3 severities (REQ-10). Implements collectReplanningNotes with mechanical mapping from EscalationReason and EvalReport.verdict, plus the v1.1 retries-exhausted (one note per terminal-failed story, ac-drift/blocking) and dep-failed-chain (one note per distinct root failed story, assumption-changed/blocking) triggers. Implements aggregateStatus for per-story status, accumulated cost from primary records' estimatedCostUsd, and velocityStoriesPerHour (PASS-count / elapsed hours, never NaN/Infinity) with optional includeAudit flag and readAuditEntries reader (REQ-11). Implements graduateFindings with REQ-12 v1.1 distinct-storyId dedup BEFORE the ≥3 threshold and the optional currentPlanStartTimeMs window-clipping. Implements reconcileState as the FIRST step inside assessPhase (before recoverState) with the v1.1 REQ-13 failed/dep-failed preservation guarantees, the dangling-dependency rule (stale dep IDs → pending + evidence + P45 warning), and 6+ unit tests including failed→rename→pending and dep-failed→upstream-replanned-away→pending.",
+      "dependencies": ["PH-01", "PH-02"],
+      "inputs": [
+        "server/lib/coordinator.ts (assessPhase, recoverState from PH-01/PH-02)",
+        "server/types/coordinate-result.ts (CoordinateResult from PH-01)",
+        "server/types/generate-result.ts (EscalationReason — used by collectReplanningNotes mapping)",
+        "server/types/eval-report.ts (EvalReport.verdict — used by collectReplanningNotes mapping)",
+        "server/lib/run-reader.ts (readRunRecords, readAuditEntries from PH-01)",
+        "docs/forge-coordinate-prd.md (REQ-10, REQ-11, REQ-12, REQ-13; NFR-C06, NFR-C08)"
+      ],
+      "outputs": [
+        "server/types/coordinate-result.ts (ReplanningNote interface with category, severity, affectedPhases, affectedStories, description fields)",
+        "server/lib/coordinator.ts (collectReplanningNotes with v1.1 retries-exhausted + dep-failed-chain triggers; aggregateStatus with optional includeAudit; graduateFindings with distinct-storyId dedup; reconcileState with REQ-13 v1.1 preservation + dangling-dep rule)",
+        "server/lib/run-reader.ts (readAuditEntries promoted from placeholder to full implementation)",
+        "server/lib/coordinator.test.ts (collectReplanningNotes mapping tests, retries-exhausted per-story, dep-failed-chain one-per-root, two-root chain test, graduateFindings distinct-storyId dedup, reconcileState 6+ tests including failed→rename→pending, dep-failed→upstream-replanned→pending, dangling-dep)",
+        "server/lib/run-reader.test.ts (readAuditEntries graceful-degradation tests)"
+      ],
+      "estimatedStories": 5
+    },
+    {
+      "id": "PH-04",
+      "title": "MCP Handler, Config Loader, Checkpoint Gates, Integration Tests, and Dogfood",
+      "description": "Wires forge_coordinate into the MCP server. Expands coordinateInputSchema with planPath (req), phaseId (req v1), masterPlanPath, coordinateMode, budgetUsd, maxTimeMs, startTimeMs, currentPlanStartTimeMs, projectPath, prdContent, replanningNotes, and haltClearedByHuman; intentionally omits maxRetries per REQ-14 v1.1 and §7 (REQ-14). Implements loadCoordinateConfig with the 4-field config schema (storyOrdering, phaseBoundaryBehavior, briefVerbosity, observability.*), per-field provenance via brief.configSource, .strict() Zod with named-field warnings, and the writeRunRecord:false → 'WARNING: crash recovery disabled.' recommendation prefix (REQ-15). Wires advisory-mode checkpoint gates: brief IS the checkpoint, no separate file or pause-and-wait call (REQ-16). Adds 17-22 integration tests including the configSource end-to-end test and the halt-hard 3-step clearing state machine test (NFR-C10 byte-identity verified via golden-file fixtures with and without an empty {} config). Closes with a dogfood run against a multi-story plan and a written dogfood report.",
+      "dependencies": ["PH-02", "PH-03"],
+      "inputs": [
+        "server/tools/coordinate.ts (16-line stub — full expansion)",
+        "server/index.ts (tool registration)",
+        "server/lib/coordinator.ts (assessPhase, checkBudget, checkTimeBudget, recoverState, reconcileState, collectReplanningNotes, aggregateStatus, graduateFindings from PH-01/PH-02/PH-03)",
+        "server/types/coordinate-result.ts (full set from PH-01/PH-03)",
+        "docs/forge-coordinate-prd.md (REQ-14, REQ-15, REQ-16; NFR-C01, NFR-C05, NFR-C07, NFR-C10)"
+      ],
+      "outputs": [
+        "server/tools/coordinate.ts (full MCP handler with expanded coordinateInputSchema and handleCoordinate wired to assessPhase)",
+        "server/lib/coordinator.ts (loadCoordinateConfig with 4-field schema, per-field provenance, .strict() Zod, writeRunRecord:false warning chain)",
+        "server/index.ts (tool description updated to reflect 4th forge primitive role)",
+        "server/tools/coordinate.test.ts (17-22 integration tests including configSource end-to-end and halt-hard 3-step clearing state machine)",
+        "server/lib/coordinator.test.ts (config-loader 7+ unit tests: no file, full file, args override, corrupt JSON, schema-invalid, mid-write race, depth-first behavioral)",
+        ".ai-workspace/plans/forge-coordinate-dogfood-report.md (dogfood results against a multi-story plan)"
+      ],
+      "estimatedStories": 5
+    }
+  ],
+  "crossCuttingConcerns": [
+    "NFR-C01: Advisory mode = $0. forge_coordinate must not import or call callClaude/trackedCallClaude from any file in its dependency chain (coordinator.ts, topo-sort.ts, run-reader.ts, run-record.ts, execution-plan.ts, coordinate-result.ts, coordinate.ts).",
+    "NFR-C02: Deterministic dispatch. Same plan → same topo sort → same brief (excluding timestamp fields). Kahn's ready-queue processes stories in stable lexicographic order by story.id. EvalReport embedded in RunRecord must serialize with sorted findings to preserve byte-identity.",
+    "NFR-C03: Crash-safe state (default config). The coordinator has no persistent state file — every call re-derives from .forge/runs/*.json. The writeRunRecord:false config is the explicit opt-out and surfaces a 'WARNING: crash recovery disabled.' prefix in brief.recommendation.",
+    "NFR-C05: Windows compatibility. No colons in any filename written by the coordinator. All path construction uses path.join. All file reads tolerate CRLF line endings. Verified by running the full coordinator test suite on windows-latest CI.",
+    "NFR-C06: Graceful degradation. Parse errors, missing files, malformed JSON/JSONL, and permission-denied errors are logged via console.error (P44) and the degraded path continues. EvalReport embedding grows .forge/runs/ by ~10 KB per FAIL/INCONCLUSIVE record — acknowledged growth surface.",
+    "NFR-C08: Brief completeness. Every field listed in REQ-05 is present in the returned brief — none silently omitted. priorEvalReport and evidence are non-optional with explicit null sentinels.",
+    "NFR-C10: Config file zero-impact when absent/empty. Running the full test suite once with no config file and once with an empty {} config produces byte-identical results across all brief fields except configSource."
+  ]
+}

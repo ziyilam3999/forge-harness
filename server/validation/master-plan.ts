@@ -1,3 +1,7 @@
+/**
+ * Shared result shape for all validators in server/validation/.
+ * Sibling modules (execution-plan, eval-report) re-export this type.
+ */
 export interface ValidationResult {
   valid: boolean;
   errors?: string[];

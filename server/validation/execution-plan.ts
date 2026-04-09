@@ -1,7 +1,5 @@
-export interface ValidationResult {
-  valid: boolean;
-  errors?: string[];
-}
+import type { ValidationResult } from "./master-plan.js";
+export type { ValidationResult };
 
 /**
  * Validate an execution plan against the v3.0.0 schema rules.

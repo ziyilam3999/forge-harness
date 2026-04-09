@@ -1,0 +1,239 @@
+{
+  "schemaVersion": "3.0.0",
+  "documentTier": "phase",
+  "phaseId": "PH-03",
+  "masterPlanPath": ".ai-workspace/plans/forge-coordinate-master-plan.json",
+  "prdPath": "docs/forge-coordinate-prd.md",
+  "stories": [
+    {
+      "id": "PH03-US-01",
+      "title": "Define ReplanningNote type with v1.1 retries-exhausted and dep-failed-chain triggers (REQ-10)",
+      "description": "Promotes the ReplanningNote placeholder type from PH-01 US-01 into a full interface in server/types/coordinate-result.ts. Fields: category ('ac-drift' | 'partial-completion' | 'dependency-satisfied' | 'gap-found' | 'assumption-changed'), severity ('blocking' | 'should-address' | 'informational'), affectedPhases?: string[], affectedStories?: string[], description: string. Mechanical routing rules (no LLM): ac-drift / assumption-changed → master update; partial-completion / dependency-satisfied → phase update; gap-found → defer; blocking → halt. The 5 categories are closed and exhaustive for v1. Adds the v1.1 retries-exhausted trigger (one ReplanningNote per terminal-failed story, category ac-drift, severity blocking, affectedStories: [failedStoryId], description naming the story and stating retry budget exhausted). Adds the v1.1 dep-failed-chain trigger (ONE ReplanningNote per distinct root failed story, category assumption-changed, severity blocking, affectedStories listing the entire transitive closure for that root). Edge case: when both fire (root failed AND its downstream dep-failed chain), both notes are emitted.",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH03-US-01-AC01",
+          "description": "ReplanningNote interface declares all 5 categories",
+          "command": "grep -nE 'ac-drift' server/types/coordinate-result.ts && grep -nE 'partial-completion' server/types/coordinate-result.ts && grep -nE 'dependency-satisfied' server/types/coordinate-result.ts && grep -nE 'gap-found' server/types/coordinate-result.ts && grep -nE 'assumption-changed' server/types/coordinate-result.ts"
+        },
+        {
+          "id": "PH03-US-01-AC02",
+          "description": "ReplanningNote interface declares all 3 severities",
+          "command": "grep -nE '\"blocking\"' server/types/coordinate-result.ts && grep -nE '\"should-address\"' server/types/coordinate-result.ts && grep -nE '\"informational\"' server/types/coordinate-result.ts"
+        },
+        {
+          "id": "PH03-US-01-AC03",
+          "description": "Retries-exhausted trigger: one terminal-failed story → exactly one ReplanningNote with category ac-drift, severity blocking",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'retries-exhausted.*per.story|retries.exhausted' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-01-AC04",
+          "description": "Multiple terminal-failed stories → multiple retries-exhausted notes (one per failed story, NOT one union note)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'retries-exhausted.*multiple|multiple.*retries-exhausted' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-01-AC05",
+          "description": "Dep-failed-chain trigger: ONE note per distinct root failed story; binary assertion replanningNotes.filter(n => n.description.includes('dep-failed-chain')).length === distinctRootFailedCount",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'dep-failed-chain.*distinct|dep-failed-chain.*root' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-01-AC06",
+          "description": "Two independent dep-failed chains: US-01 failed (downstream US-02, US-03) AND US-05 failed (downstream US-06) → exactly TWO dep-failed-chain notes",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'two.*independent.*chain|two.*roots' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-01-AC07",
+          "description": "Edge case: same phase has both retries-exhausted and dep-failed-chain triggers → both notes emitted",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'retries-exhausted.*and.*dep-failed-chain|both.*triggers' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-01-AC08",
+          "description": "TypeScript compilation succeeds",
+          "command": "npx tsc --noEmit"
+        }
+      ],
+      "affectedPaths": ["server/types/coordinate-result.ts", "server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+    },
+    {
+      "id": "PH03-US-02",
+      "title": "Implement collectReplanningNotes with mechanical routing from EscalationReason and EvalReport.verdict (REQ-10)",
+      "description": "Implements collectReplanningNotes(result) in server/lib/coordinator.ts. Mechanical (no LLM) mapping table: plateau → partial-completion; no-op → gap-found; max-iterations → partial-completion; inconclusive → gap-found; baseline-failed → assumption-changed. Eval verdicts map: FAIL → ac-drift; INCONCLUSIVE → gap-found (rationale: INCONCLUSIVE literally means 'tool could not determine a verdict' = knowledge gap). dependency-satisfied is emitted ONLY by reconcileState (PH03-US-05) when a previously-waiting story is unblocked. Unknown EscalationReason values route to gap-found with severity informational AND a P45 console.error with the exact prefix 'WARNING: unknown EscalationReason routed to gap-found: '. Routing for any blocking note is documented in brief.recommendation; coordinate never auto-invokes forge_plan(update) — the caller decides.",
+      "dependencies": ["PH03-US-01"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH03-US-02-AC01",
+          "description": "collectReplanningNotes exported from coordinator.ts",
+          "command": "grep -nE 'export.*function collectReplanningNotes' server/lib/coordinator.ts"
+        },
+        {
+          "id": "PH03-US-02-AC02",
+          "description": "EscalationReason → category mapping is mechanical and complete (5 input values, 5 mappings)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'collectReplanningNotes.*mapping|EscalationReason.*mapping' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-02-AC03",
+          "description": "FAIL eval verdict maps to ac-drift; INCONCLUSIVE maps to gap-found",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'verdict.*mapping|FAIL.*ac-drift|INCONCLUSIVE.*gap-found' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-02-AC04",
+          "description": "Unknown EscalationReason → routed to gap-found AND console.error contains 'WARNING: unknown EscalationReason routed to gap-found: '",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'unknown.*EscalationReason' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-02-AC05",
+          "description": "Blocking notes appear in brief.recommendation routing summary",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'blocking.*recommendation|routing.*summary' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-02-AC06",
+          "description": "Coordinator never auto-invokes forge_plan(update) — verified by absence of forge_plan import in coordinator.ts",
+          "command": "! grep -nE 'from.*forge_plan|import.*plan.ts' server/lib/coordinator.ts"
+        }
+      ],
+      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+    },
+    {
+      "id": "PH03-US-03",
+      "title": "Implement aggregateStatus with velocity, cost, and optional audit (REQ-11)",
+      "description": "Implements aggregateStatus(projectPath, options?: {includeAudit?: boolean}) in server/lib/coordinator.ts. Returns per-story status, accumulatedCostUsd (sum of estimatedCostUsd across primary records, null/missing excluded with incompleteData flag per REQ-06), and velocityStoriesPerHour. Velocity formula: velocityStoriesPerHour = completedStoryCount / elapsedHours, where completedStoryCount is the count of distinct storyIds with at least one PRIMARY RunRecord where evalVerdict === 'PASS' within the optional plan-execution window, and elapsedHours = (now - earliestPrimaryRecordTimestampInWindow) / 3_600_000. Edge cases: zero completed stories OR zero elapsed time → velocityStoriesPerHour is 0 (NEVER NaN or Infinity). When options.includeAudit is true, the return additionally contains auditEntries: AuditEntry[] from readAuditEntries (promoted from placeholder in PH-01 US-03 to full implementation here). readAuditEntries reads .forge/audit/*.jsonl with the same graceful-degradation contract as readRunRecords.",
+      "dependencies": ["PH03-US-02"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH03-US-03-AC01",
+          "description": "aggregateStatus exported with optional includeAudit option",
+          "command": "grep -nE 'export.*function aggregateStatus' server/lib/coordinator.ts && grep -nE 'includeAudit' server/lib/coordinator.ts"
+        },
+        {
+          "id": "PH03-US-03-AC02",
+          "description": "Velocity = 0 when zero completed stories (never NaN/Infinity)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'velocity.*zero.*completed|zero.*velocity' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-03-AC03",
+          "description": "Velocity = 0 when zero elapsed time (never division-by-zero)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'velocity.*zero.*elapsed|elapsed.*zero' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-03-AC04",
+          "description": "Velocity computed only from PASS-verdict primary records (not from generator records)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'velocity.*PASS|velocity.*primary' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-03-AC05",
+          "description": "accumulatedCostUsd excludes null estimatedCostUsd records and sets incompleteData",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'accumulatedCostUsd.*null|aggregateStatus.*incompleteData' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-03-AC06",
+          "description": "includeAudit: true → return contains auditEntries array; default false → no auditEntries field",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'includeAudit.*true|auditEntries' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-03-AC07",
+          "description": "readAuditEntries graceful degradation: corrupt JSONL skipped, console.error called, valid entries returned",
+          "command": "npx vitest run server/lib/run-reader.test.ts -t 'readAuditEntries.*corrupt|audit.*degradation' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-03-AC08",
+          "description": "readAuditEntries handles missing directory and permission-denied",
+          "command": "npx vitest run server/lib/run-reader.test.ts -t 'readAuditEntries.*missing|readAuditEntries.*permission' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/run-reader.ts", "server/lib/coordinator.test.ts", "server/lib/run-reader.test.ts"]
+    },
+    {
+      "id": "PH03-US-04",
+      "title": "Implement graduateFindings with REQ-12 v1.1 distinct-storyId dedup (REQ-12)",
+      "description": "Implements graduateFindings(result, options?: {currentPlanStartTimeMs?: number}) in server/lib/coordinator.ts. Returns a wrapper object {findings: Finding[], windowInflationRisk: boolean}. Counts escalation reasons across primary RunRecords for the current plan's story IDs, then DEDUPES BY (storyId, escalationReason) BEFORE applying the ≥3 threshold. Without dedup, a single retry-exhausted story (3 primary records, all escalation 'plateau') would cross the threshold alone and self-graduate — defeating the '≥3 DISTINCT stories = real pattern' intent. Counter is re-derived per call from readRunRecords().filter(r => r.source === 'primary') (stateless, no persistent counter file). Plan-execution window: when currentPlanStartTimeMs is provided, only records with timestamp ≥ that anchor are counted and windowInflationRisk is false; otherwise the window falls back to 'all primary records for stories currently in the plan' and windowInflationRisk is true. Generator records ignored (no evalVerdict). When no escalation reason has count ≥3 → returns {findings: [], windowInflationRisk: <bool>} (never null).",
+      "dependencies": ["PH03-US-03"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH03-US-04-AC01",
+          "description": "graduateFindings exported with the wrapper return type",
+          "command": "grep -nE 'export.*function graduateFindings' server/lib/coordinator.ts"
+        },
+        {
+          "id": "PH03-US-04-AC02",
+          "description": "Distinct-storyId dedup: 3 primary records with storyId 'US-05' all escalation 'plateau' → findings is empty (count: 1 < 3)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'graduateFindings.*dedup|distinct.storyId' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-04-AC03",
+          "description": "Threshold: 3 records with distinct story IDs all escalation 'plateau' → findings has one entry with count 3",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'graduateFindings.*threshold|three.*distinct' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-04-AC04",
+          "description": "currentPlanStartTimeMs provided → windowInflationRisk false; not provided → windowInflationRisk true",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'windowInflationRisk' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-04-AC05",
+          "description": "Empty result → returns {findings: [], windowInflationRisk: <bool>} (never null/undefined)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'graduateFindings.*empty|graduateFindings.*never null' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-04-AC06",
+          "description": "Generator records are excluded from graduation counting",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'graduateFindings.*generator.*excluded|generator.*not counted' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-04-AC07",
+          "description": "graduateFindings does NOT write to any knowledge base — returns the findings only",
+          "command": "! grep -nE 'hive-mind|knowledge.base|fs\\.writeFile.*finding' server/lib/coordinator.ts"
+        }
+      ],
+      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+    },
+    {
+      "id": "PH03-US-05",
+      "title": "Implement reconcileState with REQ-13 v1.1 failed/dep-failed preservation and dangling-dep rule (REQ-13)",
+      "description": "Implements reconcileState(plan, projectPath) in server/lib/coordinator.ts. Runs as the FIRST step inside assessPhase, before recoverState. Handles plan mutations between calls. Orphaned record (storyId field does not match any story ID in current plan) → excluded from classification, console.error warning logged. New stories (present in plan AND zero prior primary RunRecords) → initially marked pending, then flow through normal REQ-04 classification. v1.1 REQ-13 preservation guarantees: (a) failed story with unchanged ID continues failed (automatic via re-derivation, no special-case logic); (b) failed story renamed → orphaned-record warning for old ID + new pending story for new ID with retry counter starting at 0 (intentional escape hatch documented in §7); (c) failed story deleted → orphaned-record warning only; (d) dep-failed story remains dep-failed as long as upstream failed story is still in plan, automatically lifts when upstream is replanned away. Dangling-dependency rule: when any story's dependencies array references a story ID that does NOT exist in the plan → classify the downstream as 'pending' with evidence: 'dep <id> missing from plan' and a P45 console.error warning. The story is NOT dep-failed and NOT failed.",
+      "dependencies": ["PH03-US-04"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH03-US-05-AC01",
+          "description": "reconcileState exported and runs FIRST inside assessPhase (verified by source order or explicit test)",
+          "command": "grep -nE 'export.*function reconcileState' server/lib/coordinator.ts && npx vitest run server/lib/coordinator.test.ts -t 'reconcileState.*runs.first|reconcileState.*before.*recoverState' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-05-AC02",
+          "description": "Test: orphaned record (storyId not in plan) is excluded and console.error is called",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'orphan' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-05-AC03",
+          "description": "Test: new story (present in plan, zero prior records) → initially pending, flows through REQ-04 classification",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'new.*story|new-story' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-05-AC04",
+          "description": "Test: full plan replacement (all story IDs differ from prior records) → all old records orphaned, all new stories pending",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'full.*replacement|plan.*replacement' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-05-AC05",
+          "description": "Test: rename a failed story → old ID becomes orphaned warning + new ID becomes pending with retry counter 0 (intentional fresh budget)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'failed.*rename.*pending|rename.*fresh.*budget' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-05-AC06",
+          "description": "Test: dependency change makes a previously-pending story newly satisfiable → next brief shows it as ready, dependency-satisfied informational note emitted",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'dependency.*change|dependency-satisfied.*emit' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-05-AC07",
+          "description": "Test: dep-failed → upstream-replanned-away → downstream classification automatically lifts to pending on next call",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'dep-failed.*upstream.*replan|upstream-replanned' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH03-US-05-AC08",
+          "description": "Test: dangling dependency (downstream references non-existent dep ID) → downstream is 'pending' with evidence 'dep <id> missing from plan' and P45 console.error",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'dangling.*dep|missing.*from.*plan' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+    }
+  ]
+}

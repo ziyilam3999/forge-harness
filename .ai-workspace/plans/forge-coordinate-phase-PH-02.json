@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "3.0.0",
+  "documentTier": "phase",
+  "phaseId": "PH-02",
+  "masterPlanPath": ".ai-workspace/plans/forge-coordinate-master-plan.json",
+  "prdPath": "docs/forge-coordinate-prd.md",
+  "stories": [
+    {
+      "id": "PH02-US-01",
+      "title": "Implement checkBudget as a pure function over tagged-union prior records (REQ-06, NFR-C04, NFR-C09)",
+      "description": "Adds checkBudget(priorRecords: ReadonlyArray<PrimaryRecord | GeneratorRecord>, budgetUsd: number | undefined) to server/lib/coordinator.ts. Sums estimatedCostUsd across primary records only via explicit .filter(r => r.source === 'primary') — generator records have no cost field. Returns {usedUsd, budgetUsd, remainingUsd, incompleteData, warningLevel}. At ≥80% of budgetUsd, warningLevel is 'approaching'; at ≥100%, 'exceeded'. When budgetUsd is undefined, warningLevel is 'none' and remainingUsd is null. When any primary record has null/missing estimatedCostUsd, that record is excluded from the sum and incompleteData is set to true (the caller's logging path emits the P45 warning — checkBudget is pure, no logging or RunContext mutation). When warningLevel === 'exceeded', the brief's recommendation includes 'complete current story then stop' guidance; the coordinator never throws or aborts (advisory only per NFR-C04).",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH02-US-01-AC01",
+          "description": "checkBudget exported with the (priorRecords, budgetUsd) signature (no ctx parameter)",
+          "command": "grep -nE 'export.*function checkBudget\\(priorRecords' server/lib/coordinator.ts"
+        },
+        {
+          "id": "PH02-US-01-AC02",
+          "description": "At 79% of budget → warningLevel 'none'; at 80% → 'approaching'; at 100% → 'exceeded'",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'checkBudget.*threshold|budget.*80|budget.*100' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-01-AC03",
+          "description": "When budgetUsd is undefined → warningLevel 'none' and remainingUsd null (no-op)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'checkBudget.*undefined|budget.*missing' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-01-AC04",
+          "description": "Generator records (source === 'generator') are excluded from the sum",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'checkBudget.*generator|generator.*excluded' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-01-AC05",
+          "description": "Primary record with null estimatedCostUsd → that record is excluded AND incompleteData is true (NFR-C09 — never silent $0)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'incompleteData|null.*cost' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-01-AC06",
+          "description": "checkBudget never throws when warningLevel is 'exceeded' — the brief is returned and the coordinator continues (NFR-C04)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'NFR-C04|advisory.*not.*kill|never.*throw.*budget' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-01-AC07",
+          "description": "checkBudget is pure: takes no RunContext, no logger; verified by signature inspection",
+          "command": "! grep -nE 'export.*function checkBudget\\([^)]*RunContext' server/lib/coordinator.ts"
+        }
+      ],
+      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+    },
+    {
+      "id": "PH02-US-02",
+      "title": "Implement checkTimeBudget as a pure wall-clock advisory (REQ-07)",
+      "description": "Adds checkTimeBudget(startTimeMs: number | undefined, maxTimeMs: number | undefined): {elapsedMs, maxTimeMs, warningLevel} to server/lib/coordinator.ts. warningLevel ∈ {'none', 'approaching', 'exceeded', 'unknown'}. At ≥80% of maxTimeMs, 'approaching'; at ≥100%, 'exceeded'. When startTimeMs is missing/undefined, elapsedMs is null and warningLevel is 'unknown' (NOT 'none' — the distinction between 'we don't know' and 'no limit set' is preserved). When maxTimeMs is missing/undefined, warningLevel is 'none' (no-op). Pure computation — never throws, never mutates external state. Documented known limitation: Date.now() is susceptible to clock jumps (NTP, DST, manual adjustment); v1 does not address this.",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH02-US-02-AC01",
+          "description": "checkTimeBudget exported with the (startTimeMs, maxTimeMs) signature",
+          "command": "grep -nE 'export.*function checkTimeBudget\\(startTimeMs' server/lib/coordinator.ts"
+        },
+        {
+          "id": "PH02-US-02-AC02",
+          "description": "At 80% elapsed → warningLevel 'approaching'; at 100% → 'exceeded'",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'checkTimeBudget.*threshold|time.*80|time.*100' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-02-AC03",
+          "description": "Missing startTimeMs → elapsedMs null, warningLevel 'unknown' (NOT 'none')",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'startTimeMs.*missing|time.*unknown' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-02-AC04",
+          "description": "Missing maxTimeMs → warningLevel 'none' (no-op)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'maxTimeMs.*missing|time.*no-op' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-02-AC05",
+          "description": "checkTimeBudget never throws — pure computation",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'checkTimeBudget.*never.*throw|checkTimeBudget.*pure' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+    },
+    {
+      "id": "PH02-US-03",
+      "title": "INCONCLUSIVE flows through retry counter; transitive dep-failed propagation only on terminal-failed roots (REQ-08)",
+      "description": "Verifies and (where missing) wires the v1.1 INCONCLUSIVE handling: an INCONCLUSIVE eval increments retryCount the same way FAIL does (REQ-04 already counts both). The story re-enters ready-for-retry if retryCount < 3 with priorEvalReport populated, or becomes failed if retryCount >= 3. Story-level isolation is preserved (unrelated ready/ready-for-retry/pending stories remain dispatchable), but phase-brief-level forward-progress is explicitly NOT preserved (any failed or dep-failed → brief.status === 'needs-replan' per REQ-05 rule 3 — this is the explicit v1.1 behavior change). Transitive dep-failed propagation applies ONLY when the root story becomes terminally failed; a dep is NOT dep-failed merely because an upstream is ready-for-retry (it waits as 'pending' until the retry resolves PASS or exhausts). Flaky-eval compensation is explicitly rejected — the remediation is to fix the eval tool upstream (§7).",
+      "dependencies": ["PH02-US-01"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH02-US-03-AC01",
+          "description": "INCONCLUSIVE record + retryCount < 3 → status 'ready-for-retry' (NOT a terminal blocking state)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'INCONCLUSIVE.*ready-for-retry|INCONCLUSIVE.*retry' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-03-AC02",
+          "description": "Mixed budget exhaustion: 1 FAIL + 1 INCONCLUSIVE + 1 FAIL → retryCount === 3, status 'failed'",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'mixed.*FAIL.*INCONCLUSIVE|exhaust.*mixed' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-03-AC03",
+          "description": "Three consecutive INCONCLUSIVE records → retryCount === 3, status 'failed' (retry cap is about budget, not fault attribution)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'three.*INCONCLUSIVE|INCONCLUSIVE.*exhaust' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-03-AC04",
+          "description": "Story whose dependency is ready-for-retry remains 'pending' (NOT 'dep-failed' — dep-failed only triggers on terminal failed roots)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'dep.*ready-for-retry.*pending|ready-for-retry.*not.*dep-failed' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-03-AC05",
+          "description": "When every story is failed or dep-failed → brief.status 'needs-replan' (REQ-05 rule 3 instance)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'all.failed.*needs-replan|needs-replan.*all' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+    },
+    {
+      "id": "PH02-US-04",
+      "title": "Implement recoverState as a pure function over the reconciled view (REQ-09, NFR-C03)",
+      "description": "Adds recoverState(plan, projectPath) to server/lib/coordinator.ts. Pure function — reads readRunRecords(), filters source === 'primary', filters by storyId match against current-plan stories, returns the reconstructed status map. Composition: reconcileState (PH-03 US-05) runs FIRST inside assessPhase (before recoverState) — keep orphan-filter and new-story-marking logic OUT of recoverState. Operates on the already-reconciled view: most-recent PASS → done; otherwise re-derive retryCount from non-PASS primary records and let the 6-state precedence in assessPhase assign the final status. Populate priorEvalReport from the most recent non-PASS record's embedded evalReport when status is ready-for-retry or failed. no-record → pass-through, no-storyId → skip. Running assessPhase twice in a row on the same inputs (no intervening writes) returns structurally identical CoordinateResult objects.",
+      "dependencies": ["PH02-US-03"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH02-US-04-AC01",
+          "description": "recoverState exported and pure (no RunContext parameter, no logger parameter)",
+          "command": "grep -nE 'export.*function recoverState' server/lib/coordinator.ts && ! grep -nE 'export.*function recoverState\\([^)]*RunContext' server/lib/coordinator.ts"
+        },
+        {
+          "id": "PH02-US-04-AC02",
+          "description": "Crash-safe re-run: writing a partial set of RunRecords (simulated mid-run kill) and invoking assessPhase returns a CoordinateResult structurally equal to a run where all records were written atomically",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'crash.safe|crash-safe|recoverState.*idempotent' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-04-AC03",
+          "description": "Idempotency: assessPhase called twice in a row on same inputs returns deeply-equal CoordinateResults (excluding timestamps)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'idempotent|twice.*identical' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-04-AC04",
+          "description": "no-storyId record → skipped without throwing",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'no.storyId|missing.storyId' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-04-AC05",
+          "description": "priorEvalReport on a 'failed' story is populated from the most recent non-PASS record's embedded evalReport",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'priorEvalReport.*failed|failed.*priorEvalReport' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH02-US-04-AC06",
+          "description": "There is no persistent coordinator state file on disk — verified by listing .forge/ subdirs after a run",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'no.persistent.state|stateless' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+    }
+  ]
+}

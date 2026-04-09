@@ -1,0 +1,234 @@
+{
+  "schemaVersion": "3.0.0",
+  "documentTier": "phase",
+  "phaseId": "PH-04",
+  "masterPlanPath": ".ai-workspace/plans/forge-coordinate-master-plan.json",
+  "prdPath": "docs/forge-coordinate-prd.md",
+  "stories": [
+    {
+      "id": "PH04-US-01",
+      "title": "Expand coordinateInputSchema and wire handleCoordinate to assessPhase (REQ-14)",
+      "description": "Expands the 16-line stub at server/tools/coordinate.ts. coordinateInputSchema includes: planPath: string (required), phaseId: string (required in v1), masterPlanPath?, coordinateMode?: 'advisory' | 'autonomous' (default 'advisory'), budgetUsd?: number, maxTimeMs?: number, startTimeMs?: number (epoch ms anchor for time budget), currentPlanStartTimeMs?: number, projectPath?, prdContent?, replanningNotes?: ReplanningNote[], haltClearedByHuman?: boolean. Per REQ-14 v1.1 the schema deliberately does NOT expose maxRetries — the cap of 3 is hardcoded in REQ-04 and §7 documents the rationale. Zod schema rejects malformed inputs (wrong types, unknown enum values, negative budgetUsd or maxTimeMs) with a structured MCP error response (isError: true). Calling forge_coordinate with non-existent or unreadable planPath returns a structured error response, not an uncaught exception. handleCoordinate wires the input to assessPhase and returns a serialized PhaseTransitionBrief in the MCP content array. Halt-hard non-latching AC: a halted phase + injected failure → status flips to 'needs-replan' on next call (no stale latch).",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US-01-AC01",
+          "description": "coordinateInputSchema declares planPath (required) and phaseId (required) at minimum",
+          "command": "grep -nE 'planPath' server/tools/coordinate.ts && grep -nE 'phaseId' server/tools/coordinate.ts"
+        },
+        {
+          "id": "PH04-US-01-AC02",
+          "description": "Schema declares haltClearedByHuman optional boolean",
+          "command": "grep -nE 'haltClearedByHuman' server/tools/coordinate.ts"
+        },
+        {
+          "id": "PH04-US-01-AC03",
+          "description": "Schema declares startTimeMs and currentPlanStartTimeMs optional numbers",
+          "command": "grep -nE 'startTimeMs' server/tools/coordinate.ts && grep -nE 'currentPlanStartTimeMs' server/tools/coordinate.ts"
+        },
+        {
+          "id": "PH04-US-01-AC04",
+          "description": "Schema does NOT expose maxRetries (intentional omission per REQ-14 v1.1 + §7)",
+          "command": "! grep -nE 'maxRetries' server/tools/coordinate.ts"
+        },
+        {
+          "id": "PH04-US-01-AC05",
+          "description": "Negative budgetUsd is rejected with structured error response (isError: true)",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'negative.*budget|budget.*negative' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01-AC06",
+          "description": "Non-existent planPath returns isError: true (NOT uncaught exception)",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'planPath.*not.*exist|missing.*planPath' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01-AC07",
+          "description": "Calling forge_coordinate({planPath, phaseId}) on a valid v3.0.0 ExecutionPlan returns a brief without errors",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'valid.*plan.*returns.*brief|happy.*path.*MCP' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01-AC08",
+          "description": "Halt-hard non-latching: halted phase + injected failure on next call → status 'needs-replan' (NOT 'halted')",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'halt-hard.*non-latching|non-latching' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01-AC09",
+          "description": "Tool registered in server/index.ts with description reflecting 4th forge primitive role",
+          "command": "grep -nE 'forge_coordinate' server/index.ts"
+        }
+      ],
+      "affectedPaths": ["server/tools/coordinate.ts", "server/tools/coordinate.test.ts", "server/index.ts"]
+    },
+    {
+      "id": "PH04-US-01b",
+      "title": "Implement loadCoordinateConfig with 4-field schema, per-field provenance, and writeRunRecord:false warning chain (REQ-15)",
+      "description": "Adds loadCoordinateConfig(projectPath) to server/lib/coordinator.ts. Reads .forge/coordinate.config.json with a single fs.readFile call (not walked upward); missing file → empty config (not an error). Schema has exactly four optional fields: storyOrdering ('topological' | 'depth-first' | 'small-first', default 'topological'), phaseBoundaryBehavior ('auto-advance' | 'halt-and-notify' | 'halt-hard', default 'auto-advance'), briefVerbosity ('concise' | 'detailed', default 'concise'), and observability ({logLevel, writeAuditLog, writeRunRecord}). Zod schema uses .strict() at the top level — unknown top-level fields cause a P45 console.error warning naming each unknown field, then fall back to defaults for the whole config (resource-cap fields budgetUsd / maxTimeMs / escalationThresholds named explicitly in the warning since they are MCP input args only). MCP input args override config file fields per-field; brief.configSource records provenance ('file' | 'args' | 'default') for each field. Corrupt JSON, schema-invalid values, EISDIR, and mid-write races degrade gracefully via console.error per P44, never throw. When observability.writeRunRecord === false, the loader emits a P45 warning AND brief.recommendation is prefixed with 'WARNING: crash recovery disabled.' (NFR-C03 opt-out chain). Integration points: storyOrdering reorders topoSort output; phaseBoundaryBehavior branches the brief phase-complete path; briefVerbosity shapes recommendation; observability.* gates console/audit/run-record writes.",
+      "dependencies": ["PH04-US-01"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US-01b-AC01",
+          "description": "loadCoordinateConfig exported from coordinator.ts",
+          "command": "grep -nE 'export.*function loadCoordinateConfig' server/lib/coordinator.ts"
+        },
+        {
+          "id": "PH04-US-01b-AC02",
+          "description": "Test (a): no config file → defaults applied + empty configSource (or all 'default')",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'config.*no file|loadCoordinateConfig.*missing' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01b-AC03",
+          "description": "Test (b): full config file → all 4 fields applied + configSource shows 'file' for each",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'config.*full|loadCoordinateConfig.*all fields' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01b-AC04",
+          "description": "Test (c): MCP args override some config fields → mixed provenance ('file' for some, 'args' for others)",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'config.*override|args.*override.*config' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01b-AC05",
+          "description": "Test (d): corrupt JSON → graceful fallback to defaults, console.error called, never throws",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'config.*corrupt|loadCoordinateConfig.*corrupt' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01b-AC06",
+          "description": "Test (e): schema-invalid value (e.g. storyOrdering: 'random') → field skipped with warning, valid fields still applied",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'config.*schema-invalid|storyOrdering.*random' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01b-AC07",
+          "description": "Test (f): mid-write race (file exists but partially written) → graceful fallback",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'config.*mid-write|race.*config' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01b-AC08",
+          "description": "Test (g) behavioral: depth-first storyOrdering on a 6-story 2-chain plan finishes one chain before crossing",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'depth-first.*chain|storyOrdering.*depth-first' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01b-AC09",
+          "description": "writeRunRecord: false → P45 console.error warning + brief.recommendation prefixed with 'WARNING: crash recovery disabled.'",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'writeRunRecord.*false|crash recovery disabled' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-01b-AC10",
+          "description": "Resource-cap field budgetUsd in the config file → rejected by .strict() with named-field warning",
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'config.*budgetUsd.*reject|strict.*budgetUsd' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+    },
+    {
+      "id": "PH04-US-02",
+      "title": "Advisory-mode checkpoint gates: brief IS the checkpoint (REQ-16)",
+      "description": "Per REQ-16, in advisory mode (coordinateMode === 'advisory') the brief.status field and recommendation string ARE the complete checkpoint signal. No separate checkpointRequired field is emitted. No separate pause-and-wait call. No coordinator-local gate state. Resuming from a checkpoint is a plain re-invocation of forge_coordinate with the same inputs — no resume token, no stored gate state. Autonomous mode (deferred to v2) may emit checkpointRequired: true; v1 never emits this. Determinism: running forge_coordinate twice in a row with identical inputs produces briefs whose non-timestamp fields are structurally equal (NFR-C02).",
+      "dependencies": ["PH04-US-01b"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US-02-AC01",
+          "description": "Advisory mode brief never emits checkpointRequired field",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'advisory.*no checkpointRequired|checkpointRequired.*absent' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-02-AC02",
+          "description": "Resume = plain re-invocation: calling forge_coordinate twice with same inputs returns structurally equal briefs (excluding timestamps)",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'resume.*re-invocation|determinism.*twice' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-02-AC03",
+          "description": "Coordinator does NOT write any gate state file to disk (verified by directory listing in test)",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'no gate.*state|stateless.*advisory' 2>&1 | grep -q 'passed'"
+        }
+      ],
+      "affectedPaths": ["server/tools/coordinate.ts", "server/tools/coordinate.test.ts"]
+    },
+    {
+      "id": "PH04-US-03",
+      "title": "Integration tests including configSource end-to-end and halt-hard 3-step clearing state machine (NFR-C05, NFR-C07, NFR-C10)",
+      "description": "Test-scaffolding story (no REQ mapping per PRD §11). Adds 17-22 integration tests at server/tools/coordinate.test.ts covering: multi-story dispatch, budget enforcement (including incomplete cost data), time enforcement (including missing startTimeMs), crash recovery, INCONCLUSIVE routed to ready-for-retry, advisory brief, error handling, plan mutation reconciliation, corrupt run records, empty-dependency plans, all-stories-done, retry-exhausted → needs-replan, dep-failed transitive propagation, dep-failed dominates failed, 3-FAIL-then-PASS → done, mixed failed+ready → needs-replan, LAST RETRY substring, two-root dep-failed-chain, failed-replanned → new pending, dep-failed-upstream-replanned → downstream-pending, dangling-dependency. Also: (1) configSource end-to-end fixture with .forge/coordinate.config.json setting storyOrdering: 'depth-first' AND briefVerbosity: 'detailed', call with arg briefVerbosity: 'concise' → asserts brief.configSource shows mixed file/args provenance. (2) Halt-hard 3-step clearing state machine: fixture config phaseBoundaryBehavior: 'halt-hard'. Call 1 at phase completion → status 'halted' + synthetic blocking note. Call 2 without flag → still halted (idempotent). Call 3 with haltClearedByHuman: true → status 'complete', note absent. NFR-C10 byte-identity verified via golden-file comparison on 3+ fixtures (no config file vs empty {} config) excluding configSource.",
+      "dependencies": ["PH04-US-02"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US-03-AC01",
+          "description": "coordinate.test.ts has at least 17 passing integration tests",
+          "command": "npx vitest run server/tools/coordinate.test.ts 2>&1 | grep -qE 'Tests[[:space:]]+1[7-9]|Tests[[:space:]]+[2-9][0-9]'"
+        },
+        {
+          "id": "PH04-US-03-AC02",
+          "description": "configSource end-to-end test asserts mixed file/args provenance",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'configSource.*end-to-end|configSource.*provenance' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-03-AC03",
+          "description": "Halt-hard 3-step clearing state machine: call 1 halted, call 2 still halted, call 3 with flag → complete",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'halt-hard.*3-step|halt-hard.*clearing.*state' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-03-AC04",
+          "description": "NFR-C10 golden-file byte-identity: full test suite once with no config and once with empty {} config produces byte-identical brief outputs (excluding configSource)",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'NFR-C10|golden.*byte-identical|empty.*config.*identical' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-03-AC05",
+          "description": "NFR-C05 Windows compatibility: full coordinator test suite passes on windows-latest CI (verified by CI matrix)",
+          "command": "grep -nE 'windows-latest' .github/workflows/*.yml"
+        },
+        {
+          "id": "PH04-US-03-AC06",
+          "description": "NFR-C01 advisory mode $0 across the full file set",
+          "command": "test -z \"$(grep -n 'callClaude\\|trackedCallClaude' server/lib/coordinator.ts server/lib/topo-sort.ts server/lib/run-reader.ts server/lib/run-record.ts server/validation/execution-plan.ts server/types/coordinate-result.ts server/tools/coordinate.ts 2>/dev/null)\" && echo EMPTY-OK | grep -q EMPTY-OK"
+        },
+        {
+          "id": "PH04-US-03-AC07",
+          "description": "NFR-C07 schema 3.0.0 compatibility: assessPhase accepts all existing v3.0.0 fixtures from prior phases without mutation",
+          "command": "npx vitest run server/tools/coordinate.test.ts -t 'NFR-C07|schema.*3.0.0.*compatible' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-03-AC08",
+          "description": "Full test suite green",
+          "command": "npx vitest run 2>&1 | grep -q 'passed' && ! grep -q 'failed'"
+        }
+      ],
+      "affectedPaths": ["server/tools/coordinate.test.ts", ".github/workflows/"]
+    },
+    {
+      "id": "PH04-US-04",
+      "title": "Dogfood forge_coordinate against a multi-story plan and write the dogfood report",
+      "description": "Test-scaffolding story (no REQ mapping per PRD §11). Runs forge_coordinate against a multi-story execution plan (e.g. an existing forge-generate phase plan or a synthesized 6+ story plan with dependencies and prior RunRecords) and verifies: (1) topological ordering is correct; (2) status classification matches expectations across the 6 states; (3) at least one ready-for-retry path is exercised by injecting a FAIL record; (4) at least one dep-failed propagation is exercised by injecting a 3-FAIL terminal-failed root; (5) configSource is populated; (6) no crashes. Writes the dogfood report at .ai-workspace/plans/forge-coordinate-dogfood-report.md with a per-story status table, a brief.recommendation excerpt, the configSource map, and a 'gaps observed' section listing any spec discrepancies for forge-plan to address before S4.",
+      "dependencies": ["PH04-US-03"],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US-04-AC01",
+          "description": "Dogfood report exists at .ai-workspace/plans/forge-coordinate-dogfood-report.md",
+          "command": "test -f .ai-workspace/plans/forge-coordinate-dogfood-report.md"
+        },
+        {
+          "id": "PH04-US-04-AC02",
+          "description": "Dogfood report contains a per-story status table covering at least 6 stories",
+          "command": "grep -nE '\\| (done|ready|ready-for-retry|failed|pending|dep-failed) \\|' .ai-workspace/plans/forge-coordinate-dogfood-report.md"
+        },
+        {
+          "id": "PH04-US-04-AC03",
+          "description": "Dogfood report includes a brief.recommendation excerpt",
+          "command": "grep -nE 'recommendation' .ai-workspace/plans/forge-coordinate-dogfood-report.md"
+        },
+        {
+          "id": "PH04-US-04-AC04",
+          "description": "Dogfood report includes the configSource map",
+          "command": "grep -nE 'configSource' .ai-workspace/plans/forge-coordinate-dogfood-report.md"
+        },
+        {
+          "id": "PH04-US-04-AC05",
+          "description": "Dogfood report has a 'Gaps observed' section (may be empty, but the section header exists)",
+          "command": "grep -nE 'Gaps observed|## Gaps' .ai-workspace/plans/forge-coordinate-dogfood-report.md"
+        },
+        {
+          "id": "PH04-US-04-AC06",
+          "description": "Dogfood run did not crash (forge_coordinate returned a brief, recorded in the report)",
+          "command": "grep -nE 'no crash|exited 0|returned brief' .ai-workspace/plans/forge-coordinate-dogfood-report.md"
+        }
+      ],
+      "affectedPaths": [".ai-workspace/plans/forge-coordinate-dogfood-report.md"]
+    }
+  ]
+}

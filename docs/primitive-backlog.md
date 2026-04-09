@@ -129,8 +129,8 @@
 ### In Design Doc — To Be Implemented
 - GAN loop: implement → evaluate → fix → evaluate, max 3 rounds (design doc lines 280-310)
 - 8 production-grade GAN elements (core logic done in PH-01; remaining: git branching, command blocklist, two-tier feedback wiring):
-  3. Two-tier feedback: fast (hooks exit-code-2) + slow (/evaluate subagent)
-  4. Hash-based no-op detection — **logic done** (PH-01), git integration pending (PH-04)
+  1. Two-tier feedback: fast (hooks exit-code-2) + slow (/evaluate subagent)
+  2. Hash-based no-op detection — **logic done** (PH-01), git integration pending (PH-04)
 - Per-story git branches (feat/{story-id}), squash-merge on finalization
 - Git-native rollback on fail
 - Command blocklist + path-scoped writes (design doc line 290)

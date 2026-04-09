@@ -536,16 +536,19 @@ async function readContextFiles(
 ): Promise<string[] | undefined> {
   if (!contextFiles || contextFiles.length === 0) return undefined;
 
-  const contents: string[] = [];
-  for (const filePath of contextFiles) {
-    try {
-      const content = await readFile(filePath, "utf-8");
-      contents.push(content);
-    } catch {
-      console.warn(`forge_generate: context file not found, skipping: ${filePath}`);
-    }
-  }
+  // Read in parallel — order preserved via Promise.all; failures yield null and are filtered out.
+  const results = await Promise.all(
+    contextFiles.map(async (filePath) => {
+      try {
+        return await readFile(filePath, "utf-8");
+      } catch {
+        console.warn(`forge_generate: context file not found, skipping: ${filePath}`);
+        return null;
+      }
+    }),
+  );
 
+  const contents = results.filter((c): c is string => c !== null);
   return contents.length > 0 ? contents : undefined;
 }
 

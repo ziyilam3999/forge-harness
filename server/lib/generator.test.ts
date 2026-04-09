@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -534,20 +534,21 @@ describe("RunContext wiring for forge_generate", () => {
     }
   });
 
-  it("audit entry written with the action taken", async () => {
+  it("audit file created at .forge/audit/forge_generate-*.jsonl with entry for action taken", async () => {
     const result = await assembleGenerateResultWithContext({
       storyId: "US-01",
       planJson: VALID_PLAN_JSON,
       projectPath: tempDir,
     });
-    // Check that an audit file was created
-    const { readdir } = await import("node:fs/promises");
+    // Verify file created at the expected path with the expected naming
     const auditDir = join(tempDir, ".forge", "audit");
     const files = await readdir(auditDir);
-    const auditFile = files.find((f) => f.startsWith("forge_generate-"));
+    const auditFile = files.find(
+      (f) => f.startsWith("forge_generate-") && f.endsWith(".jsonl"),
+    );
     expect(auditFile).toBeDefined();
 
-    // Read audit file and verify entry
+    // Verify the entry content matches the action taken
     const content = await readFile(join(auditDir, auditFile!), "utf-8");
     const entry = JSON.parse(content.trim().split("\n")[0]);
     expect(entry.decision).toBe(result.action);
@@ -566,21 +567,6 @@ describe("RunContext wiring for forge_generate", () => {
     expect(result.action).toBe("implement");
     // costEstimate is computed separately, not via CostTracker
     // CostTracker is wired but idle — proves $0 recording
-  });
-
-  it("audit file created at .forge/audit/forge_generate-*.jsonl", async () => {
-    await assembleGenerateResultWithContext({
-      storyId: "US-01",
-      planJson: VALID_PLAN_JSON,
-      projectPath: tempDir,
-    });
-    const { readdir } = await import("node:fs/promises");
-    const auditDir = join(tempDir, ".forge", "audit");
-    const files = await readdir(auditDir);
-    const auditFiles = files.filter(
-      (f) => f.startsWith("forge_generate-") && f.endsWith(".jsonl"),
-    );
-    expect(auditFiles.length).toBeGreaterThanOrEqual(1);
   });
 });
 

@@ -68,7 +68,7 @@ export class AuditLog {
       if (files.length >= FILE_COUNT_WARNING_THRESHOLD) {
         console.error(
           `forge: audit directory has ${files.length} files (~${Math.round(files.length * 2)}KB). ` +
-          `Consider archiving old files: rm .forge/audit/*-2025-*`,
+          `Consider archiving old files from .forge/audit/`,
         );
       }
     } catch {

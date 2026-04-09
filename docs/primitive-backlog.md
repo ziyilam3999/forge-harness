@@ -390,3 +390,31 @@ All rejected fields are documented here with the rationale that killed them — 
 **Config fields in advisory-mode coordinate should shape output, not gate execution.** If a proposal caps a resource, defends against a failure mode, or modifies state, it doesn't belong in the config file — it belongs either in MCP input args (per-call control) or in a separate escalation primitive (autonomous mode v2). This principle held for all 5 rejected fields and can be applied to future proposals to avoid re-litigation.
 
 **Full implementation spec:** `.ai-workspace/plans/2026-04-09-forge-coordinate-implementation.md` PH-04 US-01.5 and the `Config File Schema` reference section.
+
+## Build/Release Rigor
+
+### Local-dist freshness incident + postinstall decision (2026-04-09)
+
+**Incident:** S3 dogfood halted at PH01-US-00a because a client Claude Code session calling `forge_generate` received the Phase-0 `"forge_generate for \"${storyId}\": not yet implemented. Phase 3 required."` stub string, despite `server/tools/generate.ts` being fully implemented and unit-tested for weeks. Expanding the audit to the other three tools showed `dist/tools/generate.js` was a 14-line Phase-0 stub while `server/tools/generate.ts` was a ~200-line real handler using `assembleGenerateResultWithContext`. `dist/tools/coordinate.js` also returned a ghost string, but in that case the source (`server/tools/coordinate.ts`) is still a legitimate pre-PH-01 stub — the dist was not stale, it was correctly reflecting an intentionally unimplemented handler.
+
+**Root cause:** `dist/` has been gitignored since the initial commit — it was **never** checked into git at any point. Each contributor builds dist/ locally via `npm run build`. Nothing forced that build to stay fresh when `server/tools/*.ts` was edited. Between the last local `tsc` run (~Apr 6) and the S3 kickoff (Apr 9), `server/tools/generate.ts` had been rewritten end-to-end, but no `npm run build` was run on the contributor's machine, so the MCP client session at Apr 9 still loaded the stale Phase-0 stub from disk. Critically, **none of the existing unit tests caught this** because every test in `server/**/*.test.ts` imports the TypeScript source directly via vitest's TS transformer — they never boot the compiled `dist/index.js` through the MCP stdio transport. The failure mode was structurally invisible to the test suite.
+
+**What the original "never check in build artifacts" rule would not have prevented:** this incident. That rule was already satisfied; the bug still happened. The real missing invariant was: **any artifact the MCP server loads at startup must be regenerated automatically on every `npm install`, and must be exercised through the real transport boundary at least once in CI before being trusted.**
+
+**Fix applied in PR `fix/dist-rebuild-and-postinstall`:**
+
+1. **`package.json postinstall` now chains `npm run build`** — every `npm install` rebuilds dist/ from current source. Any contributor who pulls master and runs `npm install` immediately has a fresh dist/; no separate build step to forget. The existing `scripts/install-hooks.cjs` call is preserved via `&&` chaining.
+2. **New MCP stdio smoke test at `server/smoke/mcp-surface.test.ts`** — spawns `node dist/index.js` as a subprocess, connects via `@modelcontextprotocol/sdk/client/stdio.js`, calls `listTools()` and `callTool()` on all four primitives. Asserts every response body is non-empty and does NOT match `/not yet implemented/i`, with a documented exemption for `forge_coordinate` (source is still a stub until PH-01 ships). Also asserts `forge_generate`'s listTools schema has ≥5 input properties — the stub schema had 1 (`storyId`), the real schema has 14, so schema-level drift is caught even before callTool runs. Runtime ~0.7s.
+3. **New CI step `dist/ drift guard`** — a grep-based belt-and-suspenders check that fails the build if any `dist/**/*.js` file contains `"not yet implemented"` outside the two allowed paths (`dist/tools/coordinate.js` and `dist/smoke/`). Redundant with the vitest smoke test on the happy path, but catches the failure mode where the smoke test is skipped, disabled, or broken. Runs on both `ubuntu-latest` and `windows-latest` in the existing matrix.
+
+**Design rule (ratified by this incident):** Every primitive must be exercised through its real transport boundary in CI before being considered shipped. Vitest handler tests that import `server/tools/*.ts` directly are **necessary but not sufficient** — they cannot see stdio framing bugs, JSON-RPC serialization drift, `.mcp.json` wiring mistakes, or stale compiled artifacts. When a new primitive is added (or the coordinator flips from stub to real in PH-01), its smoke-test entry must be added / updated in the same PR. The CI drift guard and the vitest smoke test together enforce this mechanically.
+
+**Verification dance after this PR merges:** The user must run `git pull && npm install` on their working copy (not just `git pull`) — the `npm install` is what triggers the new `postinstall` hook that regenerates dist/. After that, restart the Claude Code session (MCP servers load once at session start), then make a throwaway `forge_generate({storyId: "SMOKE-TEST"})` call to confirm the running MCP process is serving the rebuilt dist/. Only after that throwaway call returns a non-stub response should S3 work resume.
+
+**Lesson for future primitives:** A test suite that is 100% green while the shipped artifact is a 14-line stub is a canonical F46-class "loud data, silent dashboard" failure. The fix is not more tests inside the same layer — it's a test at the next layer out. For an MCP server, that layer is the stdio transport boundary. For a CLI, it would be the process-spawn boundary. For a library, it would be the published package. **Dogfood-from-S1 is the enforcement mechanism** — if every primitive's S1 session must make a real client call to its own MCP tool, incidents like this one surface in hours instead of days.
+
+**Related:**
+- `server/smoke/mcp-surface.test.ts` — the smoke test
+- `.github/workflows/ci.yml` — drift guard + named steps
+- `package.json` — postinstall chain
+- 2026-04-09 S3 mailbox thread (`forge-plan ↔ lucky-iris` on S3 blocker) — full incident trail

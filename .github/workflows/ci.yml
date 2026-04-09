@@ -25,9 +25,38 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
-      - run: npm ci --ignore-scripts
-      - run: npm run build
-      - run: npm test
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build (tsc compiles server/ → dist/)
+        run: npm run build
+
+      - name: dist/ drift guard (no ghost stubs outside PH-01 coordinator)
+        shell: bash
+        run: |
+          if [ ! -f dist/index.js ]; then
+            echo "ERROR: dist/index.js is missing after npm run build"
+            exit 1
+          fi
+          # The forge_coordinate source is a legitimate pre-PH-01 stub, and
+          # the smoke test source itself contains the ghost-pattern regex.
+          # Everything else must be free of "not yet implemented".
+          GHOSTS=$(grep -rl "not yet implemented" dist --include="*.js" 2>/dev/null \
+            | grep -v "^dist/tools/coordinate\.js$" \
+            | grep -v "^dist/smoke/" || true)
+          if [ -n "$GHOSTS" ]; then
+            echo "ERROR: stub strings found in non-exempt dist/ files:"
+            echo "$GHOSTS"
+            echo ""
+            echo "This means dist/ was built from a stale server/tools/*.ts,"
+            echo "or a new stub handler was added without a smoke-test exemption."
+            echo "See docs/primitive-backlog.md §Build/Release Rigor."
+            exit 1
+          fi
+          echo "dist/ drift guard: PASS (no unexpected ghost strings)"
+
+      - name: Tests (unit + MCP smoke, vitest discovers server/**/*.test.ts)
+        run: npm test
 
       - name: Validate commit message
         if: github.event_name == 'push'

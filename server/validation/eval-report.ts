@@ -1,9 +1,6 @@
 import type { EvalReport } from "../types/eval-report.js";
-
-export interface ValidationResult {
-  valid: boolean;
-  errors?: string[];
-}
+import type { ValidationResult } from "./master-plan.js";
+export type { ValidationResult };
 
 const VALID_VERDICTS = new Set(["PASS", "FAIL", "INCONCLUSIVE"]);
 const VALID_STATUSES = new Set(["PASS", "FAIL", "SKIPPED", "INCONCLUSIVE"]);

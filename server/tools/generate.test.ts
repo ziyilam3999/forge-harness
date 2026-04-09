@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const projectRoot = resolve(__dirname, "..", "..");
 import { handleGenerate } from "./generate.js";
 import type { ExecutionPlan } from "../types/execution-plan.js";
 import type { EvalReport } from "../types/eval-report.js";
@@ -220,7 +225,7 @@ describe("integration: full init → fix → escalate cycle", () => {
 describe("NFR-01: zero callClaude in forge_generate dependency chain", () => {
   it("generate.ts does not import callClaude", async () => {
     const content = await readFile(
-      join(process.cwd(), "server", "tools", "generate.ts"),
+      join(projectRoot, "server", "tools", "generate.ts"),
       "utf-8",
     );
     expect(content).not.toContain("callClaude");
@@ -228,7 +233,7 @@ describe("NFR-01: zero callClaude in forge_generate dependency chain", () => {
 
   it("generator.ts does not import callClaude", async () => {
     const content = await readFile(
-      join(process.cwd(), "server", "lib", "generator.ts"),
+      join(projectRoot, "server", "lib", "generator.ts"),
       "utf-8",
     );
     expect(content).not.toContain("callClaude");
@@ -236,7 +241,7 @@ describe("NFR-01: zero callClaude in forge_generate dependency chain", () => {
 
   it("plan-loader.ts does not import callClaude", async () => {
     const content = await readFile(
-      join(process.cwd(), "server", "lib", "plan-loader.ts"),
+      join(projectRoot, "server", "lib", "plan-loader.ts"),
       "utf-8",
     );
     expect(content).not.toContain("callClaude");
@@ -244,7 +249,7 @@ describe("NFR-01: zero callClaude in forge_generate dependency chain", () => {
 
   it("generate-result.ts does not import callClaude", async () => {
     const content = await readFile(
-      join(process.cwd(), "server", "types", "generate-result.ts"),
+      join(projectRoot, "server", "types", "generate-result.ts"),
       "utf-8",
     );
     expect(content).not.toContain("callClaude");

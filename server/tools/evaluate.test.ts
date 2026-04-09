@@ -17,10 +17,18 @@ vi.mock("../lib/codebase-scan.js", () => ({
   scanCodebase: vi.fn(async () => "## Directory Structure\n```\nserver/\nsrc/\n```"),
 }));
 
-// Mock run-record — don't write real files during tests
-vi.mock("../lib/run-record.js", () => ({
-  writeRunRecord: vi.fn(async () => {}),
-}));
+// Mock run-record — don't write real files during tests, but keep
+// canonicalizeEvalReport as the real implementation so the handler's
+// deterministic-serialization path is exercised (PH01-US-00a AC08).
+vi.mock("../lib/run-record.js", async () => {
+  const actual = await vi.importActual<typeof import("../lib/run-record.js")>(
+    "../lib/run-record.js",
+  );
+  return {
+    writeRunRecord: vi.fn(async () => {}),
+    canonicalizeEvalReport: actual.canonicalizeEvalReport,
+  };
+});
 
 // Mock run-context — trackedCallClaude delegates to the mocked callClaude
 vi.mock("../lib/run-context.js", async () => {
@@ -275,6 +283,94 @@ describe("handleEvaluate — story mode", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("storyId is required");
+  });
+});
+
+// ── PH01-US-00a: handleStoryEval RunContext + evalReport RunRecord ─────
+
+describe("handleStoryEval RunContext infra (PH01-US-00a)", () => {
+  it("writes a RunRecord whose evalReport is defined and matches input", async () => {
+    const inputReport = makeEvalReport({
+      verdict: "FAIL",
+      criteria: [
+        { id: "AC-02", status: "PASS", evidence: "two" },
+        { id: "AC-01", status: "FAIL", evidence: "one" },
+      ],
+    });
+    mockedEvaluateStory.mockResolvedValueOnce(inputReport);
+
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const [projectPath, record] = mockedWriteRunRecord.mock.calls[0];
+    expect(projectPath).toBe("/some/path");
+    expect(record.tool).toBe("forge_evaluate");
+    expect(record.storyId).toBe("US-01");
+    expect(record.evalVerdict).toBe("FAIL");
+    expect(record.evalReport).toBeDefined();
+    expect(record.evalReport!.criteria).toHaveLength(2);
+    // Every criterion from the input is present in the written record
+    const writtenIds = record.evalReport!.criteria.map((c) => c.id).sort();
+    expect(writtenIds).toEqual(["AC-01", "AC-02"]);
+    // estimatedCostUsd is populated (0 for story mode — no trackedCallClaude)
+    expect(record.metrics.estimatedCostUsd).toBeDefined();
+  });
+
+  it("does not write a RunRecord when projectPath is omitted", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport());
+
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      // no projectPath
+    });
+
+    expect(mockedWriteRunRecord).not.toHaveBeenCalled();
+  });
+
+  it("deterministic serialization: same EvalReport in different input order produces byte-identical evalReport field", async () => {
+    const criterionA = { id: "AC-01", status: "FAIL" as const, evidence: "one" };
+    const criterionB = { id: "AC-02", status: "PASS" as const, evidence: "two" };
+    const criterionC = { id: "AC-03", status: "PASS" as const, evidence: "three" };
+
+    mockedEvaluateStory
+      .mockResolvedValueOnce(
+        makeEvalReport({ criteria: [criterionA, criterionB, criterionC] }),
+      )
+      .mockResolvedValueOnce(
+        makeEvalReport({ criteria: [criterionC, criterionA, criterionB] }),
+      );
+
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(2);
+    const record1 = mockedWriteRunRecord.mock.calls[0][1];
+    const record2 = mockedWriteRunRecord.mock.calls[1][1];
+
+    // Byte-identical JSON output of the evalReport field across the two calls,
+    // proving canonicalizeEvalReport's sort is applied deterministically.
+    expect(JSON.stringify(record1.evalReport)).toBe(
+      JSON.stringify(record2.evalReport),
+    );
+    // And the sort produced ascending id order regardless of input order.
+    expect(record1.evalReport!.criteria.map((c) => c.id)).toEqual([
+      "AC-01",
+      "AC-02",
+      "AC-03",
+    ]);
   });
 });
 

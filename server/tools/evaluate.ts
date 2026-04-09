@@ -4,7 +4,11 @@ import { evaluateStory } from "../lib/evaluator.js";
 import { scanCodebase } from "../lib/codebase-scan.js";
 import { loadPlan } from "../lib/plan-loader.js";
 import { RunContext, trackedCallClaude } from "../lib/run-context.js";
-import { writeRunRecord, type RunRecord } from "../lib/run-record.js";
+import {
+  writeRunRecord,
+  canonicalizeEvalReport,
+  type RunRecord,
+} from "../lib/run-record.js";
 import {
   buildCoherenceEvalPrompt,
   buildCoherenceEvalUserMessage,
@@ -155,10 +159,39 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
     };
   }
 
+  // REQ-01 v1.1: full RunContext infrastructure for story-eval runs,
+  // matching the handleCoherenceEval pattern. Enables populating
+  // storyId / evalVerdict / evalReport / estimatedCostUsd on the RunRecord
+  // so forge_coordinate's state reader can classify stories.
+  const ctx = new RunContext({
+    toolName: "forge_evaluate",
+    projectPath: input.projectPath,
+    stages: ["story-eval"],
+  });
+  const startTime = Date.now();
+
   const plan = loadPlan(input.planPath, input.planJson);
   const report = await evaluateStory(plan, input.storyId, {
     timeoutMs: input.timeoutMs,
   });
+
+  // Write run record with the four REQ-01 v1.1 additive fields populated.
+  // canonicalizeEvalReport sorts criteria by (id, evidence) so two runs
+  // with the same criteria in different input orders produce byte-identical
+  // JSON output (NFR-C02 determinism, NFR-C10 golden-file byte-identity).
+  if (input.projectPath) {
+    const base = buildRunRecord(ctx, startTime, report.criteria.length);
+    await writeRunRecord(input.projectPath, {
+      ...base,
+      storyId: input.storyId,
+      evalVerdict: report.verdict,
+      evalReport: canonicalizeEvalReport(report),
+      metrics: {
+        ...base.metrics,
+        estimatedCostUsd: ctx.cost.summarize().estimatedCostUsd,
+      },
+    });
+  }
 
   return {
     content: [{ type: "text", text: JSON.stringify(report, null, 2) }],

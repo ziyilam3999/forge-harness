@@ -7,7 +7,7 @@ export const SCANNER_CHAR_CAP = 16_000;
 /** Maximum directory recursion depth. Tunable. */
 const MAX_DEPTH = 4;
 
-/** Directories to skip during scan. */
+/** Directories to skip during scan (matched by basename anywhere in the tree). */
 const SKIP_DIRS = new Set([
   "node_modules",
   "dist",
@@ -17,6 +17,18 @@ const SKIP_DIRS = new Set([
   "__pycache__",
   ".next",
   "coverage",
+]);
+
+/**
+ * Path-relative directories to skip (matched against the path from project root,
+ * with forward slashes). Used for nested noise directories that share a basename
+ * with legitimate user dirs — e.g. `.claude/worktrees` (Claude Code scratch),
+ * `.git/worktrees` (defensive symmetry; .git is already pruned by SKIP_DIRS but
+ * keeping this entry documents intent). F-01 dogfood finding.
+ */
+const SKIP_PATHS = new Set([
+  ".claude/worktrees",
+  ".git/worktrees",
 ]);
 
 /** Key files to read contents of (first 100 lines each). */
@@ -57,6 +69,7 @@ async function listDir(
 
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
+      if (SKIP_PATHS.has(relPath)) continue;
       lines.push(`${indent}${relPath}/`);
       await listDir(fullPath, rootDir, depth + 1, lines);
     } else {

@@ -229,6 +229,75 @@
         }
       ],
       "affectedPaths": [".ai-workspace/plans/forge-coordinate-dogfood-report.md"]
+    },
+    {
+      "id": "PH04-US-05",
+      "title": "forge_evaluate coherence mode adds mechanical spec-vs-types vocabulary-drift check (F-03 secondary)",
+      "description": "Closes the F-03 blindspot surfaced during S3 dogfood: PRD said EvalReport.findings sorted by (failedAcId, description) but the actual type at server/types/eval-report.ts has been criteria: CriterionResult[] with {id, status, evidence} since v0.11.x. Coherence mode currently checks PRD-vs-master-vs-phase wording consistency, NOT PRD-vs-actual-TypeScript-types — vocabulary drift slips through every coherence pass undetected and only surfaces when an implementer (lucky-iris in S3) has to adapt to the type at code time. This story adds a mechanical check to handleCoherenceEval (server/tools/evaluate.ts) that for every backtick-quoted PRD reference of the form `{TypeName}.{fieldName}` (e.g. `EvalReport.criteria`, `RunRecord.metrics`, `Story.dependencies`) looks up {TypeName} in the actual TypeScript interface declarations under server/types/ and verifies {fieldName} exists on the type. Orphan references (field does not exist on the named type) emit a coherence finding with code 'spec-vocabulary-drift' and severity 'major' (or the next available finding code in the coherence handler's existing namespace — lucky-iris's call which numeric/string code to use; the exact code does not matter, the failure mode does). Implementation: new server/lib/spec-vocabulary-check.ts module containing (1) parseTypeDefinitions(typesDir): reads every .ts file under server/types/ and builds a Map<TypeName, Set<FieldName>> using a regex-based extractor (no full TypeScript AST parser needed for interface declarations — interface field syntax is regular enough). Handles `interface X { fieldA: T; fieldB?: U }` and `type X = { ... }` shapes. (2) extractTypeReferences(prdContent): scans the PRD body for backtick-quoted CamelCase.camelCase patterns and returns ReadonlyArray<{type: string, field: string, line: number}>. (3) verifySpecVocabulary(prdPath, typesDir): composes (1) and (2), returns ReadonlyArray<{type, field, line, kind: 'unknown-type' | 'unknown-field'}>. handleCoherenceEval imports verifySpecVocabulary, calls it on the loaded prdContent + 'server/types', maps each result to a coherence finding, and threads the findings into the existing coherence finding aggregator so they show up in the report alongside wording-consistency findings. NFR-C01 preserved: zero LLM calls, all mechanical. Known limitation (documented in JSDoc, not blocking): nested type references (e.g. `RunRecord.metrics.estimatedCostUsd`) only verify the top-level field — verifying nested paths requires walking the type alias graph and is deferred to a follow-up if drift recurs. Type aliases imported via `import { Foo } from './bar'` are handled by reading the imported file's exports (one-hop only, no transitive resolution). Cross-package types (e.g. third-party libraries) are skipped with a debug log, never flagged.",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "PH04-US-05-AC01",
+          "description": "New file server/lib/spec-vocabulary-check.ts exists and exports verifySpecVocabulary",
+          "command": "grep -nE 'export.*function verifySpecVocabulary|export.*const verifySpecVocabulary' server/lib/spec-vocabulary-check.ts"
+        },
+        {
+          "id": "PH04-US-05-AC02",
+          "description": "parseTypeDefinitions builds a Map with at least the existing types EvalReport, RunRecord, Story, Phase from server/types/",
+          "command": "npx vitest run server/lib/spec-vocabulary-check.test.ts -t 'parseTypeDefinitions.*EvalReport|build.*type.*map' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-05-AC03",
+          "description": "extractTypeReferences finds backtick-quoted TypeName.fieldName patterns in markdown content",
+          "command": "npx vitest run server/lib/spec-vocabulary-check.test.ts -t 'extractTypeReferences|extract.*backtick' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-05-AC04",
+          "description": "Drift detection POSITIVE: a fixture PRD referencing `EvalReport.findings` (field that does NOT exist on the real type) returns exactly 1 unknown-field result naming EvalReport and findings",
+          "command": "npx vitest run server/lib/spec-vocabulary-check.test.ts -t 'drift.*EvalReport.findings|positive.*unknown-field' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-05-AC05",
+          "description": "Drift detection NEGATIVE: a fixture PRD referencing only valid fields (e.g. `EvalReport.criteria`, `EvalReport.verdict`) returns an empty result array",
+          "command": "npx vitest run server/lib/spec-vocabulary-check.test.ts -t 'no drift.*valid fields|negative.*empty' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-05-AC06",
+          "description": "Unknown type handling: a fixture PRD referencing `FooBar.baz` (type FooBar does not exist in server/types/) returns kind: 'unknown-type' (NOT a crash, NOT a false unknown-field)",
+          "command": "npx vitest run server/lib/spec-vocabulary-check.test.ts -t 'unknown.*type.*FooBar|unknown-type.*kind' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-05-AC07",
+          "description": "Real PRD regression check: running verifySpecVocabulary on the actual docs/forge-coordinate-prd.md against the actual server/types/ directory returns ZERO unknown-field results (confirms PRD v1.2 vocabulary cleanup is complete and the check would have caught F-03 if it had existed at S3)",
+          "command": "npx vitest run server/lib/spec-vocabulary-check.test.ts -t 'real PRD.*zero|forge-coordinate-prd.*no drift' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-05-AC08",
+          "description": "handleCoherenceEval calls verifySpecVocabulary and threads results into the coherence finding aggregator",
+          "command": "grep -nE 'verifySpecVocabulary' server/tools/evaluate.ts"
+        },
+        {
+          "id": "PH04-US-05-AC09",
+          "description": "End-to-end coherence test: a fixture PRD with deliberate vocabulary drift causes the coherence report to fail (verdict FAIL or non-empty findings array with the spec-vocabulary-drift category)",
+          "command": "npx vitest run server/tools/evaluate.test.ts -t 'coherence.*spec.*drift|coherence.*vocabulary' 2>&1 | grep -q 'passed'"
+        },
+        {
+          "id": "PH04-US-05-AC10",
+          "description": "NFR-C01 preserved: no callClaude/trackedCallClaude in the new module",
+          "command": "test -z \"$(grep -n 'callClaude\\|trackedCallClaude' server/lib/spec-vocabulary-check.ts 2>/dev/null)\""
+        },
+        {
+          "id": "PH04-US-05-AC11",
+          "description": "tsc --noEmit clean with the new module",
+          "command": "npx tsc --noEmit"
+        },
+        {
+          "id": "PH04-US-05-AC12",
+          "description": "Full vitest suite green (existing 397+ tests still pass plus new coverage)",
+          "command": "npx vitest run 2>&1 | grep -q 'passed' && ! grep -q 'failed'"
+        }
+      ],
+      "affectedPaths": ["server/lib/spec-vocabulary-check.ts", "server/lib/spec-vocabulary-check.test.ts", "server/tools/evaluate.ts", "server/tools/evaluate.test.ts"]
     }
   ]
 }

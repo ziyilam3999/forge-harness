@@ -76,8 +76,8 @@
     },
     {
       "id": "PH-04",
-      "title": "MCP Handler, Config Loader, Checkpoint Gates, Integration Tests, and Dogfood",
-      "description": "Wires forge_coordinate into the MCP server. Expands coordinateInputSchema with planPath (req), phaseId (req v1), masterPlanPath, coordinateMode, budgetUsd, maxTimeMs, startTimeMs, currentPlanStartTimeMs, projectPath, prdContent, replanningNotes, and haltClearedByHuman; intentionally omits maxRetries per REQ-14 v1.1 and §7 (REQ-14). Implements loadCoordinateConfig with the 4-field config schema (storyOrdering, phaseBoundaryBehavior, briefVerbosity, observability.*), per-field provenance via brief.configSource, .strict() Zod with named-field warnings, and the writeRunRecord:false → 'WARNING: crash recovery disabled.' recommendation prefix (REQ-15). Wires advisory-mode checkpoint gates: brief IS the checkpoint, no separate file or pause-and-wait call (REQ-16). Adds 17-22 integration tests including the configSource end-to-end test and the halt-hard 3-step clearing state machine test (NFR-C10 byte-identity verified via golden-file fixtures with and without an empty {} config). Closes with a dogfood run against a multi-story plan and a written dogfood report.",
+      "title": "MCP Handler, Config Loader, Checkpoint Gates, Integration Tests, Dogfood, and Spec-vs-Types Vocabulary Check",
+      "description": "Wires forge_coordinate into the MCP server. Expands coordinateInputSchema with planPath (req), phaseId (req v1), masterPlanPath, coordinateMode, budgetUsd, maxTimeMs, startTimeMs, currentPlanStartTimeMs, projectPath, prdContent, replanningNotes, and haltClearedByHuman; intentionally omits maxRetries per REQ-14 v1.1 and §7 (REQ-14). Implements loadCoordinateConfig with the 4-field config schema (storyOrdering, phaseBoundaryBehavior, briefVerbosity, observability.*), per-field provenance via brief.configSource, .strict() Zod with named-field warnings, and the writeRunRecord:false → 'WARNING: crash recovery disabled.' recommendation prefix (REQ-15). Wires advisory-mode checkpoint gates: brief IS the checkpoint, no separate file or pause-and-wait call (REQ-16). Adds 17-22 integration tests including the configSource end-to-end test and the halt-hard 3-step clearing state machine test (NFR-C10 byte-identity verified via golden-file fixtures with and without an empty {} config). Includes a dogfood run against a multi-story plan and a written dogfood report. Closes with PH04-US-05: a forge_evaluate coherence-mode mechanical spec-vs-types vocabulary-drift check (added per F-03 secondary disposition) — verifySpecVocabulary parses TypeScript interface declarations under server/types/, scans the PRD for backtick-quoted {TypeName}.{fieldName} references, and emits coherence findings for orphan field references. Closes the F-03 blindspot that allowed `EvalReport.findings` to slip through every coherence pass undetected until lucky-iris adapted to the real type at S3 implementation time.",
       "dependencies": ["PH-02", "PH-03"],
       "inputs": [
         "server/tools/coordinate.ts (16-line stub — full expansion)",
@@ -92,9 +92,11 @@
         "server/index.ts (tool description updated to reflect 4th forge primitive role)",
         "server/tools/coordinate.test.ts (17-22 integration tests including configSource end-to-end and halt-hard 3-step clearing state machine)",
         "server/lib/coordinator.test.ts (config-loader 7+ unit tests: no file, full file, args override, corrupt JSON, schema-invalid, mid-write race, depth-first behavioral)",
-        ".ai-workspace/plans/forge-coordinate-dogfood-report.md (dogfood results against a multi-story plan)"
+        ".ai-workspace/plans/forge-coordinate-dogfood-report.md (dogfood results against a multi-story plan)",
+        "server/lib/spec-vocabulary-check.ts (verifySpecVocabulary helper — parses server/types/ interfaces and scans PRD for orphan {TypeName}.{fieldName} references — F-03 secondary fix)",
+        "server/lib/spec-vocabulary-check.test.ts (drift positive/negative/unknown-type unit tests + real-PRD regression check)"
       ],
-      "estimatedStories": 5
+      "estimatedStories": 6
     }
   ],
   "crossCuttingConcerns": [

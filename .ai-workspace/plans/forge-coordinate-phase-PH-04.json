@@ -151,7 +151,7 @@
         {
           "id": "PH04-US-03-AC01",
           "description": "coordinate.test.ts has at least 17 passing integration tests",
-          "command": "npx vitest run server/tools/coordinate.test.ts 2>&1 | grep -qE 'Tests[[:space:]]+1[7-9]|Tests[[:space:]]+[2-9][0-9]'"
+          "command": "OUT=$(npx vitest run server/tools/coordinate.test.ts 2>&1); echo \"$OUT\" | grep -qE '1[7-9] passed|[2-9][0-9] passed'"
         },
         {
           "id": "PH04-US-03-AC02",
@@ -186,7 +186,7 @@
         {
           "id": "PH04-US-03-AC08",
           "description": "Full test suite green",
-          "command": "npx vitest run 2>&1 | grep -q 'passed' && ! grep -q 'failed'"
+          "command": "OUT=$(npx vitest run 2>&1); echo \"$OUT\" | grep -q 'passed' && ! echo \"$OUT\" | grep -qE '[0-9]+ failed'"
         }
       ],
       "affectedPaths": ["server/tools/coordinate.test.ts", ".github/workflows/"]

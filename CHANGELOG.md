@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.18.0](https://github.com/ziyilam3999/forge-harness/compare/v0.17.1...v0.18.0) (2026-04-10)
+
+### Features
+
+- **generator:** persist GenerationBrief to `.forge/runs/briefs/` — writes full GenerateResult (init brief, fix brief, or escalation) after each forge_generate call for dogfood data traceability (#133)
+
 ## [0.17.1](https://github.com/ziyilam3999/forge-harness/compare/v0.17.0...v0.17.1) (2026-04-10)
 
 ### Miscellaneous

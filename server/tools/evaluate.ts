@@ -187,10 +187,6 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
       storyId: input.storyId,
       evalVerdict: report.verdict,
       evalReport: canonicalizeEvalReport(report),
-      metrics: {
-        ...base.metrics,
-        estimatedCostUsd: ctx.cost.summarize().estimatedCostUsd,
-      },
     });
   }
 

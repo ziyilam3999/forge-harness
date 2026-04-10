@@ -8,7 +8,7 @@
     {
       "id": "PH01-US-00a",
       "title": "Extend RunRecord interface and add RunContext infrastructure to handleStoryEval (REQ-01)",
-      "description": "Extends the canonical RunRecord interface in server/lib/run-record.ts with four optional fields per REQ-01 v1.1: storyId?: string, evalVerdict?: 'PASS' | 'FAIL' | 'INCONCLUSIVE', evalReport?: EvalReport, and metrics.estimatedCostUsd?: number | null. P50 additive — no schema version bump. Adds full RunContext infrastructure to handleStoryEval at server/tools/evaluate.ts lines 150-166 matching the handleCoherenceEval pattern at line 226: RunContext construction, CostTracker, AuditLog, then writeRunRecord with all four new fields populated. The evalReport field carries the full EvalReport object returned from evaluateStory for ALL three verdicts (PASS, FAIL, INCONCLUSIVE) so consumers have a uniform shape. EvalReport.findings is sorted by (failedAcId, description) before write to preserve NFR-C02 deterministic dispatch and NFR-C10 golden-file byte-identity.",
+      "description": "Extends the canonical RunRecord interface in server/lib/run-record.ts with four optional fields per REQ-01 v1.1: storyId?: string, evalVerdict?: 'PASS' | 'FAIL' | 'INCONCLUSIVE', evalReport?: EvalReport, and metrics.estimatedCostUsd?: number | null. P50 additive — no schema version bump. Adds full RunContext infrastructure to handleStoryEval at server/tools/evaluate.ts lines 150-166 matching the handleCoherenceEval pattern at line 226: RunContext construction, CostTracker, AuditLog, then writeRunRecord with all four new fields populated. The evalReport field carries the full EvalReport object returned from evaluateStory for ALL three verdicts (PASS, FAIL, INCONCLUSIVE) so consumers have a uniform shape. EvalReport.criteria is sorted by (id, evidence) lexicographic before write — via the exported canonicalizeEvalReport(report) helper in server/lib/run-record.ts, called at the handler level before constructing the RunRecord — to preserve NFR-C02 deterministic dispatch and NFR-C10 golden-file byte-identity. Writer-level canonicalization is rejected because writeRunRecord is mocked in evaluate.test.ts; canonicalizing at the handler keeps both the presence-AC and the byte-identity-AC observable through mockedWriteRunRecord.mock.calls. (v1.2 vocabulary fix per S3 dogfood F-03 and F-04: the prior wording referenced 'findings' / 'failedAcId' / 'description' which do not exist on the EvalReport type.)",
       "dependencies": [],
       "acceptanceCriteria": [
         {
@@ -43,7 +43,7 @@
         },
         {
           "id": "PH01-US-00a-AC07",
-          "description": "Unit test asserts that handleStoryEval writes a RunRecord whose evalReport.findings is defined and matches the input EvalReport",
+          "description": "Unit test asserts that handleStoryEval writes a RunRecord whose evalReport.criteria is defined and matches the input EvalReport",
           "command": "npx vitest run server/tools/evaluate.test.ts -t 'handleStoryEval.*evalReport' 2>&1 | grep -q 'passed'"
         },
         {
@@ -362,7 +362,7 @@
         },
         {
           "id": "PH01-US-05-AC08",
-          "description": "priorEvalReport provenance: two FAIL records with distinguishable findings → priorEvalReport.findings matches the newer record",
+          "description": "priorEvalReport provenance: two FAIL records with distinguishable criteria → priorEvalReport.criteria matches the newer record",
           "command": "npx vitest run server/lib/coordinator.test.ts -t 'priorEvalReport.*provenance|priorEvalReport.*newest' 2>&1 | grep -q 'passed'"
         },
         {

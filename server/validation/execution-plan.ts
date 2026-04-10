@@ -1,3 +1,4 @@
+import type { Story } from "../types/execution-plan.js";
 import type { ValidationResult } from "./master-plan.js";
 export type { ValidationResult };
 
@@ -173,7 +174,7 @@ export function validateExecutionPlan(data: unknown): ValidationResult {
 
   // 8. Circular dependency detection (DFS) — skip if missing refs found
   if (!hasMissingRefs) {
-    const cycleError = detectCycles(plan.stories as Array<Record<string, unknown>>);
+    const cycleError = detectCycles(plan.stories as Story[]);
     if (cycleError) {
       errors.push(cycleError);
     }
@@ -191,15 +192,16 @@ const BLACK = 2; // done
 
 /**
  * DFS-based cycle detection on the story dependency graph.
- * Returns an error message if a cycle is found, null otherwise.
+ *
+ * @param stories - Array of Story objects with `id` and optional `dependencies`.
+ * @returns A human-readable error message describing the cycle if one exists,
+ *          or `null` if the graph is acyclic. Never throws.
  */
-function detectCycles(
-  stories: Array<Record<string, unknown>>,
-): string | null {
+export function detectCycles(stories: Story[]): string | null {
   const deps = new Map<string, string[]>();
   for (const story of stories) {
-    const id = story.id as string;
-    const storyDeps = (story.dependencies as string[] | undefined) ?? [];
+    const id = story.id;
+    const storyDeps = story.dependencies ?? [];
     // Filter out self-dependencies (already caught earlier)
     deps.set(id, storyDeps.filter((d) => d !== id));
   }

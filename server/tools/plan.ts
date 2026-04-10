@@ -682,6 +682,7 @@ async function writeRunRecordIfNeeded(
       findingsRejected: findingsTotal - findingsApplied,
       validationRetries,
       durationMs: Date.now() - startTime,
+      estimatedCostUsd: costSummary.estimatedCostUsd,
     },
     outcome: "success",
   };

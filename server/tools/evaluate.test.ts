@@ -584,6 +584,23 @@ describe("handleEvaluate — coherence mode", () => {
     expect(record.tool).toBe("forge_evaluate");
     expect(record.metrics.findingsTotal).toBe(1);
   });
+
+  it("coherence RunRecord contains numeric or null estimatedCostUsd (PH01-US-00b)", async () => {
+    mockedCallClaude.mockResolvedValueOnce(
+      makeCallResult({ gaps: [], summary: "All aligned." }),
+    );
+
+    await handleEvaluate({
+      evaluationMode: "coherence",
+      prdContent: "Build a thing",
+      projectPath: "/some/path",
+    });
+
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const [, record] = mockedWriteRunRecord.mock.calls[0];
+    const cost = record.metrics.estimatedCostUsd;
+    expect(cost === null || typeof cost === "number").toBe(true);
+  });
 });
 
 // ── Divergence Mode ───────────────────────────────────────

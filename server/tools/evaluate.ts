@@ -144,6 +144,7 @@ function buildRunRecord(
       findingsRejected: 0,
       validationRetries: 0,
       durationMs: Date.now() - startTime,
+      estimatedCostUsd: costSummary.estimatedCostUsd,
     },
     outcome: "success",
   };

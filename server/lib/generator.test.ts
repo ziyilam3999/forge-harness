@@ -12,6 +12,7 @@ import {
   buildEscalation,
   assembleGenerateResult,
   assembleGenerateResultWithContext,
+  persistGenerateBrief,
 } from "./generator.js";
 import type { EvalReport, CriterionResult } from "../types/eval-report.js";
 import type { ExecutionPlan } from "../types/execution-plan.js";
@@ -962,5 +963,89 @@ describe("PH03-US03: lineage pass-through from plan to brief", () => {
       tier: "phase-plan",
       sourceId: "PH-01",
     });
+  });
+});
+
+// ── Brief persistence ─────────────────────────
+
+describe("persistGenerateBrief", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "brief-persist-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("writes brief to .forge/runs/briefs/ with storyId and iteration in filename", async () => {
+    const result: GenerateResult = {
+      action: "implement",
+      storyId: "US-01",
+      iteration: 0,
+      maxIterations: 3,
+      brief: {
+        story: {
+          id: "US-01",
+          title: "Test story",
+          acceptanceCriteria: [{ id: "AC-01", description: "check", command: "echo ok" }],
+        },
+        codebaseContext: "some context",
+        gitBranch: "feat/US-01",
+        baselineCheck: "npm test",
+      },
+    };
+
+    await persistGenerateBrief(tmpDir, result);
+
+    const briefsDir = join(tmpDir, ".forge", "runs", "briefs");
+    const files = await readdir(briefsDir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/^US-01-iter0-/);
+    expect(files[0]).toMatch(/\.json$/);
+
+    const content = JSON.parse(await readFile(join(briefsDir, files[0]), "utf-8"));
+    expect(content.storyId).toBe("US-01");
+    expect(content.action).toBe("implement");
+    expect(content.brief.story.id).toBe("US-01");
+  });
+
+  it("no-ops when projectPath is undefined", async () => {
+    const result: GenerateResult = {
+      action: "implement",
+      storyId: "US-01",
+      iteration: 0,
+      maxIterations: 3,
+    };
+
+    // Should not throw
+    await persistGenerateBrief(undefined, result);
+  });
+
+  it("persists fix briefs with iteration > 0", async () => {
+    const result: GenerateResult = {
+      action: "fix",
+      storyId: "US-02",
+      iteration: 2,
+      maxIterations: 3,
+      fixBrief: {
+        failedCriteria: [{ id: "AC-01", description: "check", evidence: "failed" }],
+        score: 0.5,
+        evalHint: { failFastIds: ["AC-01"] },
+        guidance: "Fix the test",
+      },
+    };
+
+    await persistGenerateBrief(tmpDir, result);
+
+    const briefsDir = join(tmpDir, ".forge", "runs", "briefs");
+    const files = await readdir(briefsDir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/^US-02-iter2-/);
+
+    const content = JSON.parse(await readFile(join(briefsDir, files[0]), "utf-8"));
+    expect(content.action).toBe("fix");
+    expect(content.fixBrief.guidance).toBe("Fix the test");
   });
 });

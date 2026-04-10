@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { scanCodebase } from "./codebase-scan.js";
 import { loadPlan } from "./plan-loader.js";
@@ -454,6 +454,16 @@ export async function assembleGenerateResultWithContext(
     );
   }
 
+  // Persist full brief to .forge/runs/briefs/ (NFR-05: graceful)
+  try {
+    await persistGenerateBrief(input.projectPath, result);
+  } catch (err) {
+    console.error(
+      "forge_generate: brief persistence failed (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
   return result;
 }
 
@@ -481,6 +491,32 @@ export async function appendGeneratorIterationRecord(
   await mkdir(runsDir, { recursive: true });
   const filePath = join(runsDir, "data.jsonl");
   await appendFile(filePath, JSON.stringify(record) + "\n", "utf-8");
+}
+
+/**
+ * Persist the full GenerateResult (brief or fix brief) to
+ * `.forge/runs/briefs/{storyId}-iter{N}.json`.
+ *
+ * This captures the complete input side of the dogfood loop so that
+ * future sessions can analyze brief quality, affected-path accuracy,
+ * and fix guidance effectiveness without re-running forge_generate.
+ *
+ * No-op when projectPath is undefined. Failures are swallowed (NFR-05).
+ */
+export async function persistGenerateBrief(
+  projectPath: string | undefined,
+  result: GenerateResult,
+): Promise<void> {
+  if (!projectPath) return;
+
+  const briefsDir = join(projectPath, ".forge", "runs", "briefs");
+  await mkdir(briefsDir, { recursive: true });
+
+  const safeDateStr = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `${result.storyId}-iter${result.iteration}-${safeDateStr}.json`;
+  const filePath = join(briefsDir, filename);
+
+  await writeFile(filePath, JSON.stringify(result, null, 2), "utf-8");
 }
 
 // ── PH-02 US03: Cost estimation ─────────────

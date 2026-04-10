@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.0](https://github.com/ziyilam3999/forge-harness/compare/v0.16.6...v0.17.0) (2026-04-10)
+
+### Features
+
+- **coordinate:** PH-01 types, topo sort, state readers, core dispatch loop (#128)
+  - CoordinateResult, StoryStatusEntry, PhaseTransitionBrief type definitions
+  - Kahn's topological sort with lex tie-break (NFR-C02 determinism)
+  - readRunRecords tagged discriminated union (JSON + JSONL dual-source)
+  - assessPhase 6-state story classifier (done/ready/blocked/pending/failed/inconclusive)
+  - assemblePhaseTransitionBrief signal aggregation
+  - Cross-site estimatedCostUsd population at all writeRunRecord call sites
+  - detectCycles exported with Story[] signature + JSDoc
+
+### Bug Fixes
+
+- **executor:** resolve absolute bash.exe on Windows (F-05) (#122)
+- **codebase-scan:** prune .claude/worktrees and .git/worktrees (F-01) (#121)
+
 ## [0.16.6](https://github.com/ziyilam3999/forge-harness/compare/v0.16.5...v0.16.6) (2026-04-10)
 
 ### Miscellaneous

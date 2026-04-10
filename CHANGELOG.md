@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.5](https://github.com/ziyilam3999/forge-harness/compare/v0.16.4...v0.16.5) (2026-04-10)
+
+### Miscellaneous
+
+* forge_coordinate PRD v1.2 + PH-01 vocabulary fixes (F-03 + F-04) — Round 4 micro-revision reconciling spec with the EvalReport type (`findings`/`failedAcId` → `criteria`/`id`/`evidence`) and moving canonicalization location from writer to handler via the exported `canonicalizeEvalReport` helper ([#123](https://github.com/ziyilam3999/forge-harness/pull/123))
+* dist/ rebuild + postinstall freshness fix ([#120](https://github.com/ziyilam3999/forge-harness/pull/120))
+* dist/ drift CI guard + MCP surface smoke test + Build/Release Rigor backlog entry
+* forge_evaluate mock-mode affordance backlog entry ([#119](https://github.com/ziyilam3999/forge-harness/pull/119))
+
 ## [0.16.4](https://github.com/ziyilam3999/forge-harness/compare/v0.16.3...v0.16.4) (2026-04-09)
 
 ### Miscellaneous

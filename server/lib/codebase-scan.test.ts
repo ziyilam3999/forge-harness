@@ -88,6 +88,31 @@ describe("scanCodebase", () => {
     expect(result).not.toContain("dist");
   });
 
+  it("skips .claude/worktrees but keeps the rest of .claude (F-01 dogfood fix)", async () => {
+    // .claude/worktrees holds stale Claude Code scratch copies of the repo.
+    // Pre-fix, the walker descended into every worktree and ate ~70% of the
+    // brief's codebase-context budget per the F-01 dogfood finding.
+    await mkdir(join(tempDir, ".claude", "worktrees", "stale-worktree", "server"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(tempDir, ".claude", "worktrees", "stale-worktree", "server", "noise.ts"),
+      "// stale scratch copy",
+    );
+    // A real .claude/skills/ subdir should still be scanned — the prune is
+    // surgical to /worktrees, not the whole .claude tree.
+    await mkdir(join(tempDir, ".claude", "skills", "my-skill"), { recursive: true });
+    await writeFile(
+      join(tempDir, ".claude", "skills", "my-skill", "SKILL.md"),
+      "# real skill",
+    );
+
+    const result = await scanCodebase(tempDir);
+    expect(result).not.toContain("stale-worktree");
+    expect(result).not.toContain(".claude/worktrees");
+    expect(result).toContain(".claude/skills");
+  });
+
   it("respects max depth", async () => {
     // Create deeply nested structure: d1/d2/d3/d4/d5/d6/deep.txt
     // depth 0=d1, 1=d2, 2=d3, 3=d4, 4=d5 (MAX_DEPTH=4), d6 should be excluded

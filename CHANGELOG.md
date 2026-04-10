@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.6](https://github.com/ziyilam3999/forge-harness/compare/v0.16.5...v0.16.6) (2026-04-10)
+
+### Miscellaneous
+
+* forge_coordinate PH04-US-05 — new story adds mechanical spec-vs-types vocabulary-drift check to forge_evaluate coherence mode (F-03 secondary fix). Multi-root parser walks both `server/types/` and `server/lib/` so co-located types like RunRecord are covered. PH-04 grows from 5 to 6 stories (master plan total 22 → 23). Pure planning/spec change, no code touched yet ([#126](https://github.com/ziyilam3999/forge-harness/pull/126))
+
 ## [0.16.5](https://github.com/ziyilam3999/forge-harness/compare/v0.16.4...v0.16.5) (2026-04-10)
 
 ### Miscellaneous

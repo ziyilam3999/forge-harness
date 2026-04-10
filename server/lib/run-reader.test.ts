@@ -164,7 +164,7 @@ describe("readRunRecords", () => {
     consoleSpy.mockRestore();
   });
 
-  it("handles permission denied on individual files gracefully", async () => {
+  it("reads a single valid primary record without crashing", async () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     // We simulate permission error by mocking readFile for one specific call

@@ -354,6 +354,26 @@ describe("assessPhase", () => {
     expect(entry.priorEvalReport!.criteria[0].evidence).toBe("new evidence");
   });
 
+  it("NFR-C02 deterministic dispatch: two calls on identical inputs return structurally equal results", async () => {
+    const plan = makePlan([
+      makeStory("US-01"),
+      makeStory("US-02", ["US-01"]),
+    ]);
+    const records = [
+      makePrimaryRecord("US-01", "PASS", "2026-01-01T00:00:00Z"),
+      makePrimaryRecord("US-02", "FAIL", "2026-01-01T00:01:00Z"),
+    ];
+    mockedReadRunRecords
+      .mockResolvedValueOnce([...records])
+      .mockResolvedValueOnce([...records]);
+
+    const r1 = await assessPhase(plan, "/tmp/test");
+    const r2 = await assessPhase(plan, "/tmp/test");
+
+    // Compare brief structure (excluding any non-deterministic fields)
+    expect(JSON.stringify(r1.brief)).toBe(JSON.stringify(r2.brief));
+  });
+
   it("NFR-C08: Object.keys of every StoryStatusEntry returns identical sorted key set across all 6 statuses", async () => {
     // Build a plan that produces all 6 status values
     const plan = makePlan([

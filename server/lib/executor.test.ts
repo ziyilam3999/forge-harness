@@ -1,19 +1,31 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("node:child_process", () => ({
   exec: vi.fn(),
+  execSync: vi.fn(),
 }));
 
 vi.mock("node:os", () => ({
   platform: vi.fn(() => "linux"),
 }));
 
-import { exec } from "node:child_process";
+vi.mock("node:fs", () => ({
+  existsSync: vi.fn(() => false),
+}));
+
+import { exec, execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { platform } from "node:os";
-import { executeCommand } from "./executor.js";
+import {
+  executeCommand,
+  resolveWindowsBashPath,
+  _resetWindowsBashPathCacheForTesting,
+} from "./executor.js";
 
 const mockedExec = vi.mocked(exec);
+const mockedExecSync = vi.mocked(execSync);
 const mockedPlatform = vi.mocked(platform);
+const mockedExistsSync = vi.mocked(existsSync);
 
 function simulateExec(
   error: Error | null,
@@ -99,15 +111,48 @@ describe("executeCommand", () => {
     expect(result.evidence).toContain("[truncated]");
   });
 
-  it("uses bash shell on Windows", async () => {
+  it("uses resolved absolute bash path on Windows (F-05 fix)", async () => {
+    // Pre-fix: passed `shell: "bash"` literal which Node's spawn cannot
+    // resolve on Windows -> spawn bash ENOENT on every AC.
+    // Post-fix: resolves to an absolute path via FORGE_BASH_PATH / `where bash`
+    // / common Git Bash install paths.
+    _resetWindowsBashPathCacheForTesting();
     mockedPlatform.mockReturnValue("win32" as ReturnType<typeof platform>);
+    process.env.FORGE_BASH_PATH = "C:\\Program Files\\Git\\bin\\bash.exe";
+    mockedExistsSync.mockReturnValue(true);
     simulateExec(null, "", "");
+
     await executeCommand("echo test", {});
+
     expect(mockedExec).toHaveBeenCalledWith(
       "echo test",
-      expect.objectContaining({ shell: "bash" }),
+      expect.objectContaining({
+        shell: "C:\\Program Files\\Git\\bin\\bash.exe",
+      }),
       expect.any(Function),
     );
+
+    delete process.env.FORGE_BASH_PATH;
+    _resetWindowsBashPathCacheForTesting();
+  });
+
+  it("rejects with actionable error on Windows when bash cannot be resolved (F-05)", async () => {
+    _resetWindowsBashPathCacheForTesting();
+    mockedPlatform.mockReturnValue("win32" as ReturnType<typeof platform>);
+    delete process.env.FORGE_BASH_PATH;
+    mockedExistsSync.mockReturnValue(false);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error("where: command failed");
+    });
+
+    await expect(executeCommand("echo test", {})).rejects.toThrow(
+      /requires Git Bash on Windows.*FORGE_BASH_PATH/s,
+    );
+    // Critical: ensure the failure is loud (one rejection) NOT silent
+    // (every AC returning INCONCLUSIVE with "spawn bash ENOENT").
+    expect(mockedExec).not.toHaveBeenCalled();
+
+    _resetWindowsBashPathCacheForTesting();
   });
 
   it("does not force bash shell on Linux", async () => {
@@ -141,5 +186,90 @@ describe("executeCommand", () => {
     simulateExec(null, "output", "");
     const result = await executeCommand("cmd", {});
     expect(result.evidence).toBe("output");
+  });
+});
+
+describe("resolveWindowsBashPath (F-05 dogfood fix)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetWindowsBashPathCacheForTesting();
+    delete process.env.FORGE_BASH_PATH;
+  });
+
+  afterEach(() => {
+    delete process.env.FORGE_BASH_PATH;
+    _resetWindowsBashPathCacheForTesting();
+  });
+
+  it("returns FORGE_BASH_PATH when env var is set and file exists", () => {
+    process.env.FORGE_BASH_PATH = "D:\\msys64\\usr\\bin\\bash.exe";
+    mockedExistsSync.mockImplementation(
+      (p) => p === "D:\\msys64\\usr\\bin\\bash.exe",
+    );
+
+    expect(resolveWindowsBashPath()).toBe("D:\\msys64\\usr\\bin\\bash.exe");
+    expect(mockedExecSync).not.toHaveBeenCalled(); // env var short-circuits `where`
+  });
+
+  it("throws if FORGE_BASH_PATH points at a non-existent file", () => {
+    process.env.FORGE_BASH_PATH = "Z:\\does\\not\\exist\\bash.exe";
+    mockedExistsSync.mockReturnValue(false);
+
+    expect(() => resolveWindowsBashPath()).toThrow(
+      /FORGE_BASH_PATH is set.*does not exist/,
+    );
+  });
+
+  it("falls back to `where bash` when FORGE_BASH_PATH is unset", () => {
+    mockedExecSync.mockReturnValue(
+      "C:\\Program Files\\Git\\bin\\bash.exe\r\nC:\\Windows\\System32\\bash.exe\r\n",
+    );
+    mockedExistsSync.mockImplementation(
+      (p) => p === "C:\\Program Files\\Git\\bin\\bash.exe",
+    );
+
+    expect(resolveWindowsBashPath()).toBe(
+      "C:\\Program Files\\Git\\bin\\bash.exe",
+    );
+    expect(mockedExecSync).toHaveBeenCalledWith(
+      "where bash",
+      expect.objectContaining({ encoding: "utf-8" }),
+    );
+  });
+
+  it("falls back to common Git Bash install paths when `where bash` fails", () => {
+    mockedExecSync.mockImplementation(() => {
+      throw new Error("'where' is not recognized");
+    });
+    mockedExistsSync.mockImplementation(
+      (p) => p === "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+    );
+
+    expect(resolveWindowsBashPath()).toBe(
+      "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+    );
+  });
+
+  it("throws actionable error when no resolution strategy succeeds", () => {
+    mockedExecSync.mockImplementation(() => {
+      throw new Error("not found");
+    });
+    mockedExistsSync.mockReturnValue(false);
+
+    expect(() => resolveWindowsBashPath()).toThrow(
+      /requires Git Bash on Windows.*git-scm\.com\/download\/win.*FORGE_BASH_PATH/s,
+    );
+  });
+
+  it("caches the first successful resolution (idempotent across calls)", () => {
+    process.env.FORGE_BASH_PATH = "C:\\Program Files\\Git\\bin\\bash.exe";
+    mockedExistsSync.mockReturnValue(true);
+
+    const first = resolveWindowsBashPath();
+    delete process.env.FORGE_BASH_PATH;
+    mockedExistsSync.mockReturnValue(false);
+    const second = resolveWindowsBashPath();
+
+    expect(second).toBe(first);
   });
 });

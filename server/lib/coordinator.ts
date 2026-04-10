@@ -7,11 +7,13 @@ import type {
   StoryStatus,
   PhaseTransitionBrief,
   BudgetInfo,
+  BudgetWarningLevel,
   TimeBudgetInfo,
+  TimeWarningLevel,
   ReplanningNote,
 } from "../types/coordinate-result.js";
 import { topoSort } from "./topo-sort.js";
-import { readRunRecords, type PrimaryRecord } from "./run-reader.js";
+import { readRunRecords, type PrimaryRecord, type TaggedRunRecord } from "./run-reader.js";
 
 const MAX_RETRIES = 3;
 
@@ -99,7 +101,7 @@ export async function assessPhase(
   }
 
   const entries = sorted.map((s) => statusMap.get(s.id)!);
-  const brief = assemblePhaseTransitionBrief(entries, options);
+  const brief = assemblePhaseTransitionBrief(entries, options, allRecords);
 
   return {
     mode: "advisory",
@@ -214,7 +216,11 @@ function getEvidence(
  * Assemble a PhaseTransitionBrief from classified story entries (REQ-05).
  * Applies the 4-case status resolution rule and populates all brief fields.
  */
-export function assemblePhaseTransitionBrief(entries: StoryStatusEntry[], options: AssessPhaseOptions = {}): PhaseTransitionBrief {
+export function assemblePhaseTransitionBrief(
+  entries: StoryStatusEntry[],
+  options: AssessPhaseOptions = {},
+  allRecords: ReadonlyArray<TaggedRunRecord> = [],
+): PhaseTransitionBrief {
   const readyStories = entries
     .filter((e) => e.status === "ready" || e.status === "ready-for-retry")
     .map((e) => e.storyId);
@@ -239,8 +245,8 @@ export function assemblePhaseTransitionBrief(entries: StoryStatusEntry[], option
     failedStories,
     completedCount,
     totalCount,
-    budget: buildBudget(options),
-    timeBudget: buildTimeBudget(options),
+    budget: checkBudget(allRecords, options.budgetUsd ?? undefined),
+    timeBudget: checkTimeBudget(options.currentPlanStartTimeMs ?? undefined, options.maxTimeMs ?? undefined),
     replanningNotes,
     recommendation,
     configSource: {},
@@ -323,20 +329,131 @@ function buildRecommendation(
   return parts.join(" ");
 }
 
-function buildBudget(options: AssessPhaseOptions): BudgetInfo {
+/**
+ * Pure budget check over tagged-union run records (REQ-06, NFR-C04, NFR-C09).
+ * Filters to primary records, sums estimatedCostUsd, returns BudgetInfo.
+ * Advisory only — never throws on exceeded budget.
+ */
+export function checkBudget(priorRecords: ReadonlyArray<TaggedRunRecord>, budgetUsd: number | undefined): BudgetInfo {
+  if (budgetUsd === undefined || budgetUsd === null) {
+    return {
+      usedUsd: 0,
+      budgetUsd: null,
+      remainingUsd: null,
+      incompleteData: false,
+      warningLevel: "none",
+    };
+  }
+
+  let usedUsd = 0;
+  let incompleteData = false;
+
+  for (const entry of priorRecords) {
+    if (entry.source !== "primary") continue;
+    const cost = entry.record.metrics.estimatedCostUsd;
+    if (cost === undefined || cost === null) {
+      incompleteData = true;
+      continue;
+    }
+    usedUsd += cost;
+  }
+
+  const ratio = budgetUsd > 0 ? usedUsd / budgetUsd : 0;
+  let warningLevel: BudgetWarningLevel = "none";
+  if (ratio >= 1) {
+    warningLevel = "exceeded";
+  } else if (ratio >= 0.8) {
+    warningLevel = "approaching";
+  }
+
   return {
-    usedUsd: 0,
-    budgetUsd: options.budgetUsd ?? null,
-    remainingUsd: options.budgetUsd != null ? options.budgetUsd : null,
-    incompleteData: true,
-    warningLevel: "none",
+    usedUsd,
+    budgetUsd,
+    remainingUsd: budgetUsd - usedUsd,
+    incompleteData,
+    warningLevel,
   };
 }
 
-function buildTimeBudget(options: AssessPhaseOptions): TimeBudgetInfo {
-  return {
-    elapsedMs: 0,
-    maxTimeMs: options.maxTimeMs ?? null,
-    warningLevel: options.maxTimeMs != null ? "none" : "unknown",
-  };
+/**
+ * Pure wall-clock time budget check (REQ-07).
+ * Missing startTimeMs → 'unknown' (not 'none'). Missing maxTimeMs → 'none' (no-op).
+ * Never throws — pure computation.
+ */
+export function checkTimeBudget(startTimeMs: number | undefined, maxTimeMs: number | undefined): TimeBudgetInfo {
+  if (startTimeMs === undefined || startTimeMs === null) {
+    return { elapsedMs: 0, maxTimeMs: maxTimeMs ?? null, warningLevel: "unknown" };
+  }
+
+  const elapsedMs = Date.now() - startTimeMs;
+
+  if (maxTimeMs === undefined || maxTimeMs === null) {
+    return { elapsedMs, maxTimeMs: null, warningLevel: "none" };
+  }
+
+  const ratio = maxTimeMs > 0 ? elapsedMs / maxTimeMs : 0;
+  let warningLevel: TimeWarningLevel = "none";
+  if (ratio >= 1) {
+    warningLevel = "exceeded";
+  } else if (ratio >= 0.8) {
+    warningLevel = "approaching";
+  }
+
+  return { elapsedMs, maxTimeMs, warningLevel };
+}
+
+/**
+ * Pure state recovery from run records (REQ-09, NFR-C03).
+ * Reads `.forge/runs/`, filters to primary records matching plan stories,
+ * classifies each story via the 6-state precedence chain.
+ * No persistent coordinator state file — all state is re-derived from run records.
+ * Composition: reconcileState (PH-03) runs FIRST; recoverState operates on the reconciled view.
+ */
+export async function recoverState(plan: ExecutionPlan, projectPath: string): Promise<Map<string, StoryStatusEntry>> {
+  const stories = plan.stories;
+  const sorted = stories.length > 0 ? topoSort(stories) : [];
+
+  const allRecords = await readRunRecords(projectPath);
+  const primaryRecords = allRecords
+    .filter((r): r is PrimaryRecord => r.source === "primary")
+    .map((r) => r.record);
+
+  const storyIds = new Set(stories.map((s) => s.id));
+
+  const recordsByStory = new Map<string, RunRecord[]>();
+  for (const record of primaryRecords) {
+    if (!record.storyId) continue;
+    if (!storyIds.has(record.storyId)) continue;
+    const list = recordsByStory.get(record.storyId) ?? [];
+    list.push(record);
+    recordsByStory.set(record.storyId, list);
+  }
+
+  for (const records of recordsByStory.values()) {
+    records.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
+
+  const statusMap = new Map<string, StoryStatusEntry>();
+
+  for (const story of sorted) {
+    const records = recordsByStory.get(story.id) ?? [];
+    const mostRecent = records.length > 0 ? records[records.length - 1] : null;
+    const retryCount = records.filter((r) => r.evalVerdict !== "PASS").length;
+    const retriesRemaining = Math.max(0, MAX_RETRIES - retryCount);
+
+    const status = classifyStory(story, mostRecent, retryCount, records.length, statusMap, storyIds);
+    const priorEvalReport = getPriorEvalReport(status, mostRecent);
+    const evidence = getEvidence(status, story, retryCount, statusMap);
+
+    statusMap.set(story.id, {
+      storyId: story.id,
+      status,
+      retryCount,
+      retriesRemaining,
+      priorEvalReport,
+      evidence,
+    });
+  }
+
+  return statusMap;
 }

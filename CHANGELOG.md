@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.1](https://github.com/ziyilam3999/forge-harness/compare/v0.17.0...v0.17.1) (2026-04-10)
+
+### Miscellaneous
+
+- **plan:** add AC subprocess contract to forge_plan prompt — prevents F-55/F-56 patterns in generated AC commands (#134)
+- **plan:** fix 2 broken AC commands in PH-04 phase plan (captured-output pattern)
+
 ## [0.17.0](https://github.com/ziyilam3999/forge-harness/compare/v0.16.6...v0.17.0) (2026-04-10)
 
 ### Features

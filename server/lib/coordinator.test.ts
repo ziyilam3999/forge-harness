@@ -280,4 +280,110 @@ describe("assessPhase", () => {
     expect(result.brief.replanningNotes.some((n) => n.severity === "blocking")).toBe(true);
     expect(result.brief.recommendation).toContain("US-01");
   });
+
+  it("mixed-failed: 1 failed + 4 ready → needs-replan (rule 3 dominates)", async () => {
+    const plan = makePlan([
+      makeStory("US-01"),
+      makeStory("US-02"),
+      makeStory("US-03"),
+      makeStory("US-04"),
+      makeStory("US-05"),
+    ]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:00:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+    ]);
+
+    const result = await assessPhase(plan, "/tmp/test");
+    expect(result.brief.status).toBe("needs-replan");
+    expect(result.brief.failedStories).toContain("US-01");
+    expect(result.brief.readyStories).toHaveLength(4);
+  });
+
+  it("LAST RETRY: recommendation contains 'LAST RETRY: <storyId>' when retriesRemaining === 1", async () => {
+    const plan = makePlan([makeStory("US-01")]);
+    // 2 FAIL records → retryCount=2, retriesRemaining=1
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:00:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+    ]);
+
+    const result = await assessPhase(plan, "/tmp/test");
+    expect(result.brief.stories[0].retriesRemaining).toBe(1);
+    expect(result.brief.recommendation).toMatch(/LAST RETRY: US-01/);
+  });
+
+  it("depFailedStories is populated from dep-failed entries", async () => {
+    const plan = makePlan([
+      makeStory("US-01"),
+      makeStory("US-02", ["US-01"]),
+      makeStory("US-03", ["US-01"]),
+    ]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:00:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+    ]);
+
+    const result = await assessPhase(plan, "/tmp/test");
+    expect(result.brief.depFailedStories).toContain("US-02");
+    expect(result.brief.depFailedStories).toContain("US-03");
+    expect(result.brief.depFailedStories).toHaveLength(2);
+  });
+
+  it("priorEvalReport provenance: two FAIL records → priorEvalReport matches the newest", async () => {
+    const oldReport: EvalReport = {
+      storyId: "US-01",
+      verdict: "FAIL",
+      criteria: [{ id: "AC-01", status: "FAIL", evidence: "old evidence" }],
+    };
+    const newReport: EvalReport = {
+      storyId: "US-01",
+      verdict: "FAIL",
+      criteria: [{ id: "AC-01", status: "FAIL", evidence: "new evidence" }],
+    };
+    const plan = makePlan([makeStory("US-01")]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:00:00Z", oldReport),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z", newReport),
+    ]);
+
+    const result = await assessPhase(plan, "/tmp/test");
+    const entry = result.brief.stories[0];
+    expect(entry.priorEvalReport!.criteria[0].evidence).toBe("new evidence");
+  });
+
+  it("NFR-C08: Object.keys of every StoryStatusEntry returns identical sorted key set across all 6 statuses", async () => {
+    // Build a plan that produces all 6 status values
+    const plan = makePlan([
+      makeStory("US-DONE"),
+      makeStory("US-READY"),
+      makeStory("US-RETRY"),
+      makeStory("US-FAILED"),
+      makeStory("US-DEP-FAILED", ["US-FAILED"]),
+      makeStory("US-PENDING", ["US-RETRY"]),
+    ]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-DONE", "PASS", "2026-01-01T00:00:00Z"),
+      // US-READY: no records → ready
+      // US-RETRY: 1 FAIL → ready-for-retry
+      makePrimaryRecord("US-RETRY", "FAIL", "2026-01-01T00:01:00Z"),
+      // US-FAILED: 3 FAIL → failed
+      makePrimaryRecord("US-FAILED", "FAIL", "2026-01-01T00:02:00Z"),
+      makePrimaryRecord("US-FAILED", "FAIL", "2026-01-01T00:03:00Z"),
+      makePrimaryRecord("US-FAILED", "FAIL", "2026-01-01T00:04:00Z"),
+      // US-DEP-FAILED: dep on US-FAILED → dep-failed
+      // US-PENDING: dep on US-RETRY (not done) → pending
+    ]);
+
+    const result = await assessPhase(plan, "/tmp/test");
+    const statusSet = new Set(result.brief.stories.map((s) => s.status));
+    expect(statusSet).toEqual(new Set(["done", "ready", "ready-for-retry", "failed", "dep-failed", "pending"]));
+
+    // All entries must have the exact same key set
+    const keySets = result.brief.stories.map((s) => Object.keys(s).sort().join(","));
+    const uniqueKeySets = new Set(keySets);
+    expect(uniqueKeySets.size).toBe(1);
+  });
 });

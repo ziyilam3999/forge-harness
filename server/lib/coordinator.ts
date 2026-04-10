@@ -99,7 +99,7 @@ export async function assessPhase(
   }
 
   const entries = sorted.map((s) => statusMap.get(s.id)!);
-  const brief = buildBrief(entries, options);
+  const brief = assemblePhaseTransitionBrief(entries, options);
 
   return {
     mode: "advisory",
@@ -210,7 +210,11 @@ function getEvidence(
   }
 }
 
-function buildBrief(entries: StoryStatusEntry[], options: AssessPhaseOptions): PhaseTransitionBrief {
+/**
+ * Assemble a PhaseTransitionBrief from classified story entries (REQ-05).
+ * Applies the 4-case status resolution rule and populates all brief fields.
+ */
+export function assemblePhaseTransitionBrief(entries: StoryStatusEntry[], options: AssessPhaseOptions = {}): PhaseTransitionBrief {
   const readyStories = entries
     .filter((e) => e.status === "ready" || e.status === "ready-for-retry")
     .map((e) => e.storyId);
@@ -225,7 +229,7 @@ function buildBrief(entries: StoryStatusEntry[], options: AssessPhaseOptions): P
 
   const status = resolvePhaseStatus(entries, completedCount, totalCount);
   const replanningNotes = buildReplanningNotes(failedStories, depFailedStories);
-  const recommendation = buildRecommendation(status, readyStories, failedStories);
+  const recommendation = buildRecommendation(status, readyStories, failedStories, entries);
 
   return {
     status,
@@ -290,19 +294,33 @@ function buildRecommendation(
   status: string,
   readyStories: string[],
   failedStories: string[],
+  entries: StoryStatusEntry[],
 ): string {
+  const parts: string[] = [];
+
+  // LAST RETRY warnings (binary-greppable)
+  const lastRetryEntries = entries.filter((e) => e.retriesRemaining === 1);
+  for (const entry of lastRetryEntries) {
+    parts.push(`LAST RETRY: ${entry.storyId}`);
+  }
+
   switch (status) {
     case "complete":
-      return "All stories complete. Phase is ready for transition.";
+      parts.push("All stories complete. Phase is ready for transition.");
+      break;
     case "needs-replan":
-      return `Replan needed. Failed stories: ${failedStories.join(", ")}. Run forge_plan(update) to address.`;
+      parts.push(`Replan needed. Failed stories: ${failedStories.join(", ")}. Run forge_plan(update) to address.`);
+      break;
     case "in-progress":
-      return readyStories.length > 0
-        ? `Continue execution. Ready stories: ${readyStories.join(", ")}.`
-        : "Waiting on in-progress dependencies.";
-    default:
-      return "";
+      parts.push(
+        readyStories.length > 0
+          ? `Continue execution. Ready stories: ${readyStories.join(", ")}.`
+          : "Waiting on in-progress dependencies.",
+      );
+      break;
   }
+
+  return parts.join(" ");
 }
 
 function buildBudget(options: AssessPhaseOptions): BudgetInfo {

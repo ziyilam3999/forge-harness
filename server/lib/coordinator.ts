@@ -351,7 +351,7 @@ function classifyStory(
   }
 
   // Rule 2: dep-failed — any transitive dependency is failed
-  if (hasFailedTransitiveDep(story, statusMap, storyIds)) {
+  if (hasFailedTransitiveDep(deps, statusMap)) {
     return "dep-failed";
   }
 
@@ -388,11 +388,9 @@ function allDepsDone(deps: string[], statusMap: Map<string, StoryStatusEntry>): 
 }
 
 function hasFailedTransitiveDep(
-  story: Story,
+  deps: string[],
   statusMap: Map<string, StoryStatusEntry>,
-  storyIds: Set<string>,
 ): boolean {
-  const deps = (story.dependencies ?? []).filter((d) => storyIds.has(d));
   for (const depId of deps) {
     const entry = statusMap.get(depId);
     if (!entry) continue;

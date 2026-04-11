@@ -361,7 +361,7 @@ export async function assembleGenerateResult(
 // ── PH-02: Infrastructure wrapper ───────────
 
 /** JSONL run record written to .forge/runs/data.jsonl */
-export interface RunRecord {
+interface GeneratorIterationRecord {
   timestamp: string;
   storyId: string;
   iteration: number;
@@ -483,7 +483,7 @@ export async function assembleGenerateResultWithContext(
  */
 export async function appendGeneratorIterationRecord(
   projectPath: string | undefined,
-  record: RunRecord,
+  record: GeneratorIterationRecord,
 ): Promise<void> {
   if (!projectPath) return;
 

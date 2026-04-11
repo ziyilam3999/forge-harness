@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.0](https://github.com/ziyilam3999/forge-harness/compare/v0.19.0...v0.20.0) (2026-04-11)
+
+### Features
+
+- **coordinate:** PH-04 MCP handler, config loader, checkpoint gates, integration tests, dogfood — 12-field coordinateInputSchema wired to assessPhase, Zod .strict() config loader with 4 output-shaping fields, halt-hard 3-step state machine, spec-vocabulary-check for PRD drift detection, 43 new tests (#142)
+
 ## [0.19.0](https://github.com/ziyilam3999/forge-harness/compare/v0.18.0...v0.19.0) (2026-04-11)
 
 ### Features

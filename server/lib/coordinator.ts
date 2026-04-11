@@ -1,4 +1,5 @@
 import type { ExecutionPlan, Story } from "../types/execution-plan.js";
+import type { EscalationReason } from "../types/generate-result.js";
 import type { RunRecord } from "./run-record.js";
 import type { EvalReport } from "../types/eval-report.js";
 import type {
@@ -11,9 +12,12 @@ import type {
   TimeBudgetInfo,
   TimeWarningLevel,
   ReplanningNote,
+  ReplanningCategory,
+  GraduateFindingsResult,
+  Finding,
 } from "../types/coordinate-result.js";
 import { topoSort } from "./topo-sort.js";
-import { readRunRecords, type PrimaryRecord, type TaggedRunRecord } from "./run-reader.js";
+import { readRunRecords, readAuditEntries, type PrimaryRecord, type TaggedRunRecord } from "./run-reader.js";
 
 const MAX_RETRIES = 3;
 
@@ -43,16 +47,22 @@ export async function assessPhase(
     .filter((r): r is PrimaryRecord => r.source === "primary")
     .map((r) => r.record);
 
+  // ── REQ-13: reconcileState runs FIRST ──────────────────────
+  const storyIds = new Set(stories.map((s) => s.id));
+  reconcileOrphans(primaryRecords, storyIds);
+  const danglingDeps = detectDanglingDeps(stories, storyIds);
+
   // Optional: filter by currentPlanStartTimeMs
   const startFilter = options.currentPlanStartTimeMs ?? null;
   const filteredRecords = startFilter !== null
     ? primaryRecords.filter((r) => new Date(r.timestamp).getTime() >= startFilter)
     : primaryRecords;
 
-  // Group primary records by storyId
+  // Group primary records by storyId (only records matching current plan)
   const recordsByStory = new Map<string, RunRecord[]>();
   for (const record of filteredRecords) {
     if (!record.storyId) continue;
+    if (!storyIds.has(record.storyId)) continue; // skip orphaned records
     const list = recordsByStory.get(record.storyId) ?? [];
     list.push(record);
     recordsByStory.set(record.storyId, list);
@@ -62,9 +72,6 @@ export async function assessPhase(
   for (const records of recordsByStory.values()) {
     records.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   }
-
-  // Build story ID set for dependency lookup
-  const storyIds = new Set(stories.map((s) => s.id));
 
   // Phase 1: classify each story using the 6-state precedence chain
   const statusMap = new Map<string, StoryStatusEntry>();
@@ -77,6 +84,20 @@ export async function assessPhase(
       (r) => r.evalVerdict !== "PASS",
     ).length;
     const retriesRemaining = Math.max(0, MAX_RETRIES - retryCount);
+
+    // Dangling-dep override: if this story has a dangling dep, force pending
+    const danglingDepIds = danglingDeps.get(story.id);
+    if (danglingDepIds && danglingDepIds.length > 0) {
+      statusMap.set(story.id, {
+        storyId: story.id,
+        status: "pending",
+        retryCount,
+        retriesRemaining,
+        priorEvalReport: getPriorEvalReport("pending", mostRecent),
+        evidence: `dep ${danglingDepIds.join(", ")} missing from plan`,
+      });
+      continue;
+    }
 
     const status = classifyStory(
       story,
@@ -101,12 +122,76 @@ export async function assessPhase(
   }
 
   const entries = sorted.map((s) => statusMap.get(s.id)!);
-  const brief = assemblePhaseTransitionBrief(entries, options, allRecords);
+  const brief = assemblePhaseTransitionBrief(entries, options, allRecords, stories);
 
   return {
     mode: "advisory",
     phaseId: options.phaseId ?? "default",
     brief,
+  };
+}
+
+/**
+ * REQ-13: Detect orphaned records — storyIds in run records not in current plan.
+ * Logs console.error for each orphan. Returns the set of orphaned storyIds.
+ */
+function reconcileOrphans(primaryRecords: RunRecord[], storyIds: Set<string>): Set<string> {
+  const orphanedIds = new Set<string>();
+  for (const record of primaryRecords) {
+    if (!record.storyId) continue;
+    if (!storyIds.has(record.storyId) && !orphanedIds.has(record.storyId)) {
+      orphanedIds.add(record.storyId);
+      console.error(`forge: orphaned record for storyId '${record.storyId}' not in current plan (excluded from classification)`);
+    }
+  }
+  return orphanedIds;
+}
+
+/**
+ * REQ-13: Detect dangling dependencies — stories referencing dep IDs not in plan.
+ * Logs console.error P45 warning for each dangling dep.
+ * Returns a Map from storyId → list of dangling dep IDs.
+ */
+function detectDanglingDeps(stories: Story[], storyIds: Set<string>): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  for (const story of stories) {
+    const dangling: string[] = [];
+    for (const dep of story.dependencies ?? []) {
+      if (!storyIds.has(dep)) {
+        dangling.push(dep);
+        console.error(`forge: dangling dependency '${dep}' referenced by story '${story.id}' not in current plan`);
+      }
+    }
+    if (dangling.length > 0) {
+      result.set(story.id, dangling);
+    }
+  }
+  return result;
+}
+
+/**
+ * REQ-13: Exported reconcileState — runs plan mutation reconciliation.
+ * Detects orphaned records, new stories, and dangling dependencies.
+ * Returns reconciliation info for observability.
+ */
+export interface ReconcileResult {
+  orphanedStoryIds: string[];
+  danglingDeps: Map<string, string[]>;
+}
+
+export async function reconcileState(plan: ExecutionPlan, projectPath: string): Promise<ReconcileResult> {
+  const allRecords = await readRunRecords(projectPath);
+  const primaryRecords = allRecords
+    .filter((r): r is PrimaryRecord => r.source === "primary")
+    .map((r) => r.record);
+
+  const storyIds = new Set(plan.stories.map((s) => s.id));
+  const orphanedIds = reconcileOrphans(primaryRecords, storyIds);
+  const danglingDepsMap = detectDanglingDeps(plan.stories, storyIds);
+
+  return {
+    orphanedStoryIds: [...orphanedIds],
+    danglingDeps: danglingDepsMap,
   };
 }
 
@@ -220,6 +305,7 @@ export function assemblePhaseTransitionBrief(
   entries: StoryStatusEntry[],
   options: AssessPhaseOptions = {},
   allRecords: ReadonlyArray<TaggedRunRecord> = [],
+  planStories: Story[] = [],
 ): PhaseTransitionBrief {
   const readyStories = entries
     .filter((e) => e.status === "ready" || e.status === "ready-for-retry")
@@ -234,7 +320,7 @@ export function assemblePhaseTransitionBrief(
   const totalCount = entries.length;
 
   const status = resolvePhaseStatus(entries, completedCount, totalCount);
-  const replanningNotes = buildReplanningNotes(failedStories, depFailedStories);
+  const replanningNotes = buildReplanningNotes(entries, planStories);
   const recommendation = buildRecommendation(status, readyStories, failedStories, entries);
 
   return {
@@ -275,24 +361,128 @@ function resolvePhaseStatus(
   return "in-progress";
 }
 
-function buildReplanningNotes(failedStories: string[], depFailedStories: string[]): ReplanningNote[] {
+function buildReplanningNotes(entries: StoryStatusEntry[], stories: Story[]): ReplanningNote[] {
   const notes: ReplanningNote[] = [];
-  for (const id of failedStories) {
+  const failedEntries = entries.filter((e) => e.status === "failed");
+  const depFailedEntries = entries.filter((e) => e.status === "dep-failed");
+
+  // v1.1 retries-exhausted trigger: one note per terminal-failed story
+  for (const entry of failedEntries) {
     notes.push({
       category: "ac-drift",
       severity: "blocking",
-      storyId: id,
-      message: `Story ${id} exhausted retry budget (3/3) — requires replan`,
+      affectedStories: [entry.storyId],
+      description: `retries-exhausted: Story ${entry.storyId} exhausted retry budget (${entry.retryCount}/${MAX_RETRIES}) — requires plan correction (re-scope, re-phrase ACs, or remove)`,
     });
   }
-  if (depFailedStories.length > 0) {
-    notes.push({
-      category: "dep-failed-chain",
-      severity: "blocking",
-      storyId: null,
-      message: `${depFailedStories.length} stories dep-failed: ${depFailedStories.join(", ")}`,
-    });
+
+  // v1.1 dep-failed-chain trigger: one note per distinct root failed story
+  if (depFailedEntries.length > 0) {
+    // Build adjacency: storyId → list of direct dependents
+    const dependentsMap = new Map<string, string[]>();
+    for (const story of stories) {
+      for (const dep of story.dependencies ?? []) {
+        const list = dependentsMap.get(dep) ?? [];
+        list.push(story.id);
+        dependentsMap.set(dep, list);
+      }
+    }
+
+    // For each root failed story, compute transitive closure of downstream dep-failed stories
+    const entryMap = new Map(entries.map((e) => [e.storyId, e]));
+    for (const root of failedEntries) {
+      const closure: string[] = [];
+      const queue = [root.storyId];
+      const visited = new Set<string>();
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const dependent of dependentsMap.get(current) ?? []) {
+          if (visited.has(dependent)) continue;
+          visited.add(dependent);
+          const depEntry = entryMap.get(dependent);
+          if (depEntry?.status === "dep-failed") {
+            closure.push(dependent);
+            queue.push(dependent);
+          }
+        }
+      }
+      if (closure.length > 0) {
+        notes.push({
+          category: "assumption-changed",
+          severity: "blocking",
+          affectedStories: [root.storyId, ...closure],
+          description: `dep-failed-chain: Root story ${root.storyId} failed; downstream dep-failed: ${closure.join(", ")}`,
+        });
+      }
+    }
   }
+
+  return notes;
+}
+
+/**
+ * Mechanical mapping from EscalationReason and EvalReport.verdict to ReplanningNote (REQ-10).
+ * No LLM calls — pure classification. Unknown reasons route to gap-found with P45 warning.
+ */
+export interface CollectReplanningInput {
+  escalationReason?: string;
+  evalVerdict?: "PASS" | "FAIL" | "INCONCLUSIVE";
+  storyId?: string;
+}
+
+const ESCALATION_REASON_TO_CATEGORY: Record<EscalationReason, ReplanningCategory> = {
+  "plateau": "partial-completion",
+  "no-op": "gap-found",
+  "max-iterations": "partial-completion",
+  "inconclusive": "gap-found",
+  "baseline-failed": "assumption-changed",
+};
+
+const KNOWN_ESCALATION_REASONS = new Set<string>(Object.keys(ESCALATION_REASON_TO_CATEGORY));
+
+export function collectReplanningNotes(inputs: CollectReplanningInput[]): ReplanningNote[] {
+  const notes: ReplanningNote[] = [];
+
+  for (const input of inputs) {
+    // Map escalation reasons
+    if (input.escalationReason) {
+      if (KNOWN_ESCALATION_REASONS.has(input.escalationReason)) {
+        const category = ESCALATION_REASON_TO_CATEGORY[input.escalationReason as EscalationReason];
+        notes.push({
+          category,
+          severity: category === "assumption-changed" ? "blocking" : "should-address",
+          affectedStories: input.storyId ? [input.storyId] : undefined,
+          description: `EscalationReason '${input.escalationReason}' mapped to ${category} for story ${input.storyId ?? "unknown"}`,
+        });
+      } else {
+        console.error(`WARNING: unknown EscalationReason routed to gap-found: ${input.escalationReason}`);
+        notes.push({
+          category: "gap-found",
+          severity: "informational",
+          affectedStories: input.storyId ? [input.storyId] : undefined,
+          description: `Unknown EscalationReason '${input.escalationReason}' routed to gap-found for story ${input.storyId ?? "unknown"}`,
+        });
+      }
+    }
+
+    // Map eval verdicts
+    if (input.evalVerdict === "FAIL") {
+      notes.push({
+        category: "ac-drift",
+        severity: "blocking",
+        affectedStories: input.storyId ? [input.storyId] : undefined,
+        description: `Eval verdict FAIL mapped to ac-drift for story ${input.storyId ?? "unknown"}`,
+      });
+    } else if (input.evalVerdict === "INCONCLUSIVE") {
+      notes.push({
+        category: "gap-found",
+        severity: "should-address",
+        affectedStories: input.storyId ? [input.storyId] : undefined,
+        description: `Eval verdict INCONCLUSIVE mapped to gap-found for story ${input.storyId ?? "unknown"}`,
+      });
+    }
+  }
+
   return notes;
 }
 
@@ -456,4 +646,148 @@ export async function recoverState(plan: ExecutionPlan, projectPath: string): Pr
   }
 
   return statusMap;
+}
+
+/**
+ * Aggregate observability status from run records (REQ-11).
+ * Returns accumulated cost, velocity (stories/hour), and optional audit entries.
+ */
+export interface AggregateStatusOptions {
+  includeAudit?: boolean;
+  currentPlanStartTimeMs?: number;
+  storyIds?: string[];
+}
+
+export interface AggregateStatusResult {
+  accumulatedCostUsd: number;
+  incompleteData: boolean;
+  velocityStoriesPerHour: number;
+  auditEntries?: ReadonlyArray<Record<string, unknown>>;
+}
+
+export async function aggregateStatus(projectPath: string, options: AggregateStatusOptions = {}): Promise<AggregateStatusResult> {
+  const allRecords = await readRunRecords(projectPath);
+  const primaryRecords = allRecords
+    .filter((r): r is PrimaryRecord => r.source === "primary")
+    .map((r) => r.record);
+
+  // Optional window clipping
+  const startFilter = options.currentPlanStartTimeMs ?? null;
+  const windowedRecords = startFilter !== null
+    ? primaryRecords.filter((r) => new Date(r.timestamp).getTime() >= startFilter)
+    : primaryRecords;
+
+  // Optional story ID filter
+  const storyFilter = options.storyIds ? new Set(options.storyIds) : null;
+  const filteredRecords = storyFilter
+    ? windowedRecords.filter((r) => r.storyId && storyFilter.has(r.storyId))
+    : windowedRecords;
+
+  // Accumulated cost
+  let accumulatedCostUsd = 0;
+  let incompleteData = false;
+  for (const record of filteredRecords) {
+    const cost = record.metrics.estimatedCostUsd;
+    if (cost === undefined || cost === null) {
+      incompleteData = true;
+      continue;
+    }
+    accumulatedCostUsd += cost;
+  }
+
+  // Velocity: completedStoryCount / elapsedHours
+  const passStoryIds = new Set<string>();
+  for (const record of filteredRecords) {
+    if (record.evalVerdict === "PASS" && record.storyId) {
+      passStoryIds.add(record.storyId);
+    }
+  }
+  const completedStoryCount = passStoryIds.size;
+
+  let velocityStoriesPerHour = 0;
+  if (completedStoryCount > 0 && filteredRecords.length > 0) {
+    const earliestTimestamp = filteredRecords.reduce((min, r) => {
+      return r.timestamp < min ? r.timestamp : min;
+    }, filteredRecords[0].timestamp);
+    const elapsedMs = Date.now() - new Date(earliestTimestamp).getTime();
+    const elapsedHours = elapsedMs / 3_600_000;
+    if (elapsedHours > 0) {
+      velocityStoriesPerHour = completedStoryCount / elapsedHours;
+    }
+  }
+
+  const result: AggregateStatusResult = {
+    accumulatedCostUsd,
+    incompleteData,
+    velocityStoriesPerHour,
+  };
+
+  if (options.includeAudit) {
+    result.auditEntries = await readAuditEntries(projectPath);
+  }
+
+  return result;
+}
+
+/**
+ * Graduate repeated failure patterns into structured findings (REQ-12).
+ * Dedupes by (storyId, escalationReason) BEFORE the ≥3 threshold to prevent
+ * a single retry-exhausted story from self-graduating.
+ */
+export interface GraduateFindingsOptions {
+  currentPlanStartTimeMs?: number;
+  storyIds?: string[];
+}
+
+export async function graduateFindings(projectPath: string, options: GraduateFindingsOptions = {}): Promise<GraduateFindingsResult> {
+  const windowInflationRisk = options.currentPlanStartTimeMs === undefined;
+
+  const allRecords = await readRunRecords(projectPath);
+  const primaryRecords = allRecords
+    .filter((r): r is PrimaryRecord => r.source === "primary")
+    .map((r) => r.record);
+
+  // Optional window clipping
+  const startFilter = options.currentPlanStartTimeMs ?? null;
+  const windowedRecords = startFilter !== null
+    ? primaryRecords.filter((r) => new Date(r.timestamp).getTime() >= startFilter)
+    : primaryRecords;
+
+  // Optional story ID filter
+  const storyFilter = options.storyIds ? new Set(options.storyIds) : null;
+  const filteredRecords = storyFilter
+    ? windowedRecords.filter((r) => r.storyId && storyFilter.has(r.storyId))
+    : windowedRecords;
+
+  // Dedup by (storyId, escalationReason) — each story contributes at most 1 per reason
+  const seen = new Set<string>();
+  const reasonCounts = new Map<string, Set<string>>();
+
+  for (const record of filteredRecords) {
+    if (!record.storyId) continue;
+    const reason = record.escalationReason;
+    if (!reason) continue;
+
+    const dedupKey = `${record.storyId}::${reason}`;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+
+    const storySet = reasonCounts.get(reason) ?? new Set<string>();
+    storySet.add(record.storyId);
+    reasonCounts.set(reason, storySet);
+  }
+
+  // Apply ≥3 threshold
+  const findings: Finding[] = [];
+  for (const [reason, storySet] of reasonCounts) {
+    if (storySet.size >= 3) {
+      findings.push({
+        escalationReason: reason,
+        distinctStoryCount: storySet.size,
+        storyIds: [...storySet].sort(),
+      });
+    }
+  }
+
+  return { findings, windowInflationRisk };
 }

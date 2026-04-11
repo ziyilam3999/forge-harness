@@ -153,8 +153,61 @@ export async function readRunRecords(projectPath: string): Promise<ReadonlyArray
 }
 
 /**
- * Placeholder for audit log reader (full implementation in PH-03 US-03 per REQ-11).
+ * Read audit entries from `.forge/audit/*.jsonl` (REQ-11).
+ * Same graceful-degradation contract as readRunRecords:
+ * corrupt JSONL, missing dirs, permission-denied are logged and skipped.
  */
-export async function readAuditEntries(_projectPath: string): Promise<ReadonlyArray<unknown>> {
-  return [];
+export async function readAuditEntries(projectPath: string, toolName?: string): Promise<ReadonlyArray<Record<string, unknown>>> {
+  const auditDir = join(projectPath, ".forge", "audit");
+  const results: Record<string, unknown>[] = [];
+
+  let files: string[];
+  try {
+    files = await readdir(auditDir);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return [];
+    if (code === "EACCES" || code === "EPERM") {
+      console.error(`forge: permission denied reading ${auditDir} (skipping)`);
+      return [];
+    }
+    throw err;
+  }
+
+  const jsonlFiles = files.filter((f) => f.endsWith(".jsonl")).sort();
+
+  for (const file of jsonlFiles) {
+    // Optional tool-name filter: only read files matching the tool name
+    if (toolName && !file.includes(toolName)) continue;
+
+    let content: string;
+    try {
+      content = await readFile(join(auditDir, file), "utf-8");
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EACCES" || code === "EPERM") {
+        console.error(`forge: permission denied reading ${file} (skipping)`);
+        continue;
+      }
+      console.error(`forge: error reading ${file} (skipping)`);
+      continue;
+    }
+
+    const lines = content.split("\n").filter((line) => line.trim().length > 0);
+
+    for (const line of lines) {
+      try {
+        const parsed: unknown = JSON.parse(line);
+        if (typeof parsed === "object" && parsed !== null) {
+          results.push(parsed as Record<string, unknown>);
+        } else {
+          console.error(`forge: non-object entry in ${file} (skipping)`);
+        }
+      } catch {
+        console.error(`forge: corrupt JSONL line in ${file} (skipping)`);
+      }
+    }
+  }
+
+  return results;
 }

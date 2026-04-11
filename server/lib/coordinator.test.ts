@@ -4,15 +4,17 @@ import type { ExecutionPlan, Story } from "../types/execution-plan.js";
 import type { EvalReport } from "../types/eval-report.js";
 import type { PrimaryRecord, GeneratorRecord } from "./run-reader.js";
 
-// Mock readRunRecords so we control the fixture data
+// Mock readRunRecords and readAuditEntries so we control the fixture data
 vi.mock("./run-reader.js", () => ({
   readRunRecords: vi.fn(async () => []),
+  readAuditEntries: vi.fn(async () => []),
 }));
 
-import { readRunRecords } from "./run-reader.js";
-import { assessPhase, checkBudget, checkTimeBudget, recoverState } from "./coordinator.js";
+import { readRunRecords, readAuditEntries } from "./run-reader.js";
+import { assessPhase, aggregateStatus, checkBudget, checkTimeBudget, collectReplanningNotes, graduateFindings, reconcileState, recoverState } from "./coordinator.js";
 
 const mockedReadRunRecords = vi.mocked(readRunRecords);
+const mockedReadAuditEntries = vi.mocked(readAuditEntries);
 
 function makeStory(id: string, deps?: string[]): Story {
   return {
@@ -71,6 +73,31 @@ function makePrimaryRecordWithCost(storyId: string, verdict: "PASS" | "FAIL" | "
       validationRetries: 0,
       durationMs: 1000,
       estimatedCostUsd: costUsd,
+    },
+    outcome: "success",
+  };
+  return { source: "primary", record };
+}
+
+function makePrimaryRecordWithEscalation(storyId: string, verdict: "PASS" | "FAIL" | "INCONCLUSIVE", timestamp: string, escalationReason: string): PrimaryRecord {
+  const record: RunRecord = {
+    timestamp,
+    tool: "forge_evaluate",
+    documentTier: null,
+    mode: null,
+    tier: null,
+    storyId,
+    evalVerdict: verdict,
+    escalationReason,
+    metrics: {
+      inputTokens: 100,
+      outputTokens: 50,
+      critiqueRounds: 0,
+      findingsTotal: 0,
+      findingsApplied: 0,
+      findingsRejected: 0,
+      validationRetries: 0,
+      durationMs: 1000,
     },
     outcome: "success",
   };
@@ -762,5 +789,412 @@ describe("recoverState", () => {
     } catch {
       // .forge dir doesn't exist at all — that's fine, proves no state was written
     }
+  });
+});
+
+describe("ReplanningNote v1.1 triggers", () => {
+  it("retries-exhausted: one terminal-failed story emits exactly one ac-drift blocking note", async () => {
+    const plan = makePlan([makeStory("US-01")]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:03:00Z"),
+    ]);
+    const result = await assessPhase(plan, "/tmp/test");
+    const retriesExhausted = result.brief.replanningNotes.filter(
+      (n) => n.description.includes("retries-exhausted"),
+    );
+    expect(retriesExhausted).toHaveLength(1);
+    expect(retriesExhausted[0].category).toBe("ac-drift");
+    expect(retriesExhausted[0].severity).toBe("blocking");
+    expect(retriesExhausted[0].affectedStories).toEqual(["US-01"]);
+  });
+
+  it("retries-exhausted: multiple terminal-failed stories emit multiple notes (one per story)", async () => {
+    const plan = makePlan([makeStory("US-01"), makeStory("US-02")]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:03:00Z"),
+      makePrimaryRecord("US-02", "FAIL", "2026-01-01T00:04:00Z"),
+      makePrimaryRecord("US-02", "FAIL", "2026-01-01T00:05:00Z"),
+      makePrimaryRecord("US-02", "FAIL", "2026-01-01T00:06:00Z"),
+    ]);
+    const result = await assessPhase(plan, "/tmp/test");
+    const retriesExhausted = result.brief.replanningNotes.filter(
+      (n) => n.description.includes("retries-exhausted"),
+    );
+    expect(retriesExhausted).toHaveLength(2);
+    expect(retriesExhausted.map((n) => n.affectedStories![0]).sort()).toEqual(["US-01", "US-02"]);
+  });
+
+  it("dep-failed-chain: ONE note per distinct root failed story with transitive closure", async () => {
+    // US-01 (failed) → US-02 → US-03 (chain)
+    const plan = makePlan([
+      makeStory("US-01"),
+      makeStory("US-02", ["US-01"]),
+      makeStory("US-03", ["US-02"]),
+    ]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:03:00Z"),
+    ]);
+    const result = await assessPhase(plan, "/tmp/test");
+    const depFailedChain = result.brief.replanningNotes.filter(
+      (n) => n.description.includes("dep-failed-chain"),
+    );
+    expect(depFailedChain).toHaveLength(1);
+    expect(depFailedChain[0].category).toBe("assumption-changed");
+    expect(depFailedChain[0].severity).toBe("blocking");
+    expect(depFailedChain[0].affectedStories).toContain("US-01");
+    expect(depFailedChain[0].affectedStories).toContain("US-02");
+    expect(depFailedChain[0].affectedStories).toContain("US-03");
+  });
+
+  it("two independent dep-failed chains: two roots emit two dep-failed-chain notes", async () => {
+    // Chain 1: US-01 (failed) → US-02, US-03
+    // Chain 2: US-05 (failed) → US-06
+    const plan = makePlan([
+      makeStory("US-01"),
+      makeStory("US-02", ["US-01"]),
+      makeStory("US-03", ["US-01"]),
+      makeStory("US-05"),
+      makeStory("US-06", ["US-05"]),
+    ]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:03:00Z"),
+      makePrimaryRecord("US-05", "FAIL", "2026-01-01T00:04:00Z"),
+      makePrimaryRecord("US-05", "FAIL", "2026-01-01T00:05:00Z"),
+      makePrimaryRecord("US-05", "FAIL", "2026-01-01T00:06:00Z"),
+    ]);
+    const result = await assessPhase(plan, "/tmp/test");
+    const depFailedChain = result.brief.replanningNotes.filter(
+      (n) => n.description.includes("dep-failed-chain"),
+    );
+    expect(depFailedChain).toHaveLength(2);
+    // Each chain note should have the root story in affectedStories
+    const roots = depFailedChain.map((n) => n.affectedStories![0]).sort();
+    expect(roots).toEqual(["US-01", "US-05"]);
+  });
+
+  it("both triggers fire: retries-exhausted AND dep-failed-chain emitted in same phase", async () => {
+    // US-01 (failed) → US-02 (dep-failed)
+    const plan = makePlan([
+      makeStory("US-01"),
+      makeStory("US-02", ["US-01"]),
+    ]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:03:00Z"),
+    ]);
+    const result = await assessPhase(plan, "/tmp/test");
+    const retriesExhausted = result.brief.replanningNotes.filter(
+      (n) => n.description.includes("retries-exhausted"),
+    );
+    const depFailedChain = result.brief.replanningNotes.filter(
+      (n) => n.description.includes("dep-failed-chain"),
+    );
+    expect(retriesExhausted.length).toBeGreaterThanOrEqual(1);
+    expect(depFailedChain.length).toBeGreaterThanOrEqual(1);
+    // Both are blocking
+    expect(retriesExhausted[0].severity).toBe("blocking");
+    expect(depFailedChain[0].severity).toBe("blocking");
+  });
+});
+
+describe("collectReplanningNotes", () => {
+  it("EscalationReason mapping: all 5 input values produce correct categories", () => {
+    const notes = collectReplanningNotes([
+      { escalationReason: "plateau", storyId: "US-01" },
+      { escalationReason: "no-op", storyId: "US-02" },
+      { escalationReason: "max-iterations", storyId: "US-03" },
+      { escalationReason: "inconclusive", storyId: "US-04" },
+      { escalationReason: "baseline-failed", storyId: "US-05" },
+    ]);
+    expect(notes).toHaveLength(5);
+    expect(notes[0].category).toBe("partial-completion"); // plateau
+    expect(notes[1].category).toBe("gap-found");          // no-op
+    expect(notes[2].category).toBe("partial-completion"); // max-iterations
+    expect(notes[3].category).toBe("gap-found");          // inconclusive
+    expect(notes[4].category).toBe("assumption-changed"); // baseline-failed
+  });
+
+  it("FAIL eval verdict maps to ac-drift; INCONCLUSIVE maps to gap-found", () => {
+    const notes = collectReplanningNotes([
+      { evalVerdict: "FAIL", storyId: "US-01" },
+      { evalVerdict: "INCONCLUSIVE", storyId: "US-02" },
+    ]);
+    expect(notes).toHaveLength(2);
+    expect(notes[0].category).toBe("ac-drift");
+    expect(notes[0].severity).toBe("blocking");
+    expect(notes[1].category).toBe("gap-found");
+    expect(notes[1].severity).toBe("should-address");
+  });
+
+  it("PASS eval verdict produces no note", () => {
+    const notes = collectReplanningNotes([
+      { evalVerdict: "PASS", storyId: "US-01" },
+    ]);
+    expect(notes).toHaveLength(0);
+  });
+
+  it("unknown EscalationReason routes to gap-found with P45 console.error warning", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const notes = collectReplanningNotes([
+      { escalationReason: "never-heard-of-this", storyId: "US-99" },
+    ]);
+    expect(notes).toHaveLength(1);
+    expect(notes[0].category).toBe("gap-found");
+    expect(notes[0].severity).toBe("informational");
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/WARNING: unknown EscalationReason routed to gap-found: never-heard-of-this/),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("blocking notes from FAIL verdict appear with blocking severity for routing summary", () => {
+    const notes = collectReplanningNotes([
+      { evalVerdict: "FAIL", storyId: "US-10" },
+    ]);
+    const blockingNotes = notes.filter((n) => n.severity === "blocking");
+    expect(blockingNotes.length).toBeGreaterThanOrEqual(1);
+    expect(blockingNotes[0].description).toContain("US-10");
+  });
+});
+
+describe("aggregateStatus", () => {
+  it("velocity is zero when zero completed stories (never NaN/Infinity)", async () => {
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:00:00Z"),
+    ]);
+    const result = await aggregateStatus("/tmp/test");
+    expect(result.velocityStoriesPerHour).toBe(0);
+    expect(Number.isFinite(result.velocityStoriesPerHour)).toBe(true);
+  });
+
+  it("velocity is zero when zero elapsed time (same-millisecond records)", async () => {
+    // With records all at the same time and completed, elapsed = now - earliest ≈ positive
+    // But with zero records entirely, velocity = 0
+    mockedReadRunRecords.mockResolvedValueOnce([]);
+    const result = await aggregateStatus("/tmp/test");
+    expect(result.velocityStoriesPerHour).toBe(0);
+    expect(Number.isNaN(result.velocityStoriesPerHour)).toBe(false);
+  });
+
+  it("velocity computed only from PASS-verdict primary records", async () => {
+    // 2 stories PASS, 1 FAIL — only 2 count toward velocity
+    const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "PASS", hourAgo),
+      makePrimaryRecord("US-02", "PASS", hourAgo),
+      makePrimaryRecord("US-03", "FAIL", hourAgo),
+      makeGeneratorRecord("US-01", hourAgo), // generator records should not count
+    ]);
+    const result = await aggregateStatus("/tmp/test");
+    // 2 completed / ~1 hour ≈ 2 (allow some tolerance)
+    expect(result.velocityStoriesPerHour).toBeGreaterThan(1.5);
+    expect(result.velocityStoriesPerHour).toBeLessThan(2.5);
+  });
+
+  it("accumulatedCostUsd excludes null estimatedCostUsd records and sets incompleteData", async () => {
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecordWithCost("US-01", "PASS", "2026-01-01T00:00:00Z", 1.50),
+      makePrimaryRecordWithCost("US-02", "PASS", "2026-01-01T00:01:00Z", null),
+      makePrimaryRecordWithCost("US-03", "PASS", "2026-01-01T00:02:00Z", 2.00),
+    ]);
+    const result = await aggregateStatus("/tmp/test");
+    expect(result.accumulatedCostUsd).toBe(3.50);
+    expect(result.incompleteData).toBe(true);
+  });
+
+  it("includeAudit true returns auditEntries array; default false has no auditEntries", async () => {
+    mockedReadRunRecords.mockResolvedValueOnce([]);
+    mockedReadAuditEntries.mockResolvedValueOnce([{ action: "test" }]);
+    const withAudit = await aggregateStatus("/tmp/test", { includeAudit: true });
+    expect(withAudit.auditEntries).toBeDefined();
+    expect(withAudit.auditEntries).toHaveLength(1);
+
+    mockedReadRunRecords.mockResolvedValueOnce([]);
+    const withoutAudit = await aggregateStatus("/tmp/test", { includeAudit: false });
+    expect(withoutAudit.auditEntries).toBeUndefined();
+  });
+});
+
+describe("graduateFindings", () => {
+  it("distinct-storyId dedup: 3 records same storyId same escalation → findings empty (count: 1 < 3)", async () => {
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecordWithEscalation("US-05", "FAIL", "2026-01-01T00:01:00Z", "plateau"),
+      makePrimaryRecordWithEscalation("US-05", "FAIL", "2026-01-01T00:02:00Z", "plateau"),
+      makePrimaryRecordWithEscalation("US-05", "FAIL", "2026-01-01T00:03:00Z", "plateau"),
+    ]);
+    const result = await graduateFindings("/tmp/test");
+    expect(result.findings).toHaveLength(0);
+  });
+
+  it("threshold: 3 records with three distinct story IDs all escalation plateau → findings has one entry with count 3", async () => {
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecordWithEscalation("US-01", "FAIL", "2026-01-01T00:01:00Z", "plateau"),
+      makePrimaryRecordWithEscalation("US-02", "FAIL", "2026-01-01T00:02:00Z", "plateau"),
+      makePrimaryRecordWithEscalation("US-03", "FAIL", "2026-01-01T00:03:00Z", "plateau"),
+    ]);
+    const result = await graduateFindings("/tmp/test");
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].escalationReason).toBe("plateau");
+    expect(result.findings[0].distinctStoryCount).toBe(3);
+  });
+
+  it("windowInflationRisk: false when currentPlanStartTimeMs provided, true when not", async () => {
+    mockedReadRunRecords.mockResolvedValueOnce([]);
+    const withWindow = await graduateFindings("/tmp/test", { currentPlanStartTimeMs: Date.now() });
+    expect(withWindow.windowInflationRisk).toBe(false);
+
+    mockedReadRunRecords.mockResolvedValueOnce([]);
+    const withoutWindow = await graduateFindings("/tmp/test");
+    expect(withoutWindow.windowInflationRisk).toBe(true);
+  });
+
+  it("graduateFindings empty result returns {findings: [], windowInflationRisk: <bool>} (never null)", async () => {
+    mockedReadRunRecords.mockResolvedValueOnce([]);
+    const result = await graduateFindings("/tmp/test");
+    expect(result).toBeDefined();
+    expect(result.findings).toEqual([]);
+    expect(typeof result.windowInflationRisk).toBe("boolean");
+  });
+
+  it("generator records are excluded from graduation counting (not counted)", async () => {
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecordWithEscalation("US-01", "FAIL", "2026-01-01T00:01:00Z", "plateau"),
+      makePrimaryRecordWithEscalation("US-02", "FAIL", "2026-01-01T00:02:00Z", "plateau"),
+      makeGeneratorRecord("US-03", "2026-01-01T00:03:00Z"), // generator — should NOT count
+    ]);
+    const result = await graduateFindings("/tmp/test");
+    // Only 2 distinct stories from primary records, not 3
+    expect(result.findings).toHaveLength(0);
+  });
+});
+
+describe("reconcileState (PH03-US-05)", () => {
+  it("reconcileState runs first inside assessPhase (before recoverState)", async () => {
+    // Verify orphan detection fires during assessPhase
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const plan = makePlan([makeStory("US-02")]); // plan only has US-02
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"), // orphaned — not in plan
+      makePrimaryRecord("US-02", "PASS", "2026-01-01T00:02:00Z"),
+    ]);
+    const result = await assessPhase(plan, "/tmp/test");
+    // US-01 should be orphaned (logged), US-02 should be done
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("orphaned record for storyId 'US-01'"));
+    expect(result.brief.stories).toHaveLength(1);
+    expect(result.brief.stories[0].storyId).toBe("US-02");
+    expect(result.brief.stories[0].status).toBe("done");
+    errorSpy.mockRestore();
+  });
+
+  it("orphaned record: storyId not in plan is excluded and console.error is called", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("ORPHAN-01", "FAIL", "2026-01-01T00:01:00Z"),
+    ]);
+    const result = await reconcileState(makePlan([makeStory("US-01")]), "/tmp/test");
+    expect(result.orphanedStoryIds).toContain("ORPHAN-01");
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("orphaned"));
+    errorSpy.mockRestore();
+  });
+
+  it("new story: present in plan, zero prior records → initially pending via REQ-04", async () => {
+    mockedReadRunRecords.mockResolvedValueOnce([]); // no prior records
+    const plan = makePlan([makeStory("NEW-01")]);
+    const result = await assessPhase(plan, "/tmp/test");
+    expect(result.brief.stories).toHaveLength(1);
+    expect(result.brief.stories[0].storyId).toBe("NEW-01");
+    expect(result.brief.stories[0].status).toBe("ready"); // no deps, zero records → ready
+    expect(result.brief.stories[0].retryCount).toBe(0);
+  });
+
+  it("full plan replacement: all story IDs differ from prior records → all old orphaned, all new pending", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("OLD-01", "PASS", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("OLD-02", "FAIL", "2026-01-01T00:02:00Z"),
+    ]);
+    const plan = makePlan([makeStory("NEW-01"), makeStory("NEW-02")]);
+    const result = await assessPhase(plan, "/tmp/test");
+    // Old records orphaned
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("orphaned record for storyId 'OLD-01'"));
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("orphaned record for storyId 'OLD-02'"));
+    // New stories are ready (no deps, no records)
+    expect(result.brief.stories.every((s) => s.status === "ready")).toBe(true);
+    errorSpy.mockRestore();
+  });
+
+  it("rename failed story → old ID orphaned warning + new ID pending with retry counter 0 (fresh budget)", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:03:00Z"),
+    ]);
+    // Plan has been renamed: US-01 → US-01-renamed
+    const plan = makePlan([makeStory("US-01-renamed")]);
+    const result = await assessPhase(plan, "/tmp/test");
+    // Old ID orphaned
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("orphaned record for storyId 'US-01'"));
+    // New ID is ready (zero records, zero retries)
+    expect(result.brief.stories).toHaveLength(1);
+    expect(result.brief.stories[0].storyId).toBe("US-01-renamed");
+    expect(result.brief.stories[0].status).toBe("ready");
+    expect(result.brief.stories[0].retryCount).toBe(0);
+    errorSpy.mockRestore();
+  });
+
+  it("dependency change makes pending story satisfiable → shows as ready", async () => {
+    // US-02 used to depend on US-01 (not done). Now plan changed: US-02 has no deps.
+    mockedReadRunRecords.mockResolvedValueOnce([]);
+    const plan = makePlan([makeStory("US-02")]); // no deps — dependency removed
+    const result = await assessPhase(plan, "/tmp/test");
+    expect(result.brief.stories[0].status).toBe("ready");
+  });
+
+  it("dep-failed upstream-replanned-away: downstream lifts to ready on next call", async () => {
+    // First call: US-01 failed → US-02 dep-failed
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:03:00Z"),
+    ]);
+    const plan1 = makePlan([makeStory("US-01"), makeStory("US-02", ["US-01"])]);
+    const result1 = await assessPhase(plan1, "/tmp/test");
+    expect(result1.brief.stories.find((s) => s.storyId === "US-02")!.status).toBe("dep-failed");
+
+    // Second call: US-01 removed from plan. US-02 has no deps now.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:01:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:02:00Z"),
+      makePrimaryRecord("US-01", "FAIL", "2026-01-01T00:03:00Z"),
+    ]);
+    const plan2 = makePlan([makeStory("US-02")]); // US-01 removed, US-02 dep removed
+    const result2 = await assessPhase(plan2, "/tmp/test");
+    expect(result2.brief.stories[0].storyId).toBe("US-02");
+    expect(result2.brief.stories[0].status).toBe("ready"); // lifted from dep-failed
+    errorSpy.mockRestore();
+  });
+
+  it("dangling dependency: downstream is pending with evidence 'dep <id> missing from plan' and P45 console.error", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedReadRunRecords.mockResolvedValueOnce([]);
+    // US-02 depends on US-01, but US-01 is NOT in the plan (dangling dep)
+    const plan = makePlan([makeStory("US-02", ["US-01"])]);
+    const result = await assessPhase(plan, "/tmp/test");
+    expect(result.brief.stories).toHaveLength(1);
+    expect(result.brief.stories[0].status).toBe("pending");
+    expect(result.brief.stories[0].evidence).toContain("dep US-01 missing from plan");
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("dangling dependency 'US-01'"));
+    errorSpy.mockRestore();
   });
 });

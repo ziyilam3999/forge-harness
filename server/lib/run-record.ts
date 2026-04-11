@@ -19,6 +19,7 @@ export interface RunRecord {
   tier: "quick" | "standard" | "thorough" | null;
   storyId?: string;
   evalVerdict?: "PASS" | "FAIL" | "INCONCLUSIVE";
+  escalationReason?: string;
   evalReport?: EvalReport;
   metrics: {
     inputTokens: number;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { evaluateStory } from "../lib/evaluator.js";
 import { scanCodebase } from "../lib/codebase-scan.js";
 import { loadPlan } from "../lib/plan-loader.js";
@@ -18,6 +19,7 @@ import {
   buildDivergenceEvalUserMessage,
 } from "../lib/prompts/divergence-eval.js";
 import type { CoherenceReport, CoherenceGap } from "../types/coherence-report.js";
+import { verifySpecVocabularyFromContent } from "../lib/spec-vocabulary-check.js";
 import type {
   DivergenceReport,
   ForwardDivergence,
@@ -243,6 +245,34 @@ async function handleCoherenceEval(
 
     // Validate the response structure
     const gaps = Array.isArray(parsed.gaps) ? parsed.gaps as CoherenceGap[] : [];
+
+    // Mechanical spec-vocabulary-drift check (F-03 secondary, PH-04 US-05).
+    // Runs alongside LLM coherence — zero LLM calls, pure regex matching.
+    if (input.prdContent && input.projectPath) {
+      try {
+        const sourceDirs = [
+          join(input.projectPath, "server", "types"),
+          join(input.projectPath, "server", "lib"),
+        ];
+        const driftResults = await verifySpecVocabularyFromContent(input.prdContent, sourceDirs);
+        const unknownFields = driftResults.filter((r) => r.kind === "unknown-field");
+        for (const drift of unknownFields) {
+          gaps.push({
+            id: `VOCAB-${gaps.length + 1}`,
+            severity: "MAJOR",
+            sourceDocument: "prd",
+            targetDocument: "phasePlan",
+            description: `spec-vocabulary-drift: PRD references \`${drift.type}.${drift.field}\` (line ${drift.line}) but field '${drift.field}' does not exist on type '${drift.type}'`,
+            missingRequirement: `Type ${drift.type} has no field named '${drift.field}' — possible vocabulary drift from an older spec revision`,
+          });
+        }
+      } catch (err) {
+        console.error(
+          `forge_evaluate: spec-vocabulary-check failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     const summary =
       typeof parsed.summary === "string"
         ? parsed.summary

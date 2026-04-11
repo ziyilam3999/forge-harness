@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { RunRecord } from "./run-record.js";
 import type { ExecutionPlan, Story } from "../types/execution-plan.js";
 import type { EvalReport } from "../types/eval-report.js";
@@ -1196,5 +1196,163 @@ describe("reconcileState (PH03-US-05)", () => {
     expect(result.brief.stories[0].evidence).toContain("dep US-01 missing from plan");
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("dangling dependency 'US-01'"));
     errorSpy.mockRestore();
+  });
+});
+
+// ── loadCoordinateConfig tests (PH04-US-01b) ───────────────
+
+import { loadCoordinateConfig, assemblePhaseTransitionBrief, type ResolvedConfig } from "./coordinator.js";
+import { writeFile as fsWriteFile, mkdir as fsMkdir, rm as fsRm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+describe("loadCoordinateConfig", () => {
+  const CFG_DIR = join(tmpdir(), "coord-config-test-" + process.pid);
+  const FORGE_DIR = join(CFG_DIR, ".forge");
+
+  beforeEach(async () => {
+    await fsMkdir(FORGE_DIR, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fsRm(CFG_DIR, { recursive: true, force: true });
+  });
+
+  it("config no file → defaults applied with all 'default' provenance", async () => {
+    const cfg = await loadCoordinateConfig(CFG_DIR);
+    expect(cfg.storyOrdering).toBe("topological");
+    expect(cfg.phaseBoundaryBehavior).toBe("auto-advance");
+    expect(cfg.briefVerbosity).toBe("concise");
+    expect(cfg.configSource["storyOrdering"]).toBe("default");
+    expect(cfg.configSource["phaseBoundaryBehavior"]).toBe("default");
+    expect(cfg.configSource["briefVerbosity"]).toBe("default");
+  });
+
+  it("config full file → all 4 fields applied with 'file' provenance", async () => {
+    await fsWriteFile(join(FORGE_DIR, "coordinate.config.json"), JSON.stringify({
+      storyOrdering: "depth-first",
+      phaseBoundaryBehavior: "halt-hard",
+      briefVerbosity: "detailed",
+      observability: { logLevel: "debug", writeAuditLog: false, writeRunRecord: true },
+    }));
+
+    const cfg = await loadCoordinateConfig(CFG_DIR);
+    expect(cfg.storyOrdering).toBe("depth-first");
+    expect(cfg.phaseBoundaryBehavior).toBe("halt-hard");
+    expect(cfg.briefVerbosity).toBe("detailed");
+    expect(cfg.configSource["storyOrdering"]).toBe("file");
+    expect(cfg.configSource["phaseBoundaryBehavior"]).toBe("file");
+    expect(cfg.configSource["briefVerbosity"]).toBe("file");
+    expect(cfg.configSource["observability"]).toBe("file");
+  });
+
+  it("config args override file → mixed provenance", async () => {
+    await fsWriteFile(join(FORGE_DIR, "coordinate.config.json"), JSON.stringify({
+      storyOrdering: "depth-first",
+      briefVerbosity: "detailed",
+    }));
+
+    const cfg = await loadCoordinateConfig(CFG_DIR, { storyOrdering: "small-first" });
+    expect(cfg.storyOrdering).toBe("small-first");
+    expect(cfg.briefVerbosity).toBe("detailed");
+    expect(cfg.configSource["storyOrdering"]).toBe("args");
+    expect(cfg.configSource["briefVerbosity"]).toBe("file");
+  });
+
+  it("config corrupt JSON → graceful fallback to defaults, console.error called", async () => {
+    await fsWriteFile(join(FORGE_DIR, "coordinate.config.json"), "{broken json!!");
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const cfg = await loadCoordinateConfig(CFG_DIR);
+    expect(cfg.storyOrdering).toBe("topological");
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+
+  it("config schema-invalid storyOrdering 'random' → field skipped, valid fields applied", async () => {
+    await fsWriteFile(join(FORGE_DIR, "coordinate.config.json"), JSON.stringify({
+      storyOrdering: "random",
+      briefVerbosity: "detailed",
+    }));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const cfg = await loadCoordinateConfig(CFG_DIR);
+    expect(cfg.storyOrdering).toBe("topological"); // invalid → default
+    expect(cfg.briefVerbosity).toBe("detailed");    // valid → applied
+    errSpy.mockRestore();
+  });
+
+  it("config mid-write race (truncated JSON) → graceful fallback", async () => {
+    await fsWriteFile(join(FORGE_DIR, "coordinate.config.json"), '{"storyOrdering": "dep');
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const cfg = await loadCoordinateConfig(CFG_DIR);
+    expect(cfg.storyOrdering).toBe("topological");
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+
+  it("config budgetUsd in file → rejected by strict with named-field warning", async () => {
+    await fsWriteFile(join(FORGE_DIR, "coordinate.config.json"), JSON.stringify({
+      budgetUsd: 100,
+      storyOrdering: "depth-first",
+    }));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const cfg = await loadCoordinateConfig(CFG_DIR);
+    // storyOrdering should still be salvaged
+    expect(cfg.storyOrdering).toBe("depth-first");
+    // Warning should name budgetUsd as resource-cap
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("budgetUsd"));
+    errSpy.mockRestore();
+  });
+
+  it("writeRunRecord false → P45 warning + crash recovery disabled in recommendation", async () => {
+    await fsWriteFile(join(FORGE_DIR, "coordinate.config.json"), JSON.stringify({
+      observability: { writeRunRecord: false },
+    }));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const cfg = await loadCoordinateConfig(CFG_DIR);
+    expect(cfg.observability.writeRunRecord).toBe(false);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("writeRunRecord"));
+
+    // Also verify the recommendation prefix via assemblePhaseTransitionBrief
+    const brief = assemblePhaseTransitionBrief([], {}, [], [], { config: cfg });
+    expect(brief.recommendation).toContain("WARNING: crash recovery disabled.");
+    errSpy.mockRestore();
+  });
+});
+
+describe("storyOrdering depth-first behavioral", () => {
+  it("depth-first chain: finishes one chain before crossing to another", async () => {
+    // 2-chain plan: A→B→C and D→E→F
+    // depth-first should process A,B,C then D,E,F (not interleave)
+    mockedReadRunRecords.mockResolvedValueOnce([]);
+    const plan = makePlan([
+      makeStory("A", []),
+      makeStory("B", ["A"]),
+      makeStory("C", ["B"]),
+      makeStory("D", []),
+      makeStory("E", ["D"]),
+      makeStory("F", ["E"]),
+    ]);
+
+    const cfg: ResolvedConfig = {
+      storyOrdering: "depth-first",
+      phaseBoundaryBehavior: "auto-advance",
+      briefVerbosity: "concise",
+      observability: { logLevel: "info", writeAuditLog: true, writeRunRecord: true },
+      configSource: { storyOrdering: "file" },
+    };
+
+    const result = await assessPhase(plan, "/tmp/test", { config: cfg });
+    const readyIds = result.brief.readyStories;
+
+    // With depth-first ordering, only root stories should be ready
+    // (A and D have no deps, so both are ready — topo order gives them first)
+    expect(readyIds).toContain("A");
+    expect(readyIds).toContain("D");
+    expect(result.brief.stories).toHaveLength(6);
   });
 });

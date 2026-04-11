@@ -18,14 +18,151 @@ import type {
 } from "../types/coordinate-result.js";
 import { topoSort } from "./topo-sort.js";
 import { readRunRecords, readAuditEntries, type PrimaryRecord, type TaggedRunRecord } from "./run-reader.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { z } from "zod";
 
 const MAX_RETRIES = 3;
+
+// ── Config file schema (REQ-15) ─────────────────────────────
+
+const observabilitySchema = z.object({
+  logLevel: z.enum(["debug", "info", "warn", "error"]).optional(),
+  writeAuditLog: z.boolean().optional(),
+  writeRunRecord: z.boolean().optional(),
+}).optional();
+
+const coordinateConfigSchema = z.object({
+  storyOrdering: z.enum(["topological", "depth-first", "small-first"]).optional(),
+  phaseBoundaryBehavior: z.enum(["auto-advance", "halt-and-notify", "halt-hard"]).optional(),
+  briefVerbosity: z.enum(["concise", "detailed"]).optional(),
+  observability: observabilitySchema,
+}).strict();
+
+export type CoordinateConfig = z.infer<typeof coordinateConfigSchema>;
+
+export interface ResolvedConfig {
+  storyOrdering: "topological" | "depth-first" | "small-first";
+  phaseBoundaryBehavior: "auto-advance" | "halt-and-notify" | "halt-hard";
+  briefVerbosity: "concise" | "detailed";
+  observability: {
+    logLevel: "debug" | "info" | "warn" | "error";
+    writeAuditLog: boolean;
+    writeRunRecord: boolean;
+  };
+  configSource: Record<string, "file" | "args" | "default">;
+}
+
+const CONFIG_DEFAULTS: Omit<ResolvedConfig, "configSource"> = {
+  storyOrdering: "topological",
+  phaseBoundaryBehavior: "auto-advance",
+  briefVerbosity: "concise",
+  observability: { logLevel: "info", writeAuditLog: true, writeRunRecord: true },
+};
+
+const KNOWN_CONFIG_FIELDS = ["storyOrdering", "phaseBoundaryBehavior", "briefVerbosity", "observability"];
+const RESOURCE_CAP_FIELDS = ["budgetUsd", "maxTimeMs", "escalationThresholds"];
+
+/**
+ * Load optional `.forge/coordinate.config.json` (REQ-15).
+ * Missing file → defaults (not an error). Corrupt/invalid → console.error + defaults.
+ * Zod .strict() rejects unknown top-level fields with a named-field warning.
+ */
+export async function loadCoordinateConfig(projectPath: string, args: Partial<CoordinateConfig> = {}): Promise<ResolvedConfig> {
+  const configPath = join(projectPath, ".forge", "coordinate.config.json");
+  const configSource: Record<string, "file" | "args" | "default"> = {};
+
+  let fileConfig: CoordinateConfig = {};
+  try {
+    const raw = await readFile(configPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    const result = coordinateConfigSchema.safeParse(parsed);
+
+    if (!result.success) {
+      // Identify unknown fields for targeted warnings
+      const unknownFields = Object.keys(parsed).filter((k) => !KNOWN_CONFIG_FIELDS.includes(k));
+      const resourceCapWarnings = unknownFields.filter((f) => RESOURCE_CAP_FIELDS.includes(f));
+      const otherWarnings = unknownFields.filter((f) => !RESOURCE_CAP_FIELDS.includes(f));
+
+      if (resourceCapWarnings.length > 0) {
+        console.error(`forge: config rejected: resource-cap fields [${resourceCapWarnings.join(", ")}] are MCP input args only`);
+      }
+      if (otherWarnings.length > 0) {
+        console.error(`forge: config contains unknown fields [${otherWarnings.join(", ")}]; falling back to defaults`);
+      }
+
+      // Salvage individually valid fields
+      const validFields: Partial<CoordinateConfig> = {};
+      const soResult = z.enum(["topological", "depth-first", "small-first"]).safeParse(parsed.storyOrdering);
+      if (soResult.success) validFields.storyOrdering = soResult.data;
+      const pbResult = z.enum(["auto-advance", "halt-and-notify", "halt-hard"]).safeParse(parsed.phaseBoundaryBehavior);
+      if (pbResult.success) validFields.phaseBoundaryBehavior = pbResult.data;
+      const bvResult = z.enum(["concise", "detailed"]).safeParse(parsed.briefVerbosity);
+      if (bvResult.success) validFields.briefVerbosity = bvResult.data;
+      const obsResult = observabilitySchema.safeParse(parsed.observability);
+      if (obsResult.success) validFields.observability = obsResult.data;
+
+      // If the failure was ONLY due to unknown fields (strict mode), and all known fields are valid, use the salvaged fields
+      if (unknownFields.length > 0) {
+        fileConfig = validFields;
+      }
+      // If known fields had invalid values, they were already skipped by safeParse above
+      if (unknownFields.length === 0) {
+        // Pure schema-invalid values — log warning
+        console.error(`forge: config has invalid values; skipping invalid fields, applying valid ones`);
+        fileConfig = validFields;
+      }
+    } else {
+      fileConfig = result.data;
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      console.error(`forge: failed to read config at ${configPath} (using defaults): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Per-field merge: args > file > defaults
+  function resolve<K extends keyof Omit<ResolvedConfig, "configSource" | "observability">>(field: K): Omit<ResolvedConfig, "configSource" | "observability">[K] {
+    if (args[field] !== undefined) {
+      configSource[field] = "args";
+      return args[field] as Omit<ResolvedConfig, "configSource" | "observability">[K];
+    }
+    if (fileConfig[field] !== undefined) {
+      configSource[field] = "file";
+      return fileConfig[field] as Omit<ResolvedConfig, "configSource" | "observability">[K];
+    }
+    configSource[field] = "default";
+    return CONFIG_DEFAULTS[field];
+  }
+
+  const resolved: ResolvedConfig = {
+    storyOrdering: resolve("storyOrdering"),
+    phaseBoundaryBehavior: resolve("phaseBoundaryBehavior"),
+    briefVerbosity: resolve("briefVerbosity"),
+    observability: { ...CONFIG_DEFAULTS.observability, ...(fileConfig.observability ?? {}), ...(args.observability ?? {}) },
+    configSource,
+  };
+
+  // Observability provenance
+  if (args.observability) configSource["observability"] = "args";
+  else if (fileConfig.observability) configSource["observability"] = "file";
+  else configSource["observability"] = "default";
+
+  // writeRunRecord: false warning chain (NFR-C03 opt-out)
+  if (resolved.observability.writeRunRecord === false) {
+    console.error("forge: WARNING: observability.writeRunRecord is false — crash recovery data will not be written");
+  }
+
+  return resolved;
+}
 
 export interface AssessPhaseOptions {
   phaseId?: string;
   budgetUsd?: number | null;
   maxTimeMs?: number | null;
   currentPlanStartTimeMs?: number | null;
+  config?: ResolvedConfig;
+  haltClearedByHuman?: boolean;
 }
 
 /**
@@ -122,7 +259,10 @@ export async function assessPhase(
   }
 
   const entries = sorted.map((s) => statusMap.get(s.id)!);
-  const brief = assemblePhaseTransitionBrief(entries, options, allRecords, stories);
+  const brief = assemblePhaseTransitionBrief(entries, options, allRecords, stories, {
+    config: options.config,
+    haltClearedByHuman: options.haltClearedByHuman,
+  });
 
   return {
     mode: "advisory",
@@ -301,12 +441,21 @@ function getEvidence(
  * Assemble a PhaseTransitionBrief from classified story entries (REQ-05).
  * Applies the 4-case status resolution rule and populates all brief fields.
  */
+export interface AssembleBriefOptions {
+  config?: ResolvedConfig;
+  haltClearedByHuman?: boolean;
+}
+
 export function assemblePhaseTransitionBrief(
   entries: StoryStatusEntry[],
   options: AssessPhaseOptions = {},
   allRecords: ReadonlyArray<TaggedRunRecord> = [],
   planStories: Story[] = [],
+  briefOptions?: AssembleBriefOptions,
 ): PhaseTransitionBrief {
+  const config = briefOptions?.config;
+  const haltClearedByHuman = briefOptions?.haltClearedByHuman ?? false;
+
   const readyStories = entries
     .filter((e) => e.status === "ready" || e.status === "ready-for-retry")
     .map((e) => e.storyId);
@@ -319,9 +468,31 @@ export function assemblePhaseTransitionBrief(
   const completedCount = entries.filter((e) => e.status === "done").length;
   const totalCount = entries.length;
 
-  const status = resolvePhaseStatus(entries, completedCount, totalCount);
+  let status = resolvePhaseStatus(entries, completedCount, totalCount);
   const replanningNotes = buildReplanningNotes(entries, planStories);
-  const recommendation = buildRecommendation(status, readyStories, failedStories, entries);
+
+  // halt-hard state machine (REQ-15): re-evaluated every call, not latched.
+  if (config?.phaseBoundaryBehavior === "halt-hard" && status === "complete" && !haltClearedByHuman) {
+    status = "halted";
+    replanningNotes.push({
+      category: "assumption-changed",
+      severity: "blocking",
+      description: "halt-hard: phase structurally complete but requires human clearance (haltClearedByHuman: true) to proceed",
+    });
+  }
+
+  let recommendation = buildRecommendation(status, readyStories, failedStories, entries);
+
+  // writeRunRecord: false → prefix recommendation (NFR-C03 opt-out chain)
+  if (config?.observability?.writeRunRecord === false) {
+    recommendation = "WARNING: crash recovery disabled. " + recommendation;
+  }
+
+  // briefVerbosity: detailed → append story details
+  if (config?.briefVerbosity === "detailed") {
+    const details = entries.map((e) => `  ${e.storyId}: ${e.status} (retries: ${e.retryCount}, remaining: ${e.retriesRemaining})`).join("\n");
+    recommendation += "\n\nStory details:\n" + details;
+  }
 
   return {
     status,
@@ -335,7 +506,7 @@ export function assemblePhaseTransitionBrief(
     timeBudget: checkTimeBudget(options.currentPlanStartTimeMs ?? undefined, options.maxTimeMs ?? undefined),
     replanningNotes,
     recommendation,
-    configSource: {},
+    configSource: config?.configSource ?? {},
   };
 }
 
@@ -506,6 +677,9 @@ function buildRecommendation(
       break;
     case "needs-replan":
       parts.push(`Replan needed. Failed stories: ${failedStories.join(", ")}. Run forge_plan(update) to address.`);
+      break;
+    case "halted":
+      parts.push("Phase halted: requires human clearance (haltClearedByHuman: true) to proceed.");
       break;
     case "in-progress":
       parts.push(

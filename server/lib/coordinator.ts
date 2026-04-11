@@ -678,6 +678,9 @@ function buildRecommendation(
     case "needs-replan":
       parts.push(`Replan needed. Failed stories: ${failedStories.join(", ")}. Run forge_plan(update) to address.`);
       break;
+    case "halted":
+      parts.push("Phase halted: requires human clearance (haltClearedByHuman: true) to proceed.");
+      break;
     case "in-progress":
       parts.push(
         readyStories.length > 0

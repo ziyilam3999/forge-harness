@@ -19,16 +19,13 @@ const replanningNoteSchema = z.object({
 export const coordinateInputSchema = {
   planPath: z.string().describe("Path to execution-plan.json (required)"),
   phaseId: z.string().describe("Phase identifier, e.g. PH-01 (required in v1)"),
-  masterPlanPath: z.string().optional().describe("Path to master-plan.json"),
-  coordinateMode: z.enum(["advisory", "autonomous"]).default("advisory").describe("Coordination mode (default: advisory)"),
   budgetUsd: z.number().nonnegative("budgetUsd must be non-negative").optional().describe("Budget cap in USD (advisory signal)"),
   maxTimeMs: z.number().nonnegative("maxTimeMs must be non-negative").optional().describe("Max wall-clock time in ms (advisory signal)"),
-  startTimeMs: z.number().optional().describe("Epoch ms anchor for time budget"),
   currentPlanStartTimeMs: z.number().optional().describe("Epoch ms for plan-execution windowing"),
   projectPath: z.string().optional().describe("Project root path for run-record reads"),
-  prdContent: z.string().optional().describe("PRD content for context"),
   replanningNotes: z.array(replanningNoteSchema).optional().describe("Injected replanning notes from prior calls"),
   haltClearedByHuman: z.boolean().optional().describe("Clear halt-hard gate on this call"),
+  // Reserved for v2: masterPlanPath, coordinateMode ("autonomous"), startTimeMs, prdContent
 };
 
 // Intentional omission per REQ-14 v1.1 + §7: retry cap (3) is
@@ -37,20 +34,15 @@ export const coordinateInputSchema = {
 type CoordinateInput = {
   planPath: string;
   phaseId: string;
-  masterPlanPath?: string;
-  coordinateMode?: "advisory" | "autonomous";
   budgetUsd?: number;
   maxTimeMs?: number;
-  startTimeMs?: number;
   currentPlanStartTimeMs?: number;
   projectPath?: string;
-  prdContent?: string;
   replanningNotes?: ReplanningNote[];
   haltClearedByHuman?: boolean;
 };
 
 type McpResponse = {
-  [key: string]: unknown;
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
 };

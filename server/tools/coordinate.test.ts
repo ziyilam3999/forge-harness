@@ -62,8 +62,7 @@ describe("coordinateInputSchema", () => {
     expect(coordinateInputSchema.haltClearedByHuman).toBeDefined();
   });
 
-  it("declares startTimeMs and currentPlanStartTimeMs", () => {
-    expect(coordinateInputSchema.startTimeMs).toBeDefined();
+  it("declares currentPlanStartTimeMs", () => {
     expect(coordinateInputSchema.currentPlanStartTimeMs).toBeDefined();
   });
 });

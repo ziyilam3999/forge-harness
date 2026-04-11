@@ -1,0 +1,70 @@
+{
+  "session": "2026-04-12-s7-divergence",
+  "agent": "lucky-iris",
+  "branch": "master",
+  "baseCommit": "cbe68da",
+  "tool": "forge_evaluate",
+  "mode": "divergence",
+  "transport": "MCP stdio",
+  "runs": [
+    {
+      "target": "forge-coordinate",
+      "planPaths": [
+        ".ai-workspace/plans/forge-coordinate-phase-PH-01.json",
+        ".ai-workspace/plans/forge-coordinate-phase-PH-02.json",
+        ".ai-workspace/plans/forge-coordinate-phase-PH-03.json",
+        ".ai-workspace/plans/forge-coordinate-phase-PH-04.json"
+      ],
+      "projectPath": "C:\\Users\\ziyil\\coding_projects\\forge-harness",
+      "results": {
+        "PH-01": { "rawForwardFailures": 4, "verifiedReal": 0, "reverse": "OAuth 401" },
+        "PH-02": { "rawForwardFailures": 0, "verifiedReal": 0, "reverse": "OAuth 401" },
+        "PH-03": { "rawForwardFailures": 0, "verifiedReal": 0, "reverse": "OAuth 401" },
+        "PH-04": { "rawForwardFailures": 0, "verifiedReal": 0, "reverse": "OAuth 401" }
+      },
+      "totals": { "rawForwardFailures": 4, "verifiedReal": 0 }
+    },
+    {
+      "target": "forge-generate",
+      "planPaths": [
+        ".ai-workspace/plans/forge-generate-phase-PH-01.json",
+        ".ai-workspace/plans/forge-generate-phase-PH-02.json",
+        ".ai-workspace/plans/forge-generate-phase-PH-03.json",
+        ".ai-workspace/plans/forge-generate-phase-PH-04.json"
+      ],
+      "projectPath": "C:\\Users\\ziyil\\coding_projects\\forge-harness",
+      "results": {
+        "PH-01": { "rawForwardFailures": 16, "verifiedReal": 0, "reverse": "OAuth 401" },
+        "PH-02": { "rawForwardFailures": 15, "verifiedReal": 0, "reverse": "OAuth 401" },
+        "PH-03": { "rawForwardFailures": 10, "verifiedReal": 0, "reverse": "OAuth 401" },
+        "PH-04": { "rawForwardFailures": 10, "verifiedReal": 0, "reverse": "OAuth 401" }
+      },
+      "totals": { "rawForwardFailures": 51, "verifiedReal": 0 }
+    }
+  ],
+  "baseline": {
+    "date": "2026-04-07",
+    "file": ".ai-workspace/divergence-baseline-post-three-tier.md",
+    "totalItems": 80,
+    "forwardRemaining": 2,
+    "reverseItems": 78
+  },
+  "comparison": {
+    "forwardChange": "2 → 0 (100% reduction, baseline remaining gaps still deferred)",
+    "reverseChange": "78 → unmeasurable (OAuth 401, same limitation)",
+    "netAssessedDivergence": "≤78 items (all reverse, ceiling unchanged)"
+  },
+  "findings": [
+    {
+      "id": "BUG-DIV-CWD",
+      "severity": "HIGH",
+      "category": "tool-bug",
+      "description": "handleDivergenceEval does not pass projectPath as cwd to evaluateStory — all forward AC commands run in MCP server process.cwd() instead of project root",
+      "file": "server/tools/evaluate.ts:350",
+      "impact": "55/55 raw forward failures are false negatives",
+      "fix": "Add cwd: input.projectPath to evaluateStory options (1-line fix)"
+    }
+  ],
+  "reportPath": ".ai-workspace/audits/2026-04-12-divergence-post-coordinate.md",
+  "timestamp": "2026-04-12T02:45:00+08:00"
+}

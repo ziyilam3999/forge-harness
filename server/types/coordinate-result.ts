@@ -46,23 +46,36 @@ export interface TimeBudgetInfo {
   warningLevel: TimeWarningLevel;
 }
 
-// ── Replanning notes (placeholder — full impl in PH-03) ────
+// ── Replanning notes (REQ-10) ──────────────────────────────
 
 export type ReplanningCategory =
   | "ac-drift"
   | "partial-completion"
   | "dependency-satisfied"
   | "gap-found"
-  | "assumption-changed"
-  | "dep-failed-chain";
+  | "assumption-changed";
 
-export type ReplanningSeverity = "info" | "warning" | "blocking";
+export type ReplanningSeverity = "blocking" | "should-address" | "informational";
 
 export interface ReplanningNote {
   category: ReplanningCategory;
   severity: ReplanningSeverity;
-  storyId: string | null;
-  message: string;
+  affectedPhases?: string[];
+  affectedStories?: string[];
+  description: string;
+}
+
+// ── Graduation findings (REQ-12) ───────────────────────────
+
+export interface Finding {
+  escalationReason: string;
+  distinctStoryCount: number;
+  storyIds: string[];
+}
+
+export interface GraduateFindingsResult {
+  findings: Finding[];
+  windowInflationRisk: boolean;
 }
 
 // ── PhaseTransitionBrief ────────────────────────────────────

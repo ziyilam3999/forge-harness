@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { join } from "node:path";
 import type { CallClaudeResult } from "../lib/anthropic.js";
 
 // Mock the evaluator
@@ -600,6 +601,32 @@ describe("handleEvaluate — coherence mode", () => {
     const [, record] = mockedWriteRunRecord.mock.calls[0];
     const cost = record.metrics.estimatedCostUsd;
     expect(cost === null || typeof cost === "number").toBe(true);
+  });
+
+  it("coherence spec-vocabulary-drift: PRD with invalid field reference produces VOCAB gap (PH04-US-05)", async () => {
+    mockedCallClaude.mockResolvedValueOnce(
+      makeCallResult({ gaps: [], summary: "All aligned." }),
+    );
+
+    const prdContent =
+      "The `EvalReport.findings` should be sorted.\n" +
+      "Also check `EvalReport.criteria` for valid fields.";
+
+    const result = await handleEvaluate({
+      evaluationMode: "coherence",
+      prdContent,
+      projectPath: join(import.meta.dirname, "..", ".."),
+    });
+
+    expect(result.isError).toBeUndefined();
+    const report = JSON.parse(result.content[0].text);
+    expect(report.evaluationMode).toBe("coherence");
+
+    const vocabGaps = report.gaps.filter((g: { id: string }) => g.id.startsWith("VOCAB"));
+    expect(vocabGaps.length).toBeGreaterThanOrEqual(1);
+    expect(vocabGaps[0].description).toContain("spec-vocabulary-drift");
+    expect(vocabGaps[0].description).toContain("EvalReport");
+    expect(vocabGaps[0].description).toContain("findings");
   });
 });
 

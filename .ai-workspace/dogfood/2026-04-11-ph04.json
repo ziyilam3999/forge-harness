@@ -1,0 +1,193 @@
+{
+  "session": "2026-04-11-ph04",
+  "agent": "lucky-iris",
+  "branch": "feat/forge-coordinate-ph-04",
+  "baseCommit": "8ed470e",
+  "planPath": ".ai-workspace/plans/forge-coordinate-phase-PH-04.json",
+  "totalStories": 6,
+  "firstPassRate": "5/6 (83%)",
+  "stories": [
+    {
+      "storyId": "PH04-US-05",
+      "title": "forge_evaluate coherence mode adds mechanical spec-vs-types vocabulary-drift check (F-03 secondary)",
+      "iterations": [
+        {
+          "iteration": 0,
+          "verdict": "FAIL",
+          "failedACs": ["PH04-US-05-AC05"],
+          "fix": "Test name 'NEGATIVE' did not match AC05 grep pattern 'no drift.*valid fields|negative.*empty' — renamed test to 'no drift with valid fields → negative empty result'"
+        },
+        {
+          "iteration": 1,
+          "verdict": "PASS",
+          "criteria": [
+            {"id": "PH04-US-05-AC01", "status": "PASS"},
+            {"id": "PH04-US-05-AC02", "status": "PASS"},
+            {"id": "PH04-US-05-AC03", "status": "PASS"},
+            {"id": "PH04-US-05-AC04", "status": "PASS"},
+            {"id": "PH04-US-05-AC05", "status": "PASS"},
+            {"id": "PH04-US-05-AC06", "status": "PASS"},
+            {"id": "PH04-US-05-AC07", "status": "PASS"},
+            {"id": "PH04-US-05-AC08", "status": "PASS"},
+            {"id": "PH04-US-05-AC09", "status": "PASS"},
+            {"id": "PH04-US-05-AC10", "status": "PASS"},
+            {"id": "PH04-US-05-AC11", "status": "PASS"},
+            {"id": "PH04-US-05-AC12", "status": "PASS"}
+          ]
+        }
+      ]
+    },
+    {
+      "storyId": "PH04-US-01",
+      "title": "Expand coordinateInputSchema and wire handleCoordinate to assessPhase (REQ-14)",
+      "iterations": [
+        {
+          "iteration": 0,
+          "verdict": "PASS",
+          "criteria": [
+            {"id": "PH04-US-01-AC01", "status": "PASS"},
+            {"id": "PH04-US-01-AC02", "status": "PASS"},
+            {"id": "PH04-US-01-AC03", "status": "PASS"},
+            {"id": "PH04-US-01-AC04", "status": "PASS"},
+            {"id": "PH04-US-01-AC05", "status": "PASS"},
+            {"id": "PH04-US-01-AC06", "status": "PASS"},
+            {"id": "PH04-US-01-AC07", "status": "PASS"},
+            {"id": "PH04-US-01-AC08", "status": "PASS"},
+            {"id": "PH04-US-01-AC09", "status": "PASS"}
+          ]
+        }
+      ]
+    },
+    {
+      "storyId": "PH04-US-01b",
+      "title": "Implement loadCoordinateConfig with 4-field schema, per-field provenance, and writeRunRecord:false warning chain (REQ-15)",
+      "iterations": [
+        {
+          "iteration": 0,
+          "verdict": "PASS",
+          "criteria": [
+            {"id": "PH04-US-01b-AC01", "status": "PASS"},
+            {"id": "PH04-US-01b-AC02", "status": "PASS"},
+            {"id": "PH04-US-01b-AC03", "status": "PASS"},
+            {"id": "PH04-US-01b-AC04", "status": "PASS"},
+            {"id": "PH04-US-01b-AC05", "status": "PASS"},
+            {"id": "PH04-US-01b-AC06", "status": "PASS"},
+            {"id": "PH04-US-01b-AC07", "status": "PASS"},
+            {"id": "PH04-US-01b-AC08", "status": "PASS"},
+            {"id": "PH04-US-01b-AC09", "status": "PASS"},
+            {"id": "PH04-US-01b-AC10", "status": "PASS"}
+          ]
+        }
+      ]
+    },
+    {
+      "storyId": "PH04-US-02",
+      "title": "Advisory-mode checkpoint gates: brief IS the checkpoint (REQ-16)",
+      "iterations": [
+        {
+          "iteration": 0,
+          "verdict": "PASS",
+          "criteria": [
+            {"id": "PH04-US-02-AC01", "status": "PASS"},
+            {"id": "PH04-US-02-AC02", "status": "PASS"},
+            {"id": "PH04-US-02-AC03", "status": "PASS"}
+          ]
+        }
+      ]
+    },
+    {
+      "storyId": "PH04-US-03",
+      "title": "Integration tests including configSource end-to-end and halt-hard 3-step clearing state machine",
+      "iterations": [
+        {
+          "iteration": 0,
+          "verdict": "PASS",
+          "criteria": [
+            {"id": "PH04-US-03-AC01", "status": "PASS"},
+            {"id": "PH04-US-03-AC02", "status": "PASS"},
+            {"id": "PH04-US-03-AC03", "status": "PASS"},
+            {"id": "PH04-US-03-AC04", "status": "PASS"},
+            {"id": "PH04-US-03-AC05", "status": "PASS"},
+            {"id": "PH04-US-03-AC06", "status": "PASS"},
+            {"id": "PH04-US-03-AC07", "status": "PASS"},
+            {"id": "PH04-US-03-AC08", "status": "PASS"}
+          ]
+        }
+      ]
+    },
+    {
+      "storyId": "PH04-US-04",
+      "title": "Dogfood forge_coordinate against a multi-story plan and write the dogfood report",
+      "iterations": [
+        {
+          "iteration": 0,
+          "verdict": "PASS",
+          "criteria": [
+            {"id": "PH04-US-04-AC01", "status": "PASS"},
+            {"id": "PH04-US-04-AC02", "status": "PASS"},
+            {"id": "PH04-US-04-AC03", "status": "PASS"},
+            {"id": "PH04-US-04-AC04", "status": "PASS"},
+            {"id": "PH04-US-04-AC05", "status": "PASS"},
+            {"id": "PH04-US-04-AC06", "status": "PASS"}
+          ]
+        }
+      ]
+    }
+  ],
+  "testMetrics": {
+    "baseline": 498,
+    "final": 541,
+    "added": 43,
+    "allPassing": true,
+    "testFileBreakdown": {
+      "server/lib/spec-vocabulary-check.test.ts": 11,
+      "server/tools/coordinate.test.ts": 22,
+      "server/lib/coordinator.test.ts": 9,
+      "server/tools/evaluate.test.ts": 1
+    }
+  },
+  "filesModified": [
+    "server/tools/coordinate.ts",
+    "server/tools/coordinate.test.ts",
+    "server/lib/coordinator.ts",
+    "server/lib/coordinator.test.ts",
+    "server/lib/spec-vocabulary-check.ts",
+    "server/lib/spec-vocabulary-check.test.ts",
+    "server/tools/evaluate.ts",
+    "server/tools/evaluate.test.ts",
+    "server/index.ts",
+    "docs/forge-coordinate-prd.md",
+    ".ai-workspace/plans/forge-coordinate-dogfood-report.md"
+  ],
+  "findings": [
+    {
+      "id": "F-55-test-name",
+      "category": "ac-quality",
+      "severity": "low",
+      "description": "AC05 grep pattern 'no drift.*valid fields|negative.*empty' is case-sensitive; test name with uppercase 'NEGATIVE' did not match",
+      "impact": "PH04-US-05 AC05 false-fail on first eval",
+      "fix": "Renamed test to match grep pattern"
+    }
+  ],
+  "designDecisions": [
+    {
+      "decision": "extractTypeReferences regex only matches lowercase-starting field names after the dot",
+      "rationale": "PascalCase after dot (e.g. MasterPlan.Phase) indicates a sub-type reference, not a field. This filters false positives without requiring type-graph analysis."
+    },
+    {
+      "decision": "verifySpecVocabularyFromContent added as content-based variant",
+      "rationale": "Coherence eval receives prdContent inline — reading from disk would require writing a temp file. Content variant composes cleanly."
+    },
+    {
+      "decision": "halt-hard branches in assemblePhaseTransitionBrief, not resolvePhaseStatus",
+      "rationale": "resolvePhaseStatus only has entries/counts — no config context. assemblePhaseTransitionBrief has the config parameter."
+    },
+    {
+      "decision": "MCP rebuild requires build-then-restart two-step sequence",
+      "rationale": "Discovered during dogfood: restart alone uses old dist; build alone doesn't restart server process. Saved as memory for future sessions."
+    }
+  ],
+  "dataGaps": [],
+  "dogfoodMcpTransport": true,
+  "dogfoodMcpCallTimestamp": "2026-04-12T01:10:00+08:00"
+}

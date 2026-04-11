@@ -59,9 +59,11 @@ server.registerTool(
   {
     title: "Forge Coordinate",
     description:
-      "Compose plan/generate/evaluate into dependency-ordered workflows. Reads execution-plan.json, dispatches stories, tracks progress, enforces budgets.",
+      "Fourth forge primitive: dependency-aware dispatch and phase transition brief assembler. " +
+      "Reads execution-plan.json, classifies stories into 6 states (done/ready/ready-for-retry/failed/pending/dep-failed), " +
+      "enforces budgets (advisory), returns PhaseTransitionBrief. Advisory mode only ($0, no LLM calls).",
     inputSchema: coordinateInputSchema,
-    annotations: { destructiveHint: true },
+    annotations: { readOnlyHint: true },
   },
   handleCoordinate
 );

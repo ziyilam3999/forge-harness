@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.0](https://github.com/ziyilam3999/forge-harness/compare/v0.18.0...v0.19.0) (2026-04-11)
+
+### Features
+
+- **coordinate:** PH-03 replanning notes, reconciliation, graduation, observability — ReplanningNote type (5 categories, 3 severities), collectReplanningNotes, aggregateStatus with velocity/cost, graduateFindings with dedup, reconcileState with orphan/dangling-dep detection (#141)
+
+### Miscellaneous
+
+- **coordinate:** PH-02 budget, time, INCONCLUSIVE, crash recovery (#140)
+- **docs:** add projectPath to forge_evaluate in dogfood briefs
+
 ## [0.18.0](https://github.com/ziyilam3999/forge-harness/compare/v0.17.1...v0.18.0) (2026-04-10)
 
 ### Features

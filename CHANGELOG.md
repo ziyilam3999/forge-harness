@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.0](https://github.com/ziyilam3999/forge-harness/compare/v0.20.2...v0.21.0) (2026-04-13)
+
+### Features
+
+* **reconcile:** Q0/L2+L3 `forge_reconcile` tool + PhaseTransitionBrief drift fields ([#159](https://github.com/ziyilam3999/forge-harness/pull/159)) — new MCP primitive closing the plan-writeback loop via Intelligent Clipboard pattern (gap-found → JSONL audit, precedence-sorted routing to `handlePlan(update)`, atomic halt on blocking severity). `PhaseTransitionBrief` gains `driftSinceLastPlanUpdate: {reverse, orphaned, dangling}` derived from real reconcileState+masterPlan+phasePlans inputs, with 50-cap overflow spill. `reverseFindings[].id` migrated from LLM-generated `REV-NN` to deterministic `rev-<sha256-12hex>` (fresh-run-only). `server/tools/plan.ts` unmodified (negative AC).
+
 ## [0.20.2](https://github.com/ziyilam3999/forge-harness/compare/v0.20.1...v0.20.2) (2026-04-12)
 
 ### Miscellaneous

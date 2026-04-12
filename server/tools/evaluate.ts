@@ -392,6 +392,7 @@ async function handleDivergenceEval(
     // Pre-computed reverse findings from the calling session (architectural split:
     // session does LLM judgment, MCP does mechanical validation).
     // When provided, replaces the LLM reverse scan entirely.
+    ctx.progress.begin("reverse-eval");
     try {
       const parsed = JSON.parse(input.reverseFindings);
       if (!Array.isArray(parsed)) {

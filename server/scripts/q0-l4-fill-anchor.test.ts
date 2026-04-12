@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -27,20 +27,15 @@ function sha256(buf: Buffer | string): string {
 }
 
 function runScript(args: string[]): { stdout: string; stderr: string; status: number } {
-  try {
-    const stdout = execSync(`bash ${SCRIPT_PATH} ${args.map((a) => `"${a}"`).join(" ")}`, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return { stdout, stderr: "", status: 0 };
-  } catch (e) {
-    const err = e as { stdout?: Buffer | string; stderr?: Buffer | string; status?: number };
-    return {
-      stdout: err.stdout?.toString() ?? "",
-      stderr: err.stderr?.toString() ?? "",
-      status: err.status ?? 1,
-    };
-  }
+  // Use spawnSync so we get stdout AND stderr regardless of exit code.
+  // execSync only returns stdout on success and drops stderr — that caused
+  // the "bootstrap"/"already" assertions to fail on exit 0 paths.
+  const result = spawnSync("bash", [SCRIPT_PATH, ...args], { encoding: "utf8" });
+  return {
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    status: result.status ?? 1,
+  };
 }
 
 describeIf("q0-l4-fill-anchor.sh", () => {

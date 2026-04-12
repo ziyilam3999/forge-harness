@@ -4,6 +4,7 @@ import { planInputSchema, handlePlan } from "./tools/plan.js";
 import { evaluateInputSchema, handleEvaluate } from "./tools/evaluate.js";
 import { generateInputSchema, handleGenerate } from "./tools/generate.js";
 import { coordinateInputSchema, handleCoordinate } from "./tools/coordinate.js";
+import { reconcileInputSchema, handleReconcile } from "./tools/reconcile.js";
 
 const server = new McpServer({
   name: "forge",
@@ -66,6 +67,22 @@ server.registerTool(
     annotations: { readOnlyHint: true },
   },
   handleCoordinate
+);
+
+server.registerTool(
+  "forge_reconcile",
+  {
+    title: "Forge Reconcile",
+    description:
+      "Fifth forge primitive: Intelligent Clipboard orchestrator for plan-writeback. " +
+      "Reads a batch of ReplanningNotes, sorts by category precedence, writes gap-found notes to audit JSONL, " +
+      "halts atomically on blocking severity, routes ac-drift/assumption-changed to master plan update and " +
+      "partial-completion/dependency-satisfied to phase plan update via handlePlan(documentTier:'update'). " +
+      "Does not call Claude directly — Intelligent Clipboard only.",
+    inputSchema: reconcileInputSchema,
+    annotations: { readOnlyHint: false },
+  },
+  handleReconcile
 );
 
 async function main() {

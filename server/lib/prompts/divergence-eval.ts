@@ -14,12 +14,12 @@ export function buildDivergenceEvalPrompt(): string {
 
 ## Output Format
 
-Respond with ONLY a JSON object matching this schema:
+Respond with ONLY a JSON object matching this schema.
+Note: do NOT emit an "id" field — it is computed deterministically from location+classification+description post-parse.
 
 {
   "reverse": [
     {
-      "id": "REV-01",
       "description": "Clear description of the unplanned capability",
       "location": "file path or area in the codebase",
       "classification": "method-divergence | extra-functionality | scope-creep",

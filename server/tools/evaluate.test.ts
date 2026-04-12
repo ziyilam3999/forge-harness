@@ -859,3 +859,36 @@ describe("self-healing cycle support", () => {
     expect(result.isError).toBeUndefined();
   });
 });
+
+// ── Q0/L2 — deterministic reverseFindings ids ──
+
+import { computeReverseFindingId } from "./evaluate.js";
+
+describe("computeReverseFindingId — determinism", () => {
+  it("same inputs produce the same id across calls", () => {
+    const a = computeReverseFindingId("server/foo.ts:10", "method-divergence", "x");
+    const b = computeReverseFindingId("server/foo.ts:10", "method-divergence", "x");
+    expect(a).toBe(b);
+    expect(a).toMatch(/^rev-[a-f0-9]{12}$/);
+  });
+
+  it("different inputs produce different ids", () => {
+    const a = computeReverseFindingId("server/foo.ts:10", "method-divergence", "x");
+    const b = computeReverseFindingId("server/foo.ts:11", "method-divergence", "x");
+    expect(a).not.toBe(b);
+  });
+
+  it("lexically-equivalent input arrays emit same ids across two parse runs", () => {
+    const input = [
+      { location: "server/a.ts:5", classification: "method-divergence", description: "alpha" },
+      { location: "server/b.ts:9", classification: "scope-creep", description: "beta" },
+    ];
+    const ids1 = input.map((i) =>
+      computeReverseFindingId(i.location, i.classification, i.description),
+    );
+    const ids2 = [...input].map((i) =>
+      computeReverseFindingId(i.location, i.classification, i.description),
+    );
+    expect(ids1).toEqual(ids2);
+  });
+});

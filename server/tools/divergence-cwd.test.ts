@@ -172,7 +172,8 @@ describe("handleEvaluate — divergence mode reverseFindings", () => {
 
     const report = JSON.parse(result.content[0].text);
     expect(report.reverse).toHaveLength(2);
-    expect(report.reverse[0].id).toBe("REV-01");
+    // Q0/L2: reverseFindings[].id is overwritten with deterministic hash
+    expect(report.reverse[0].id).toMatch(/^rev-[a-f0-9]{12}$/);
     expect(report.reverse[1].classification).toBe("method-divergence");
     expect(report.summary).toContain("2 pre-computed reverse finding(s)");
   });

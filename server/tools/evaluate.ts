@@ -1,6 +1,24 @@
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+
+/**
+ * Compute a deterministic `reverseFindings[].id` from its identifying fields.
+ * Stability invariant: same (location, classification, description) → same id
+ * across runs, so downstream id-only diffs (reconcile-remnants) remain meaningful.
+ */
+export function computeReverseFindingId(
+  location: string,
+  classification: string,
+  description: string,
+): string {
+  const hash = createHash("sha256")
+    .update(`${location}|${classification}|${description}`)
+    .digest("hex")
+    .slice(0, 12);
+  return `rev-${hash}`;
+}
 import { evaluateStory } from "../lib/evaluator.js";
 import { scanCodebase } from "../lib/codebase-scan.js";
 import { loadPlan } from "../lib/plan-loader.js";
@@ -400,7 +418,7 @@ async function handleDivergenceEval(
         "extra-functionality",
         "scope-creep",
       ]);
-      const REQUIRED_FIELDS = ["id", "description", "location", "classification", "alignsWithPrd"] as const;
+      const REQUIRED_FIELDS = ["description", "location", "classification", "alignsWithPrd"] as const;
 
       for (const item of parsed) {
         for (const field of REQUIRED_FIELDS) {
@@ -416,9 +434,15 @@ async function handleDivergenceEval(
         }
         if (typeof item.alignsWithPrd !== "boolean") {
           throw new Error(
-            `reverseFindings item "${item.id}" has non-boolean alignsWithPrd: ${typeof item.alignsWithPrd}`,
+            `reverseFindings item "${item.id ?? "(unknown)"}" has non-boolean alignsWithPrd: ${typeof item.alignsWithPrd}`,
           );
         }
+        // Overwrite id with a deterministic hash so cross-run diffs stay meaningful.
+        item.id = computeReverseFindingId(
+          String(item.location),
+          String(item.classification),
+          String(item.description),
+        );
       }
 
       reverseDivergences = parsed as ReverseDivergence[];

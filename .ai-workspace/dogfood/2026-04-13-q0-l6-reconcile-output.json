@@ -1,0 +1,23 @@
+{
+  "runAt": "2026-04-13T15:00:00+08:00",
+  "inputFindings": {
+    "path": ".ai-workspace/audits/2026-04-12-reverse-divergence-findings-hashed.json",
+    "count": 7
+  },
+  "synthesizedNotes": {
+    "total": 7,
+    "byCategory": {
+      "ac-drift": 1,
+      "gap-found": 6
+    }
+  },
+  "reconcileOutput": {
+    "status": "success",
+    "rewriteCount": 1,
+    "operationsCount": 1,
+    "deferredNotesCount": 6,
+    "terminalStateTotal": 7
+  },
+  "trailerLine": "plan-refresh: 1 items",
+  "dogfoodInterpretation": "All 7 findings reached terminal state: 1 routed to plan rewrite, 6 formally deferred via gap-found pre-pass. Zero findings lost. First non-baseline plan-refresh trailer in the history of this repo."
+}

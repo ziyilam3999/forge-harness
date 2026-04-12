@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.22.0](https://github.com/ziyilam3999/forge-harness/compare/v0.21.0...v0.22.0) (2026-04-13)
+
+### Features
+
+* **reconcile:** L4 audit log accuracy + failure-status disambiguation ([#161](https://github.com/ziyilam3999/forge-harness/pull/161)) — `conflicts[].winningCategory` Pass 2b rewrite fixes stale values in 3-way precedence overlaps; `ReconcileStatus` gains `"failed"` to distinguish all-failed from half-success; `haltedOnNoteId` → `haltedOnNoteIndex` rename (zero live consumers pre-v0.21.0)
+* **q0-l4:** anchor file + deadline watchdog + fill workflow ([#162](https://github.com/ziyilam3999/forge-harness/pull/162)) — 14-day deferred-dogfood proof mechanism. `.ai-workspace/q0-l4-anchor.json` ships with real Q0 merge metadata + new `q0FillMode: "bootstrap"` enum. Post-merge fill workflow uses `gh pr merge --auto --squash`. Daily cron watchdog opens `q0-l4-anchor-incomplete` (sha256-idempotent) and `q0-l4-unproven` tracking issues. Pure TypeScript evaluator at `server/lib/q0-l4-deadline.ts` is the authoritative logic source; YAML delegates via `node --input-type=module`
+* **plan,reconcile:** structured `updatedPlan`/`critiqueRounds` sidecar ([#164](https://github.com/ziyilam3999/forge-harness/pull/164)) — Q0/L5 closes the `forge_plan(documentTier: "update")` orphan. `handleUpdatePlan` now returns additive top-level fields alongside the existing text envelope (P50 additive). `server/tools/reconcile.ts` drops the brittle brace-counting `parseHandlePlanOutput` extractor in favor of structured reads. Plan.ts negative AC was lifted for this layer only; non-update branches unaffected
+
+### Miscellaneous
+
+* **test(plan):** envelope contract test for `handleUpdatePlan` output ([#163](https://github.com/ziyilam3999/forge-harness/pull/163)) — Q0/L5 pre-flight
+* **docs(plan):** clarify gap-found is pre-pass, not `CATEGORY_PRECEDENCE` ([#160](https://github.com/ziyilam3999/forge-harness/pull/160)) — Caveat B amendment
+
+### Breaking changes (internal only)
+
+* **reconcile-output.ts**: `haltedOnNoteId` field renamed to `haltedOnNoteIndex`. Pre-v0.22 serialized records use the old name. Zero live consumers outside this repo — no external migration required
+* **reverseFindings[].id**: continues the v0.21.0 migration from LLM-sequential (`REV-NN`) to deterministic hash (`rev-<sha256-12hex>`). Fresh-run-only — no retroactive rewrite
+
 ## [0.21.0](https://github.com/ziyilam3999/forge-harness/compare/v0.20.2...v0.21.0) (2026-04-13)
 
 ### Features

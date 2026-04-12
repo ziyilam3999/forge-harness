@@ -1,0 +1,77 @@
+name: Q0/L4 Anchor Fill
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.ai-workspace/q0-l4-anchor.json'
+
+permissions:
+  # contents: write is required so the workflow can push its own feature
+  # branch (NOT master — branch protection still gates master merges via PR).
+  contents: write
+  pull-requests: write
+
+jobs:
+  anchor-fill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check anchor state
+        id: check
+        run: |
+          if [ ! -f .ai-workspace/q0-l4-anchor.json ]; then
+            echo "status=skipped-no-anchor" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILL_MODE=$(jq -r '.q0FillMode' .ai-workspace/q0-l4-anchor.json)
+          MERGED_AT=$(jq -r '.q0MergedAt' .ai-workspace/q0-l4-anchor.json)
+          if [ "$FILL_MODE" = "bootstrap" ]; then
+            echo "status=skipped-bootstrap" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$MERGED_AT" != "PENDING" ]; then
+            echo "status=skipped-already-filled" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "status=fill-required" >> "$GITHUB_OUTPUT"
+      - name: Compute fill values
+        if: steps.check.outputs.status == 'fill-required'
+        id: compute
+        run: |
+          MERGE_SHA=$(git log -1 --format=%H -- .ai-workspace/q0-l4-anchor.json)
+          MERGED_AT=$(git log -1 --format=%aI "$MERGE_SHA")
+          echo "merge_sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
+          echo "merged_at=$MERGED_AT" >> "$GITHUB_OUTPUT"
+      - name: Open follow-up PR
+        if: steps.check.outputs.status == 'fill-required'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_SHA: ${{ steps.compute.outputs.merge_sha }}
+          MERGED_AT: ${{ steps.compute.outputs.merged_at }}
+        run: |
+          BRANCH="chore/q0-l4-anchor-fill-$(echo "$MERGE_SHA" | cut -c1-7)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          bash scripts/q0-l4-fill-anchor.sh .ai-workspace/q0-l4-anchor.json "$MERGE_SHA" "$MERGED_AT"
+          git add -f .ai-workspace/q0-l4-anchor.json
+          git commit -m "chore: fill q0-l4-anchor.json post-merge"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "chore: fill q0-l4-anchor.json post-merge" \
+            --body "Automated fill of q0-l4-anchor.json with real merge SHA + timestamp. See .github/workflows/q0-l4-anchor-fill.yml." \
+            --label "q0-l4-anchor-fill"
+          # Capture PR number from the branch we just pushed.
+          PR_NUMBER=$(gh pr view "$BRANCH" --json number -q .number)
+          # Primary path: --auto waits for required checks then squash-merges.
+          # Fallback path: if --auto is rejected (no required checks configured
+          # on master), the `q0-l4-anchor-fill` label flags this PR for the
+          # /ship skill's mandatory-unblock list so a human can finish the
+          # merge. Either path satisfies the plan.md spec that forbids
+          # leaving the merge to "existing automation" ambiguously.
+          gh pr merge "$PR_NUMBER" --auto --squash --delete-branch || \
+            echo "gh pr merge --auto failed (likely no required checks configured); PR remains labeled q0-l4-anchor-fill for /ship fallback."

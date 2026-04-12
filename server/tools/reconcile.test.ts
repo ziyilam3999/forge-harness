@@ -171,7 +171,7 @@ describe("handleReconcile — atomic halt", () => {
     expect(result.isError).toBe(true);
     const output = JSON.parse(result.content[0].text);
     expect(output.status).toBe("halted");
-    expect(output.haltedOnNoteId).toBe(1);
+    expect(output.haltedOnNoteIndex).toBe(1);
     expect(output.rewriteCount).toBe(0);
     expect(output.operations).toHaveLength(0);
 
@@ -437,7 +437,7 @@ describe("handleReconcile — gap-found bypasses precedence", () => {
 
 // ── Adversarial 3: handlePlan returns non-enveloped payload ──
 describe("handleReconcile — parseHandlePlanOutput failure path", () => {
-  it("master route: non-enveloped handlePlan response yields error + partial status", async () => {
+  it("master route: non-enveloped handlePlan response yields error + failed status (sole op)", async () => {
     await writePlanFiles();
     const base = makeBase();
 
@@ -458,11 +458,160 @@ describe("handleReconcile — parseHandlePlanOutput failure path", () => {
     });
 
     const output = JSON.parse(result.content[0].text);
-    expect(output.status).toBe("partial");
+    // Only op failed and no deferredNotes → "failed", not "partial"
+    expect(output.status).toBe("failed");
     expect(output.errors?.length ?? 0).toBeGreaterThan(0);
     expect(output.operations).toHaveLength(1);
     expect(output.operations[0].planPathWritten).toBe("");
     expect(result.isError).toBe(true);
+  });
+});
+
+// ── MAJOR-1: 3-way overlap stale winningCategory rewrite ──
+describe("handleReconcile — 3-way overlap conflict audit rewrite", () => {
+  it("rewrites stale winningCategory when pairwise winner is later suppressed", async () => {
+    await writePlanFiles();
+    const base = makeBase();
+
+    // Note 0: ac-drift       — wins pairwise vs note 1, later suppressed by note 2
+    // Note 1: partial-completion — loses to note 0 (stale winner)
+    // Note 2: assumption-changed — highest precedence, suppresses note 0
+    // All three touch US-01.
+    const result = await handleReconcile({
+      ...base,
+      replanningNotes: [
+        {
+          category: "ac-drift",
+          severity: "should-address",
+          description: "drift",
+          affectedStories: ["US-01"],
+        },
+        {
+          category: "partial-completion",
+          severity: "should-address",
+          description: "partial",
+          affectedStories: ["US-01"],
+          affectedPhases: ["PH-01"],
+        },
+        {
+          category: "assumption-changed",
+          severity: "should-address",
+          description: "assumption flipped",
+          affectedStories: ["US-01"],
+        },
+      ],
+    });
+
+    const output = JSON.parse(result.content[0].text);
+    // conflicts must exist and note 1's winning category must be rewritten
+    // to the surviving highest-precedence note (assumption-changed), not "ac-drift"
+    const losersByIdx = new Map<number, string>();
+    for (const c of output.conflicts) {
+      losersByIdx.set(c.noteIndex, c.winningCategory);
+    }
+    expect(losersByIdx.get(1)).toBe("assumption-changed");
+    expect(losersByIdx.get(1)).not.toBe("ac-drift");
+    // Note 0 also a loser, correctly recorded
+    expect(losersByIdx.get(0)).toBe("assumption-changed");
+  });
+});
+
+// ── MAJOR-3: half-failed mixed status ──
+describe("handleReconcile — mixed success/failure status", () => {
+  it("half-failed: first op succeeds, second op fails → status=partial", async () => {
+    await writePlanFiles();
+    const base = makeBase();
+
+    // First handlePlan call (master route): valid envelope (default mock)
+    // Second handlePlan call (phase route PH-01): garbage
+    mockedHandlePlan.mockImplementationOnce(async () => ({
+      content: [
+        {
+          type: "text" as const,
+          text:
+            "=== UPDATED PLAN ===\n\n" +
+            JSON.stringify({ schemaVersion: "3.0.0", stories: [] }, null, 2) +
+            "\n\n=== USAGE ===\nTotal tokens: 0 input / 0 output",
+        },
+      ],
+    }));
+    mockedHandlePlan.mockImplementationOnce(async () => ({
+      content: [{ type: "text" as const, text: "garbage no envelope" }],
+    }));
+
+    const result = await handleReconcile({
+      ...base,
+      replanningNotes: [
+        {
+          category: "ac-drift",
+          severity: "should-address",
+          description: "drift",
+        },
+        {
+          category: "partial-completion",
+          severity: "should-address",
+          description: "partial",
+          affectedPhases: ["PH-01"],
+        },
+      ],
+    });
+
+    const output = JSON.parse(result.content[0].text);
+    expect(output.status).toBe("partial");
+    const successful = output.operations.filter(
+      (op: { planPathWritten: string }) => op.planPathWritten !== "",
+    );
+    const failed = output.operations.filter(
+      (op: { planPathWritten: string }) => op.planPathWritten === "",
+    );
+    expect(successful).toHaveLength(1);
+    expect(failed).toHaveLength(1);
+    expect(output.errors?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("all-failed multi-op: 2 ac-drift routes all fail → status=failed", async () => {
+    await writePlanFiles();
+    const base = makeBase();
+
+    // Both handlePlan calls return garbage. ac-drift collapses into a single
+    // master-update op (batched), so we only need one garbage response to cause
+    // total failure with operations.length > 0.
+    mockedHandlePlan.mockImplementationOnce(async () => ({
+      content: [{ type: "text" as const, text: "garbage 1" }],
+    }));
+
+    const result = await handleReconcile({
+      ...base,
+      replanningNotes: [
+        {
+          category: "ac-drift",
+          severity: "should-address",
+          description: "drift 1",
+        },
+        {
+          category: "ac-drift",
+          severity: "should-address",
+          description: "drift 2",
+        },
+      ],
+    });
+
+    const output = JSON.parse(result.content[0].text);
+    expect(output.status).toBe("failed");
+    expect(output.operations.length).toBeGreaterThan(0);
+    for (const op of output.operations) {
+      expect(op.planPathWritten).toBe("");
+    }
+    expect(output.errors?.length ?? 0).toBeGreaterThan(0);
+    expect(output.rewriteCount).toBe(0);
+    // No plan files should have been written
+    const masterPath = join(TEST_DIR, "master.json");
+    const hashAfter = await sha256File(masterPath);
+    // master.json had seed content; if it was overwritten it would change
+    const seedHash = createHash("sha256")
+      .update(JSON.stringify({ seed: "master" }))
+      .digest("hex");
+    expect(hashAfter).toBe(seedHash);
   });
 });
 

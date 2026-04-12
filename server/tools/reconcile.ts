@@ -176,7 +176,7 @@ export async function handleReconcile(input: ReconcileInput): Promise<McpRespons
       operations: [],
       deferredNotes: [],
       conflicts: [],
-      haltedOnNoteId: haltIdx,
+      haltedOnNoteIndex: haltIdx,
       rewriteCount: 0,
       timestamp: new Date().toISOString(),
     };
@@ -265,6 +265,35 @@ export async function handleReconcile(input: ReconcileInput): Promise<McpRespons
         break; // i is gone; stop comparing
       }
     }
+  }
+
+  // ── Pass 2b: rewrite stale conflict winningCategory entries ──
+  // In a 3-way overlap, a pairwise winner recorded during Pass 2 may itself
+  // be suppressed by a later, higher-precedence note. The audit-log entry in
+  // conflicts[] would then claim a loser lost to a note that is also gone.
+  // Rewrite each conflict's winningCategory to the highest-precedence
+  // surviving note whose affectedStories overlap with the loser's stories.
+  for (const conflict of conflicts) {
+    const loserNote = replanningNotes[conflict.noteIndex];
+    const loserStories = new Set(loserNote.affectedStories ?? []);
+    let bestSurvivor: { category: ReplanningCategory; rank: number } | null = null;
+    for (let k = 0; k < replanningNotes.length; k++) {
+      if (suppressed.has(k)) continue;
+      if (gapFoundHandled.has(k)) continue;
+      const candidate = replanningNotes[k];
+      if (candidate.category === "gap-found") continue;
+      const candidateStories = candidate.affectedStories ?? [];
+      const overlap = candidateStories.some((s) => loserStories.has(s));
+      if (!overlap) continue;
+      const rank = precedenceRank(candidate.category);
+      if (bestSurvivor === null || rank < bestSurvivor.rank) {
+        bestSurvivor = { category: candidate.category, rank };
+      }
+    }
+    if (bestSurvivor) {
+      conflict.winningCategory = bestSurvivor.category;
+    }
+    // else: leave original winningCategory (all overlappers also suppressed)
   }
 
   // ── Pass 3: route surviving non-gap-found notes ──
@@ -433,16 +462,19 @@ export async function handleReconcile(input: ReconcileInput): Promise<McpRespons
   const rewriteCount = operations.filter((op) => op.planPathWritten !== "").length;
 
   let status: ReconcileStatus;
+  const successfulOps = operations.filter((op) => op.planPathWritten !== "").length;
   if (operations.length === 0 && deferredNotes.length === 0 && errors.length === 0) {
     status = "no-op";
-  } else if (errors.length > 0 && (operations.length > 0 || deferredNotes.length > 0)) {
-    // Nit 11 — some work succeeded, some failed.
-    status = "partial";
-  } else if (errors.length > 0) {
-    // Nothing succeeded at all.
-    status = "partial";
-  } else {
+  } else if (errors.length === 0) {
     status = "success";
+  } else if (successfulOps === 0 && deferredNotes.length === 0) {
+    // Nothing actually landed — distinguish total failure from partial success
+    // so downstream retry logic doesn't loop forever on a silent all-fail.
+    status = "failed";
+  } else {
+    // Mixed: some operations wrote plan files (or gap-found notes deferred)
+    // while others errored.
+    status = "partial";
   }
 
   const output: ReconcileOutput = {

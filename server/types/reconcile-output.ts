@@ -1,6 +1,6 @@
 import type { ReplanningNote } from "./coordinate-result.js";
 
-export type ReconcileStatus = "success" | "halted" | "no-op" | "partial";
+export type ReconcileStatus = "success" | "halted" | "no-op" | "partial" | "failed";
 
 export interface ReconcileOperation {
   route: "master-update" | "phase-update";
@@ -20,7 +20,7 @@ export interface ReconcileOutput {
   operations: ReconcileOperation[];
   deferredNotes: ReplanningNote[]; // gap-found notes
   conflicts: ReconcileConflict[];
-  haltedOnNoteId?: number; // note index (deterministic order); only set when status=halted
+  haltedOnNoteIndex?: number; // note index (deterministic order); only set when status=halted
   rewriteCount: number; // total plan files written (0 when halted or no-op)
   timestamp: string; // ISO-8601
   errors?: string[];

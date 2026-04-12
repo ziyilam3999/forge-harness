@@ -657,6 +657,9 @@ describe("documentTier: master", () => {
     expect(result.content[0].text).toContain('"schemaVersion": "1.0.0"');
     expect(result.content[0].text).toContain("PH-01");
     expect(result.content[0].text).toContain("PH-02");
+    // Q0/L5: structured updatedPlan sidecar is exclusive to handleUpdatePlan.
+    // Non-update branches (master/phase/default) must NOT set the field.
+    expect((result as { updatedPlan?: unknown }).updatedPlan).toBeUndefined();
   });
 
   it("returns error when visionDoc is missing", async () => {
@@ -944,12 +947,12 @@ describe("documentTier: update", () => {
     expect(record.documentTier).toBe("update");
   });
 
-  // Q0/L5 pre-flight: envelope contract test (plan.ts:920-934).
-  // Locks the text-blob format that server/tools/reconcile.ts parses in
-  // parseHandlePlanOutput. If this test fails, reconcile's brace-counting
-  // extractor breaks silently. L5 proper will replace the text scraping
-  // with a structured return (option b+ per forge-plan T1240), but until
-  // then this contract is load-bearing. See Q0/L5 pre-flight PR.
+  // Envelope contract test (plan.ts:~920-934). Originally added in Q0/L5
+  // pre-flight (PR #163) to lock the text blob format that reconcile.ts
+  // was parsing via brace-counting. Q0/L5 proper moved reconcile to read
+  // the structured updatedPlan sidecar (see the structured-return test
+  // below), but the text blob MUST still match this contract for backward
+  // compat with external MCP consumers.
   it("envelope contract: output matches '=== UPDATED PLAN ===\\n\\n<JSON>\\n\\n[=== CRITIQUE SUMMARY ===\\n\\n...\\n\\n]=== USAGE ===...'", async () => {
     const plan = makeValidPlan();
     mockedCallClaude.mockResolvedValueOnce(makeCallResult(plan));
@@ -986,6 +989,63 @@ describe("documentTier: update", () => {
     // 4. USAGE section contains the exact "Total tokens:" literal
     const usageSection = text.slice(usageIdx);
     expect(usageSection).toMatch(/^=== USAGE ===\nTotal tokens: \d+ input \/ \d+ output/);
+  });
+
+  // Q0/L5 proper: structured sidecar fields on the handlePlan("update") response.
+  // reconcile.ts reads `resp.updatedPlan` directly instead of scraping the
+  // text envelope. This test locks the additive contract. The text blob
+  // (envelope contract test above) must ALSO still be present for backward
+  // compat with external MCP consumers.
+  it("returns structured updatedPlan + critiqueRounds fields on the response (Q0/L5)", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude.mockResolvedValueOnce(makeCallResult(plan));
+
+    const result = await handlePlan({
+      intent: "update plan",
+      documentTier: "update",
+      currentPlan: JSON.stringify(makeValidPlan()),
+      implementationNotes: "Structured return test",
+      tier: "quick",
+    });
+
+    // Structured fields present (additive on handlePlan return shape)
+    const resp = result as typeof result & {
+      updatedPlan?: unknown;
+      critiqueRounds?: unknown;
+    };
+    expect(resp.updatedPlan).toBeDefined();
+    expect((resp.updatedPlan as { schemaVersion?: string }).schemaVersion).toBe("3.0.0");
+
+    // critiqueRounds is present as either an array (rounds) or null (no rounds).
+    // Quick tier runs zero critique rounds, so expect null here.
+    expect("critiqueRounds" in resp).toBe(true);
+    expect(resp.critiqueRounds).toBeNull();
+
+    // Text blob unchanged (backward compat with envelope contract)
+    expect(result.content[0].text).toMatch(/^=== UPDATED PLAN ===\n\n\{/);
+    expect(result.content[0].text).toContain("=== USAGE ===");
+  });
+
+  // N3: non-null critiqueRounds path — when the critic actually runs, the
+  // sidecar field must carry the raw rounds array, not null.
+  it("returns non-null critiqueRounds when critic actually runs (Q0/L5)", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude
+      .mockResolvedValueOnce(makeCallResult(plan)) // update planner
+      .mockResolvedValueOnce(makeCriticResult()); // critic-1 (standard tier, zero findings)
+
+    const result = await handlePlan({
+      intent: "update plan",
+      documentTier: "update",
+      currentPlan: JSON.stringify(makeValidPlan()),
+      implementationNotes: "Non-null critique test",
+      tier: "standard",
+    });
+
+    const resp = result as typeof result & { critiqueRounds?: unknown };
+    expect(resp.critiqueRounds).not.toBeNull();
+    expect(Array.isArray(resp.critiqueRounds)).toBe(true);
+    expect((resp.critiqueRounds as unknown[]).length).toBeGreaterThan(0);
   });
 });
 

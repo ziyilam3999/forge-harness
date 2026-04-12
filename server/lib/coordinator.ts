@@ -15,12 +15,131 @@ import type {
   ReplanningCategory,
   GraduateFindingsResult,
   Finding,
+  DriftCounts,
 } from "../types/coordinate-result.js";
 import { topoSort } from "./topo-sort.js";
 import { readRunRecords, readAuditEntries, type PrimaryRecord, type TaggedRunRecord } from "./run-reader.js";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+
+// ── Drift computation (Q0/L3) ──────────────────────────────
+
+/** Maximum drift items reported per subfield before overflow spill. */
+const DRIFT_CAP = 50;
+
+/**
+ * Drift since last plan update — formally-defined raw inputs (pre-derivation).
+ *
+ * Definitions:
+ * - reverseFindings: direct ReverseDivergence entries emitted by
+ *   forge_evaluate(divergence). Each contributes 1 to the reverse count.
+ * - reconcileState: records whose parentStoryId is absent from
+ *   masterPlan.stories[*].id → contributes 1 to the orphaned count.
+ * - phasePlans[].deps[].targetStoryId that either (a) does not match any
+ *   story in masterPlan.stories[*].id, or (b) matches a story whose
+ *   status === "completed" → contributes 1 to the dangling count.
+ */
+export interface DriftInputs {
+  reverseFindings: Array<{ id?: string; location?: string; classification?: string; description?: string }>;
+  reconcileState: Array<{ parentStoryId: string }>;
+  masterPlan: { stories: Array<{ id: string; status?: string }> };
+  phasePlans: Array<{ deps: Array<{ targetStoryId: string }> }>;
+}
+
+/**
+ * Maximum drift items reported per subfield before overflow spill.
+ * Exposed as a constant (not hard-coded) so tests can reference the boundary.
+ */
+export const DRIFT_CAP_LIMIT = DRIFT_CAP;
+
+export interface ComputeDriftOptions {
+  /** Root dir for the spill file. Defaults to `{projectPath}/.ai-workspace/drift/`. */
+  driftSpillDir?: string;
+  projectPath?: string;
+}
+
+/**
+ * Derive capped DriftCounts from DriftInputs. When any subfield overflows
+ * DRIFT_CAP (50), writes a spill file containing the FULL (uncapped) lists
+ * to `.ai-workspace/drift/{timestamp}.json` (or a test-supplied dir).
+ */
+export async function computeDriftCounts(
+  inputs: DriftInputs,
+  options: ComputeDriftOptions = {},
+): Promise<DriftCounts> {
+  // Derive raw lists per the formal definitions above.
+  const reverseList: string[] = (inputs.reverseFindings ?? []).map(
+    (f, idx) => f.id ?? f.location ?? `rev-${idx}`,
+  );
+
+  const masterStoryIds = new Set(
+    (inputs.masterPlan?.stories ?? []).map((s) => s.id),
+  );
+  const completedStoryIds = new Set(
+    (inputs.masterPlan?.stories ?? [])
+      .filter((s) => s.status === "completed")
+      .map((s) => s.id),
+  );
+
+  const orphanedList: string[] = (inputs.reconcileState ?? [])
+    .filter((r) => !masterStoryIds.has(r.parentStoryId))
+    .map((r) => r.parentStoryId);
+
+  const danglingList: string[] = [];
+  for (const pp of inputs.phasePlans ?? []) {
+    for (const dep of pp.deps ?? []) {
+      const tgt = dep.targetStoryId;
+      if (!masterStoryIds.has(tgt) || completedStoryIds.has(tgt)) {
+        danglingList.push(tgt);
+      }
+    }
+  }
+
+  const reverseCount = Math.min(reverseList.length, DRIFT_CAP);
+  const orphanedCount = Math.min(orphanedList.length, DRIFT_CAP);
+  const danglingCount = Math.min(danglingList.length, DRIFT_CAP);
+  const overflow =
+    reverseList.length > DRIFT_CAP ||
+    orphanedList.length > DRIFT_CAP ||
+    danglingList.length > DRIFT_CAP;
+
+  if (overflow) {
+    const spillDir =
+      options.driftSpillDir ??
+      (options.projectPath
+        ? join(options.projectPath, ".ai-workspace", "drift")
+        : null);
+    if (spillDir) {
+      try {
+        await mkdir(spillDir, { recursive: true });
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        const spillPath = join(spillDir, `${ts}.json`);
+        await writeFile(
+          spillPath,
+          JSON.stringify(
+            { reverse: reverseList, orphaned: orphanedList, dangling: danglingList },
+            null,
+            2,
+          ),
+          "utf-8",
+        );
+      } catch (err) {
+        console.error(
+          `forge: failed to write drift overflow spill: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  const drift: DriftCounts = {
+    reverse: reverseCount,
+    orphaned: orphanedCount,
+    dangling: danglingCount,
+  };
+  if (overflow) drift.overflow = true;
+  return drift;
+}
 
 const MAX_RETRIES = 3;
 
@@ -163,6 +282,8 @@ export interface AssessPhaseOptions {
   currentPlanStartTimeMs?: number | null;
   config?: ResolvedConfig;
   haltClearedByHuman?: boolean;
+  /** Project path for drift spill file resolution. */
+  projectPath?: string;
 }
 
 /**
@@ -259,7 +380,7 @@ export async function assessPhase(
   }
 
   const entries = sorted.map((s) => statusMap.get(s.id)!);
-  const brief = assemblePhaseTransitionBrief(entries, options, allRecords, stories, {
+  const brief = await assemblePhaseTransitionBrief(entries, options, allRecords, stories, {
     config: options.config,
     haltClearedByHuman: options.haltClearedByHuman,
   });
@@ -442,15 +563,34 @@ function getEvidence(
 export interface AssembleBriefOptions {
   config?: ResolvedConfig;
   haltClearedByHuman?: boolean;
+  /**
+   * Drift since last plan update (Q0/L3). Optional — when provided and any
+   * subfield is > 0, buildRecommendation appends an INVOKE forge_plan(update) line.
+   */
+  driftSinceLastPlanUpdate?: DriftCounts;
+  /**
+   * Raw drift inputs — when provided, computeDriftCounts is invoked
+   * internally and populates driftSinceLastPlanUpdate. Mutually exclusive
+   * with a pre-computed driftSinceLastPlanUpdate (if both are given, the
+   * pre-computed value wins).
+   */
+  driftInputs?: DriftInputs;
+  /** Root dir for overflow spill file. See computeDriftCounts. */
+  driftSpillDir?: string;
+  /**
+   * Count of gap-found ReplanningNote entries written by the most recent
+   * forge_reconcile run. Additive-only pass-through (P50).
+   */
+  deferredReplanningNotes?: number;
 }
 
-export function assemblePhaseTransitionBrief(
+export async function assemblePhaseTransitionBrief(
   entries: StoryStatusEntry[],
   options: AssessPhaseOptions = {},
   allRecords: ReadonlyArray<TaggedRunRecord> = [],
   planStories: Story[] = [],
   briefOptions?: AssembleBriefOptions,
-): PhaseTransitionBrief {
+): Promise<PhaseTransitionBrief> {
   const config = briefOptions?.config;
   const haltClearedByHuman = briefOptions?.haltClearedByHuman ?? false;
 
@@ -479,7 +619,14 @@ export function assemblePhaseTransitionBrief(
     });
   }
 
-  let recommendation = buildRecommendation(status, readyStories, failedStories, entries);
+  let drift = briefOptions?.driftSinceLastPlanUpdate;
+  if (!drift && briefOptions?.driftInputs) {
+    drift = await computeDriftCounts(briefOptions.driftInputs, {
+      driftSpillDir: briefOptions.driftSpillDir,
+      projectPath: options.projectPath,
+    });
+  }
+  let recommendation = buildRecommendation(status, readyStories, failedStories, entries, drift);
 
   // writeRunRecord: false → prefix recommendation (NFR-C03 opt-out chain)
   if (config?.observability?.writeRunRecord === false) {
@@ -492,7 +639,7 @@ export function assemblePhaseTransitionBrief(
     recommendation += "\n\nStory details:\n" + details;
   }
 
-  return {
+  const brief: PhaseTransitionBrief = {
     status,
     stories: entries,
     readyStories,
@@ -506,6 +653,13 @@ export function assemblePhaseTransitionBrief(
     recommendation,
     configSource: config?.configSource ?? {},
   };
+
+  if (drift) brief.driftSinceLastPlanUpdate = drift;
+  if (briefOptions?.deferredReplanningNotes !== undefined) {
+    brief.deferredReplanningNotes = briefOptions.deferredReplanningNotes;
+  }
+
+  return brief;
 }
 
 function resolvePhaseStatus(
@@ -660,6 +814,7 @@ function buildRecommendation(
   readyStories: string[],
   failedStories: string[],
   entries: StoryStatusEntry[],
+  drift?: DriftCounts,
 ): string {
   const parts: string[] = [];
 
@@ -686,6 +841,13 @@ function buildRecommendation(
           : "Waiting on in-progress dependencies.",
       );
       break;
+  }
+
+  // Q0/L3 — drift gate: any non-zero subfield appends an INVOKE line.
+  if (drift && (drift.reverse > 0 || drift.orphaned > 0 || drift.dangling > 0)) {
+    parts.push(
+      `INVOKE forge_plan(documentTier: "update") to resolve ${drift.reverse} reverse + ${drift.orphaned} orphaned + ${drift.dangling} dangling drift items.`,
+    );
   }
 
   return parts.join(" ");

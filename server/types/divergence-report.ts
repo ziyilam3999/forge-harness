@@ -11,7 +11,7 @@ export interface ForwardDivergence {
 }
 
 export interface ReverseDivergence {
-  id: string; // REV-01, REV-02, etc.
+  id: string; // deterministic hash "rev-<12hex>" derived from sha256(location|classification|description).slice(0,12)
   description: string;
   location: string; // file path or area in the codebase
   classification:

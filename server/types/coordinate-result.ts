@@ -78,6 +78,15 @@ export interface GraduateFindingsResult {
   windowInflationRisk: boolean;
 }
 
+// ── Drift tracking (Q0/L3) ─────────────────────────────────
+
+export interface DriftCounts {
+  reverse: number;
+  orphaned: number;
+  dangling: number;
+  overflow?: boolean; // true when any subfield was capped at 50
+}
+
 // ── PhaseTransitionBrief ────────────────────────────────────
 
 export interface PhaseTransitionBrief {
@@ -93,6 +102,26 @@ export interface PhaseTransitionBrief {
   replanningNotes: ReplanningNote[];
   recommendation: string;
   configSource: Record<string, "file" | "args" | "default">;
+  /**
+   * Drift since last plan update.
+   * - reverse: count of reverseFindings entries emitted by forge_evaluate(divergence)
+   *   (source: server/types/eval-report.ts reverseFindings array length)
+   * - orphaned: count of records in coordinator.reconcileState whose parent story no
+   *   longer exists in the master plan (formally: a reconcileState record whose
+   *   parentStoryId is absent from masterPlan.stories[*].id)
+   * - dangling: count of phase plan dependencies whose target story is missing or
+   *   already-completed (formally: a phasePlan.deps[].targetStoryId that either does
+   *   not match any story in the master plan OR matches a story whose status=completed).
+   * Capped at 50 per subfield; full list spills to .ai-workspace/drift/{timestamp}.json
+   * when overflow=true.
+   */
+  driftSinceLastPlanUpdate?: DriftCounts;
+  /**
+   * Count of ReplanningNote entries with category: "gap-found" written to
+   * .forge/audit/reconcile-notes.jsonl during the most recent forge_reconcile run.
+   * Additive optional (P50).
+   */
+  deferredReplanningNotes?: number;
 }
 
 // ── Coordinate mode ─────────────────────────────────────────

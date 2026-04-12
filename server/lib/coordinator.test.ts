@@ -1201,7 +1201,9 @@ describe("reconcileState (PH03-US-05)", () => {
 
 // ── loadCoordinateConfig tests (PH04-US-01b) ───────────────
 
-import { loadCoordinateConfig, assemblePhaseTransitionBrief, type ResolvedConfig } from "./coordinator.js";
+import { loadCoordinateConfig, assemblePhaseTransitionBrief, computeDriftCounts, type ResolvedConfig, type DriftInputs } from "./coordinator.js";
+import { mkdtemp, readFile as fsReadFile, readdir, rm } from "node:fs/promises";
+import { join as pathJoin } from "node:path";
 import { writeFile as fsWriteFile, mkdir as fsMkdir, rm as fsRm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -1318,7 +1320,7 @@ describe("loadCoordinateConfig", () => {
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("writeRunRecord"));
 
     // Also verify the recommendation prefix via assemblePhaseTransitionBrief
-    const brief = assemblePhaseTransitionBrief([], {}, [], [], { config: cfg });
+    const brief = await assemblePhaseTransitionBrief([], {}, [], [], { config: cfg });
     expect(brief.recommendation).toContain("WARNING: crash recovery disabled.");
     errSpy.mockRestore();
   });
@@ -1356,3 +1358,150 @@ describe("storyOrdering depth-first behavioral", () => {
     expect(result.brief.stories).toHaveLength(6);
   });
 });
+
+// ── Q0/L3 — driftSinceLastPlanUpdate + INVOKE recommendation ──
+
+function emptyMasterPlan() {
+  return { stories: [] as Array<{ id: string; status?: string }> };
+}
+
+describe("driftSinceLastPlanUpdate — non-triviality fixtures (derived)", () => {
+  it("Fixture A: 3 reverseFindings → reverse=3, orphaned=0, dangling=0 — INVOKE appended", async () => {
+    const driftInputs: DriftInputs = {
+      reverseFindings: [
+        { id: "rev-aaaaaaaaaaaa", location: "src/a.ts", classification: "extra-functionality", description: "d1" },
+        { id: "rev-bbbbbbbbbbbb", location: "src/b.ts", classification: "scope-creep", description: "d2" },
+        { id: "rev-cccccccccccc", location: "src/c.ts", classification: "method-divergence", description: "d3" },
+      ],
+      reconcileState: [],
+      masterPlan: emptyMasterPlan(),
+      phasePlans: [],
+    };
+    const brief = await assemblePhaseTransitionBrief([], {}, [], [], { driftInputs });
+    expect(brief.driftSinceLastPlanUpdate).toEqual({ reverse: 3, orphaned: 0, dangling: 0 });
+    expect(brief.recommendation).toMatch(/INVOKE.*forge_plan\s*\(.*update/);
+  });
+
+  it("Fixture B: reconcileState parentStoryId absent from masterPlan → orphaned=1", async () => {
+    const driftInputs: DriftInputs = {
+      reverseFindings: [],
+      reconcileState: [{ parentStoryId: "ORPHAN-01" }],
+      masterPlan: { stories: [{ id: "OTHER-01" }] },
+      phasePlans: [],
+    };
+    const brief = await assemblePhaseTransitionBrief([], {}, [], [], { driftInputs });
+    expect(brief.driftSinceLastPlanUpdate).toEqual({ reverse: 0, orphaned: 1, dangling: 0 });
+    expect(brief.recommendation).toMatch(/INVOKE.*forge_plan\s*\(.*update/);
+  });
+
+  it("Fixture C: phasePlan dep targetStoryId absent from masterPlan → dangling=1", async () => {
+    const driftInputs: DriftInputs = {
+      reverseFindings: [],
+      reconcileState: [],
+      masterPlan: { stories: [{ id: "OTHER" }] },
+      phasePlans: [{ deps: [{ targetStoryId: "MISSING-01" }] }],
+    };
+    const brief = await assemblePhaseTransitionBrief([], {}, [], [], { driftInputs });
+    expect(brief.driftSinceLastPlanUpdate).toEqual({ reverse: 0, orphaned: 0, dangling: 1 });
+    expect(brief.recommendation).toMatch(/INVOKE.*forge_plan\s*\(.*update/);
+  });
+
+  it("All zero drift — no INVOKE appended", async () => {
+    const driftInputs: DriftInputs = {
+      reverseFindings: [],
+      reconcileState: [],
+      masterPlan: emptyMasterPlan(),
+      phasePlans: [],
+    };
+    const brief = await assemblePhaseTransitionBrief([], {}, [], [], { driftInputs });
+    expect(brief.recommendation).not.toMatch(/INVOKE/);
+  });
+
+  it("deferredReplanningNotes pass-through", async () => {
+    const brief = await assemblePhaseTransitionBrief([], {}, [], [], {
+      deferredReplanningNotes: 3,
+    });
+    expect(brief.deferredReplanningNotes).toBe(3);
+  });
+});
+
+// ── computeDriftCounts — direct unit tests (cap + spill) ──
+
+describe("computeDriftCounts — cap boundary + overflow spill", () => {
+  let spillDir: string;
+
+  beforeEach(async () => {
+    spillDir = await mkdtemp(pathJoin(tmpdir(), "drift-spill-"));
+  });
+
+  afterEach(async () => {
+    await rm(spillDir, { recursive: true, force: true });
+  });
+
+  function mkReverse(n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      id: `rev-${i.toString().padStart(12, "0")}`,
+      location: `src/f${i}.ts`,
+      classification: "extra-functionality",
+      description: `d${i}`,
+    }));
+  }
+
+  it("cap boundary: exactly 49 reverse findings → reverse=49, no overflow, no spill file", async () => {
+    const drift = await computeDriftCounts(
+      {
+        reverseFindings: mkReverse(49),
+        reconcileState: [],
+        masterPlan: emptyMasterPlan(),
+        phasePlans: [],
+      },
+      { driftSpillDir: spillDir },
+    );
+    expect(drift.reverse).toBe(49);
+    expect(drift.overflow).toBeUndefined();
+    const contents = await readdir(spillDir);
+    expect(contents).toHaveLength(0);
+  });
+
+  it("cap trigger: 51 reverse findings → reverse=50, overflow=true, spill file contains all 51", async () => {
+    const drift = await computeDriftCounts(
+      {
+        reverseFindings: mkReverse(51),
+        reconcileState: [],
+        masterPlan: emptyMasterPlan(),
+        phasePlans: [],
+      },
+      { driftSpillDir: spillDir },
+    );
+    expect(drift.reverse).toBe(50);
+    expect(drift.overflow).toBe(true);
+
+    const files = await readdir(spillDir);
+    expect(files).toHaveLength(1);
+    const content = JSON.parse(await fsReadFile(pathJoin(spillDir, files[0]), "utf-8"));
+    expect(content.reverse).toHaveLength(51);
+  });
+
+  it("mixed cap: 51 reverse + 3 orphaned + 3 dangling → reverse=50, orphaned=3, dangling=3, overflow=true", async () => {
+    const drift = await computeDriftCounts(
+      {
+        reverseFindings: mkReverse(51),
+        reconcileState: [
+          { parentStoryId: "O1" },
+          { parentStoryId: "O2" },
+          { parentStoryId: "O3" },
+        ],
+        masterPlan: { stories: [{ id: "X" }] },
+        phasePlans: [
+          { deps: [{ targetStoryId: "M1" }, { targetStoryId: "M2" }, { targetStoryId: "M3" }] },
+        ],
+      },
+      { driftSpillDir: spillDir },
+    );
+    expect(drift.reverse).toBe(50);
+    expect(drift.orphaned).toBe(3);
+    expect(drift.dangling).toBe(3);
+    expect(drift.overflow).toBe(true);
+  });
+});
+

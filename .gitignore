@@ -1,6 +1,7 @@
 node_modules/
 dist/
-.forge/
+.forge/*
+!.forge/.plan-refresh-initialized
 .ai-workspace/
 tmp/
 *.tgz

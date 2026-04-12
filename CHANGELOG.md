@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.1](https://github.com/ziyilam3999/forge-harness/compare/v0.20.0...v0.20.1) (2026-04-12)
+
+### Bug Fixes
+
+- **evaluate:** Add `cwd: input.projectPath` to both `evaluateStory` call sites (BUG-DIV-CWD) — fixes 55 false-negative forward divergence failures where AC commands ran in wrong directory (#151)
+- **evaluate:** Add `reverseFindings` optional input to divergence schema — enables session-does-LLM architectural split for OAuth 401 workaround (#151)
+- **evaluate:** Add `progress.begin` for reverseFindings branch (ship review B1)
+
+### Miscellaneous
+
+- Tighten REQ-01 AC-3 handleCoherenceEval pattern description (#135)
+- Rename generator.ts RunRecord to GeneratorIterationRecord (#136)
+- Remove redundant estimatedCostUsd override in handleStoryEval (#137)
+- Deduplicate filtered deps in classifyStory/hasFailedTransitiveDep (#138)
+- Rename misleading permission-denied test in run-reader (#139)
+- S7 divergence measurement post-coordinate docs (#148)
+
 ## [0.20.0](https://github.com/ziyilam3999/forge-harness/compare/v0.19.0...v0.20.0) (2026-04-11)
 
 ### Features

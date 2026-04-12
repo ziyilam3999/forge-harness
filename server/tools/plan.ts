@@ -931,7 +931,28 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
     projectPath, startTime, "update", null, effectiveTier, critiqueRounds, validationRetries, ctx,
   );
 
-  return { content: [{ type: "text" as const, text: sections.join("\n\n") }] };
+  // Additive top-level fields on the MCP response (P50 additive extension).
+  // Consumed in-process by server/tools/reconcile.ts to avoid text-scraping
+  // the content[0].text envelope (Q0/L5 closes the forge_plan(update) orphan).
+  //
+  // WIRE BEHAVIOR: forge_plan is registered without an outputSchema, so the
+  // MCP SDK does NOT filter these fields from the JSON-RPC response. They
+  // ship over stdio to external callers. Default SDK clients ignore unknown
+  // keys (CallToolResultSchema is non-strict zod), so this is harmless in
+  // practice — but strict-schema clients may reject. A follow-up (Q0/L5b)
+  // should migrate these fields to the MCP-canonical `structuredContent`
+  // slot, which requires declaring an outputSchema and opting into strict
+  // validation. Tracked as a follow-up issue.
+  //
+  // Backward compat: the text blob in content[0].text is unchanged, so
+  // existing external consumers (none known in this repo — grep confirms
+  // only server/tools/reconcile.ts depends on the envelope shape) continue
+  // to work without modification.
+  return {
+    content: [{ type: "text" as const, text: sections.join("\n\n") }],
+    updatedPlan: plan,
+    critiqueRounds: critiqueRounds.length > 0 ? critiqueRounds : null,
+  };
 }
 
 /**

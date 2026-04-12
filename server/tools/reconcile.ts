@@ -2,6 +2,7 @@ import { z } from "zod";
 import { mkdir, writeFile, appendFile } from "node:fs/promises";
 import { dirname, join, isAbsolute } from "node:path";
 import { handlePlan } from "./plan.js";
+import type { ExecutionPlan } from "../types/execution-plan.js";
 import type { ReplanningNote, ReplanningCategory } from "../types/coordinate-result.js";
 import type {
   ReconcileOutput,
@@ -93,55 +94,25 @@ function formatNotesAsMarkdown(notes: ReplanningNote[]): string {
     .join("\n");
 }
 
-function parseHandlePlanOutput(text: string): unknown | null {
-  // handlePlan update returns "=== UPDATED PLAN ===\n\n<JSON>\n\n=== CRITIQUE..."
-  // We need to extract the JSON object between the header and next section.
-  const marker = "=== UPDATED PLAN ===";
-  const idx = text.indexOf(marker);
-  if (idx === -1) {
-    // Try direct JSON parse
-    try {
-      return JSON.parse(text);
-    } catch {
-      return null;
-    }
-  }
-  const after = text.slice(idx + marker.length);
-  // Find the first `{` and the matching end `}` using brace counting.
-  const start = after.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < after.length; i++) {
-    const ch = after[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (ch === "\\") {
-      escape = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) {
-        const jsonStr = after.slice(start, i + 1);
-        try {
-          return JSON.parse(jsonStr);
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
+/**
+ * Q0/L5: read the structured `updatedPlan` field off a handlePlan("update")
+ * response. handleUpdatePlan emits this field alongside the text blob
+ * (additive top-level response field — see server/tools/plan.ts:~934).
+ * Returns `undefined` if the response is an error, or if the sidecar field
+ * is absent or not an object, so the caller can record an error instead of
+ * writing garbage to disk.
+ *
+ * Defense-in-depth: all call sites already gate on `resp.isError` before
+ * invoking this reader, but we re-check here so a reorder can't silently
+ * leak a partial/garbage plan through.
+ */
+function readStructuredUpdatedPlan(
+  resp: { content?: unknown; isError?: boolean; updatedPlan?: unknown },
+): ExecutionPlan | undefined {
+  if (resp.isError) return undefined;
+  const field = resp.updatedPlan;
+  if (!field || typeof field !== "object") return undefined;
+  return field as ExecutionPlan;
 }
 
 /**
@@ -348,12 +319,12 @@ export async function handleReconcile(input: ReconcileInput): Promise<McpRespons
     let planPathWritten = "";
     if ((resp as { isError?: boolean }).isError) {
       errors.push(
-        `handlePlan (master-update) returned error: ${resp.content[0]?.text ?? "unknown"}`,
+        `handlePlan (master-update) returned isError; cannot extract updatedPlan: ${resp.content[0]?.text ?? "unknown"}`,
       );
     } else {
-      const parsed = parseHandlePlanOutput(resp.content[0]?.text ?? "");
-      if (parsed === null) {
-        errors.push("handlePlan (master-update): failed to parse updated plan JSON");
+      const parsed = readStructuredUpdatedPlan(resp);
+      if (parsed === undefined) {
+        errors.push("handlePlan (master-update) response missing structured updatedPlan field");
       } else {
         const target = resolvePath(projectPath, masterPlanPath);
         try {
@@ -420,13 +391,13 @@ export async function handleReconcile(input: ReconcileInput): Promise<McpRespons
     let planPathWritten = "";
     if ((resp as { isError?: boolean }).isError) {
       errors.push(
-        `handlePlan (phase-update ${phaseId}) returned error: ${resp.content[0]?.text ?? "unknown"}`,
+        `handlePlan (phase-update ${phaseId}) returned isError; cannot extract updatedPlan: ${resp.content[0]?.text ?? "unknown"}`,
       );
     } else {
-      const parsed = parseHandlePlanOutput(resp.content[0]?.text ?? "");
-      if (parsed === null) {
+      const parsed = readStructuredUpdatedPlan(resp);
+      if (parsed === undefined) {
         errors.push(
-          `handlePlan (phase-update ${phaseId}): failed to parse updated plan JSON`,
+          `handlePlan (phase-update ${phaseId}) response missing structured updatedPlan field`,
         );
       } else {
         const rel = phasePlanPaths[phaseId];

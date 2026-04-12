@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 
-// Mock handlePlan — stub returns a fixed updated plan as a text blob in the
-// same shape evaluate/plan produces in real runs.
+// Mock handlePlan — Q0/L5: returns structured updatedPlan + critiqueRounds
+// sidecar fields alongside a text blob. reconcile.ts reads the structured
+// field directly and no longer parses the text envelope, so the text body
+// here is purely cosmetic (kept realistic for readability).
 vi.mock("./plan.js", () => ({
   handlePlan: vi.fn(async () => ({
     content: [
@@ -18,6 +20,8 @@ vi.mock("./plan.js", () => ({
           "\n\n=== USAGE ===\nTotal tokens: 0 input / 0 output",
       },
     ],
+    updatedPlan: { schemaVersion: "3.0.0", stories: [] },
+    critiqueRounds: null,
   })),
 }));
 
@@ -435,15 +439,20 @@ describe("handleReconcile — gap-found bypasses precedence", () => {
   });
 });
 
-// ── Adversarial 3: handlePlan returns non-enveloped payload ──
-describe("handleReconcile — parseHandlePlanOutput failure path", () => {
-  it("master route: non-enveloped handlePlan response yields error + failed status (sole op)", async () => {
+// ── Adversarial 3: handlePlan response missing structured updatedPlan field ──
+// Q0/L5: reconcile reads resp.updatedPlan directly. If handlePlan ever drops
+// the field (regression or bug), reconcile must fail loudly instead of
+// writing garbage to the plan file.
+describe("handleReconcile — missing structured updatedPlan field failure path", () => {
+  it("master route: handlePlan response without updatedPlan yields error + failed status (sole op)", async () => {
     await writePlanFiles();
     const base = makeBase();
 
-    // Override mock: return raw garbage (no === UPDATED PLAN === marker, no valid JSON)
+    // Override mock: text content is irrelevant now — the load-bearing
+    // signal is the absence of the structured updatedPlan sidecar field.
     mockedHandlePlan.mockImplementationOnce(async () => ({
-      content: [{ type: "text" as const, text: "this is not a plan, not json, no envelope" }],
+      content: [{ type: "text" as const, text: "anything" }],
+      // updatedPlan intentionally absent
     }));
 
     const result = await handleReconcile({
@@ -522,8 +531,8 @@ describe("handleReconcile — mixed success/failure status", () => {
     await writePlanFiles();
     const base = makeBase();
 
-    // First handlePlan call (master route): valid envelope (default mock)
-    // Second handlePlan call (phase route PH-01): garbage
+    // First handlePlan call (master route): valid structured response
+    // Second handlePlan call (phase route PH-01): missing updatedPlan sidecar
     mockedHandlePlan.mockImplementationOnce(async () => ({
       content: [
         {
@@ -534,9 +543,12 @@ describe("handleReconcile — mixed success/failure status", () => {
             "\n\n=== USAGE ===\nTotal tokens: 0 input / 0 output",
         },
       ],
+      updatedPlan: { schemaVersion: "3.0.0", stories: [] },
+      critiqueRounds: null,
     }));
     mockedHandlePlan.mockImplementationOnce(async () => ({
-      content: [{ type: "text" as const, text: "garbage no envelope" }],
+      content: [{ type: "text" as const, text: "missing sidecar" }],
+      // updatedPlan intentionally absent
     }));
 
     const result = await handleReconcile({
@@ -573,11 +585,12 @@ describe("handleReconcile — mixed success/failure status", () => {
     await writePlanFiles();
     const base = makeBase();
 
-    // Both handlePlan calls return garbage. ac-drift collapses into a single
-    // master-update op (batched), so we only need one garbage response to cause
-    // total failure with operations.length > 0.
+    // Both handlePlan calls return responses without the updatedPlan sidecar.
+    // ac-drift collapses into a single master-update op (batched), so we only
+    // need one bad response to cause total failure with operations.length > 0.
     mockedHandlePlan.mockImplementationOnce(async () => ({
-      content: [{ type: "text" as const, text: "garbage 1" }],
+      content: [{ type: "text" as const, text: "missing sidecar 1" }],
+      // updatedPlan intentionally absent
     }));
 
     const result = await handleReconcile({

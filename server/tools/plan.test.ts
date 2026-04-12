@@ -943,6 +943,50 @@ describe("documentTier: update", () => {
     const [, record] = mockedWriteRunRecord.mock.calls[0];
     expect(record.documentTier).toBe("update");
   });
+
+  // Q0/L5 pre-flight: envelope contract test (plan.ts:920-934).
+  // Locks the text-blob format that server/tools/reconcile.ts parses in
+  // parseHandlePlanOutput. If this test fails, reconcile's brace-counting
+  // extractor breaks silently. L5 proper will replace the text scraping
+  // with a structured return (option b+ per forge-plan T1240), but until
+  // then this contract is load-bearing. See Q0/L5 pre-flight PR.
+  it("envelope contract: output matches '=== UPDATED PLAN ===\\n\\n<JSON>\\n\\n[=== CRITIQUE SUMMARY ===\\n\\n...\\n\\n]=== USAGE ===...'", async () => {
+    const plan = makeValidPlan();
+    mockedCallClaude.mockResolvedValueOnce(makeCallResult(plan));
+
+    const result = await handlePlan({
+      intent: "update plan",
+      documentTier: "update",
+      currentPlan: JSON.stringify(makeValidPlan()),
+      implementationNotes: "Envelope contract test",
+      tier: "quick",
+    });
+
+    const text = result.content[0].text;
+
+    // 1. Exact marker strings present in order
+    const updatedIdx = text.indexOf("=== UPDATED PLAN ===");
+    const usageIdx = text.indexOf("=== USAGE ===");
+    expect(updatedIdx).toBe(0); // first section starts at offset 0
+    expect(usageIdx).toBeGreaterThan(updatedIdx);
+
+    // 2. Sections joined by exactly "\n\n"
+    expect(text).toMatch(/^=== UPDATED PLAN ===\n\n\{/);
+    expect(text).toMatch(/\n\n=== USAGE ===\n/);
+
+    // 3. JSON block after UPDATED PLAN parses cleanly
+    const afterMarker = text.slice("=== UPDATED PLAN ===\n\n".length);
+    // Find the end of the JSON by locating the next "\n\n===" marker
+    const nextSectionIdx = afterMarker.indexOf("\n\n===");
+    expect(nextSectionIdx).toBeGreaterThan(0);
+    const jsonBlob = afterMarker.slice(0, nextSectionIdx);
+    const parsed = JSON.parse(jsonBlob);
+    expect(parsed.schemaVersion).toBe("3.0.0");
+
+    // 4. USAGE section contains the exact "Total tokens:" literal
+    const usageSection = text.slice(usageIdx);
+    expect(usageSection).toMatch(/^=== USAGE ===\nTotal tokens: \d+ input \/ \d+ output/);
+  });
 });
 
 describe("backward compatibility (no documentTier)", () => {

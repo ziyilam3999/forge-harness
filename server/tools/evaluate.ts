@@ -89,6 +89,15 @@ export const evaluateInputSchema = {
     .describe(
       "Absolute path to project root. Required for divergence mode (codebase scanning).",
     ),
+  reverseFindings: z
+    .string()
+    .optional()
+    .describe(
+      "Pre-computed reverse divergence findings as a JSON string (array of ReverseDivergence objects). " +
+        "When provided, replaces the LLM reverse scan entirely. projectPath is still used for " +
+        "forward AC execution but not for reverse analysis. Each object must have: id, description, " +
+        "location, classification (method-divergence|extra-functionality|scope-creep), alignsWithPrd (boolean).",
+    ),
 
   // ── Self-healing ──
   maxSelfHealingCycles: z
@@ -114,6 +123,7 @@ type EvaluateInput = {
   masterPlanContent?: string;
   phasePlans?: Array<{ phaseId: string; content: string }>;
   projectPath?: string;
+  reverseFindings?: string;
   maxSelfHealingCycles?: number;
 };
 
@@ -176,6 +186,7 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
   const plan = loadPlan(input.planPath, input.planJson);
   const report = await evaluateStory(plan, input.storyId, {
     timeoutMs: input.timeoutMs,
+    cwd: input.projectPath,
   });
 
   // Write run record with the four REQ-01 v1.1 additive fields populated.
@@ -349,6 +360,7 @@ async function handleDivergenceEval(
     try {
       const report = await evaluateStory(plan, story.id, {
         timeoutMs: input.timeoutMs,
+        cwd: input.projectPath,
       });
       for (const criterion of report.criteria) {
         if (criterion.status === "FAIL" || criterion.status === "INCONCLUSIVE") {
@@ -376,7 +388,52 @@ async function handleDivergenceEval(
   let reverseDivergences: ReverseDivergence[] = [];
   let reverseSummary = "No codebase context available for reverse divergence scan.";
 
-  if (input.projectPath) {
+  if (input.reverseFindings) {
+    // Pre-computed reverse findings from the calling session (architectural split:
+    // session does LLM judgment, MCP does mechanical validation).
+    // When provided, replaces the LLM reverse scan entirely.
+    try {
+      const parsed = JSON.parse(input.reverseFindings);
+      if (!Array.isArray(parsed)) {
+        throw new Error("reverseFindings must be a JSON array");
+      }
+
+      const VALID_CLASSIFICATIONS = new Set([
+        "method-divergence",
+        "extra-functionality",
+        "scope-creep",
+      ]);
+      const REQUIRED_FIELDS = ["id", "description", "location", "classification", "alignsWithPrd"] as const;
+
+      for (const item of parsed) {
+        for (const field of REQUIRED_FIELDS) {
+          if (item[field] === undefined || item[field] === null) {
+            throw new Error(`reverseFindings item missing required field: ${field}`);
+          }
+        }
+        if (!VALID_CLASSIFICATIONS.has(item.classification)) {
+          throw new Error(
+            `reverseFindings item has invalid classification "${item.classification}". ` +
+              `Must be one of: ${[...VALID_CLASSIFICATIONS].join(", ")}`,
+          );
+        }
+        if (typeof item.alignsWithPrd !== "boolean") {
+          throw new Error(
+            `reverseFindings item "${item.id}" has non-boolean alignsWithPrd: ${typeof item.alignsWithPrd}`,
+          );
+        }
+      }
+
+      reverseDivergences = parsed as ReverseDivergence[];
+      reverseSummary = `${reverseDivergences.length} pre-computed reverse finding(s) from caller`;
+      ctx.progress.complete("reverse-eval");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`forge_evaluate: reverseFindings parse failed: ${message}`);
+      reverseSummary = `reverseFindings parse failed: ${message}`;
+      ctx.progress.fail("reverse-eval");
+    }
+  } else if (input.projectPath) {
     try {
       const codebaseSummary = await scanCodebase(input.projectPath);
       const system = buildDivergenceEvalPrompt();

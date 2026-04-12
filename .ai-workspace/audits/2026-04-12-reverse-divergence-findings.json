@@ -1,0 +1,51 @@
+[
+  {
+    "id": "REV-01",
+    "description": "assemblePhaseTransitionBrief signature takes 5 params (entries, options, allRecords, planStories, briefOptions) instead of PRD-specified (result, plan). Decomposed for testability but undocumented API shape.",
+    "location": "server/lib/coordinator.ts:358",
+    "classification": "method-divergence",
+    "alignsWithPrd": true
+  },
+  {
+    "id": "REV-02",
+    "description": "Config loader individually salvages valid fields from partially-invalid config files using per-field safeParse, instead of falling back to defaults entirely as PRD REQ-15 specifies.",
+    "location": "server/lib/coordinator.ts:93-113",
+    "classification": "extra-functionality",
+    "alignsWithPrd": true
+  },
+  {
+    "id": "REV-03",
+    "description": "checkTimeBudget returns elapsedMs: 0 when startTimeMs is undefined. PRD REQ-07 explicitly requires elapsedMs: null in this case. Direct spec mismatch.",
+    "location": "server/lib/coordinator.ts:578",
+    "classification": "method-divergence",
+    "alignsWithPrd": false
+  },
+  {
+    "id": "REV-04",
+    "description": "RESOURCE_CAP_FIELDS constant provides targeted warning messages for budgetUsd/maxTimeMs/escalationThresholds in config file, with specialized text distinct from generic unknown-field warnings. Not specified in PRD.",
+    "location": "server/lib/coordinator.ts:72",
+    "classification": "extra-functionality",
+    "alignsWithPrd": true
+  },
+  {
+    "id": "REV-05",
+    "description": "aggregateStatus options includes storyIds?: string[] and currentPlanStartTimeMs?: number filters not specified in PRD REQ-11 (which only mentions includeAudit).",
+    "location": "server/lib/coordinator.ts:616-619",
+    "classification": "extra-functionality",
+    "alignsWithPrd": true
+  },
+  {
+    "id": "REV-06",
+    "description": "recoverState and assessPhase contain duplicated record-reading and classification logic. PRD REQ-09 says recoverState is 'invoked on every call to assessPhase', but implementation has them as parallel independent functions.",
+    "location": "server/lib/coordinator.ts:157-220 and server/lib/coordinator.ts:550-600",
+    "classification": "method-divergence",
+    "alignsWithPrd": true
+  },
+  {
+    "id": "REV-07",
+    "description": "handleCoordinate defaults projectPath to '.' when not provided (input.projectPath ?? '.'). PRD describes projectPath as optional but doesn't specify a fallback — this affects where run records are read from.",
+    "location": "server/tools/coordinate.ts:120",
+    "classification": "scope-creep",
+    "alignsWithPrd": true
+  }
+]

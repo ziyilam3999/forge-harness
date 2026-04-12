@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.2](https://github.com/ziyilam3999/forge-harness/compare/v0.20.1...v0.20.2) (2026-04-12)
+
+### Miscellaneous
+
+* **plan:** L1b amendment — mark L1a merged, add 5 nit follow-ups + n=2 graduation ([#153](https://github.com/ziyilam3999/forge-harness/pull/153))
+
 ## [0.20.1](https://github.com/ziyilam3999/forge-harness/compare/v0.20.0...v0.20.1) (2026-04-12)
 
 ### Bug Fixes

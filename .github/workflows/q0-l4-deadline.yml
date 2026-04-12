@@ -1,0 +1,104 @@
+name: Q0/L4 Deadline Watchdog
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  deadline-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+      - name: Evaluate anchor state
+        id: eval
+        run: |
+          set -e
+          if ! git show origin/master:.ai-workspace/q0-l4-anchor.json > /tmp/anchor.json 2>/dev/null; then
+            echo "status=skipped-no-anchor" >> "$GITHUB_OUTPUT"
+            echo "Anchor file absent on origin/master."
+            exit 0
+          fi
+          RESULT=$(node --input-type=module -e "
+            import fs from 'node:fs';
+            import { evaluateAnchorState } from './dist/lib/q0-l4-deadline.js';
+            const content = JSON.parse(fs.readFileSync('/tmp/anchor.json', 'utf8'));
+            const r = evaluateAnchorState(content, new Date());
+            console.log(JSON.stringify(r));
+          ")
+          STATUS=$(echo "$RESULT" | jq -r '.status')
+          AGE=$(echo "$RESULT" | jq -r '.ageDays // empty')
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          if [ -n "$AGE" ]; then
+            echo "age_days=$AGE" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Evaluated: $RESULT"
+      - name: Open tracking issue
+        if: steps.eval.outputs.status == 'overdue'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="Q0/L4 unproven — $(date -u +%Y-%m-%d)"
+          EXISTING=$(gh issue list --label q0-l4-unproven --state open --json number -q 'length')
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "Existing q0-l4-unproven issue already open — skipping."
+            exit 0
+          fi
+          gh issue create \
+            --title "$TITLE" \
+            --label "q0-l4-unproven" \
+            --body "Q0/L4 is unproven 14+ days after Q0 merge. See .ai-workspace/q0-l4-anchor.json and .github/workflows/q0-l4-deadline.yml. Expected action: land an L4-proof follow-up PR that updates q0L4ProvenBy to the proof PR's merge SHA."
+      - name: Open tracking issue (anchor-incomplete)
+        if: steps.eval.outputs.status == 'skipped-anchor-incomplete'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          # Hash the anchor file content so repeated cron firings on the same
+          # broken anchor don't spam duplicate issues. Different content ->
+          # different hash -> new issue, because it's a distinct failure.
+          HASH=$(sha256sum /tmp/anchor.json | cut -c1-12)
+          TITLE="Q0/L4 anchor incomplete — fill workflow did not run — $HASH"
+          # Idempotence: scan open issues with the anchor-incomplete label and
+          # skip if any existing title already contains this hash substring.
+          if gh issue list --label q0-l4-anchor-incomplete --state open --json title -q '.[] | .title' | grep -qF -- "- $HASH"; then
+            echo "Existing q0-l4-anchor-incomplete issue already open for hash $HASH — skipping."
+            exit 0
+          fi
+          ANCHOR_BODY=$(cat /tmp/anchor.json)
+          BODY=$(cat <<EOF
+          Q0/L4 anchor file is present on origin/master but q0MergedAt is still "PENDING".
+          This means the q0-l4-anchor-fill workflow did not run (or failed) on the commit that introduced this anchor.
+
+          **Hash:** \`$HASH\`
+
+          **Action:** Fill workflow failed to run on the commit that introduced this anchor. Investigate \`.github/workflows/q0-l4-anchor-fill.yml\` logs.
+
+          <details><summary>Anchor file contents</summary>
+
+          \`\`\`json
+          $ANCHOR_BODY
+          \`\`\`
+
+          </details>
+          EOF
+          )
+          gh issue create \
+            --title "$TITLE" \
+            --label "q0-l4-anchor-incomplete" \
+            --body "$BODY"

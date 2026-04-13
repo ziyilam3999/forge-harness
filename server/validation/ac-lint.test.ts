@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { lintAcCommand, lintPlan } from "./ac-lint.js";
+import { AC_LINT_RULES } from "../lib/prompts/shared/ac-subprocess-rules.js";
 
 describe("lintAcCommand — WRONG patterns (must flag)", () => {
   it("F55: vitest count-based grep with [5-9]", () => {
@@ -73,6 +74,88 @@ describe("lintAcCommand — WRONG patterns (must flag)", () => {
     expect(lintAcCommand(cmd).findings.some((f) => f.ruleId === "F36-raw-rg")).toBe(
       true,
     );
+  });
+});
+
+describe("lintAcCommand — Q0.5/A2 MAJOR-2/MINOR-3/4/5 additions", () => {
+  // MAJOR-2 false-positive regressions — each was falsely SKIPPED by A1's regex.
+  it("MAJOR-2 FP-a: grep + && + url containing 'src' must NOT flag F36", () => {
+    const cmd = "grep -q 'ok' out.log && curl localhost:3000/src/main.js";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F36-source-tree-grep")).toBe(false);
+  });
+
+  it("MAJOR-2 FP-b: grep + || + echo containing 'server/' must NOT flag F36", () => {
+    const cmd = "grep -q 'x' out.log || echo 'server/up'";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F36-source-tree-grep")).toBe(false);
+  });
+
+  it("MAJOR-2 FP-c: grep + ; + ls lib/*.ts must NOT flag F36", () => {
+    const cmd = "grep -q 'foo' out.log ; ls lib/*.ts";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F36-source-tree-grep")).toBe(false);
+  });
+
+  // MINOR-3: bare-word rg arg.
+  it("MINOR-3: `rg pattern server/` (unquoted single-word) flags F36-raw-rg", () => {
+    const cmd = "rg pattern server/";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F36-raw-rg")).toBe(true);
+  });
+
+  it("MINOR-3: `rg --help` does NOT flag (flag-only probe is allowed)", () => {
+    expect(lintAcCommand("rg --help").suspect).toBe(false);
+  });
+
+  it("MINOR-3: `rg --version` does NOT flag", () => {
+    expect(lintAcCommand("rg --version").suspect).toBe(false);
+  });
+
+  // MINOR-4: `||` and `;` variants of multi-grep.
+  it("MINOR-4: `cmd | grep -q 'x' || grep -q 'y'` flags F56-multigrep-pipe", () => {
+    const cmd = "cmd | grep -q 'x' || grep -q 'y'";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F56-multigrep-pipe")).toBe(true);
+  });
+
+  it("MINOR-4: `cmd | grep -q 'x' ; grep -q 'y'` flags F56-multigrep-pipe", () => {
+    const cmd = "cmd | grep -q 'x' ; grep -q 'y'";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F56-multigrep-pipe")).toBe(true);
+  });
+
+  // MINOR-5: regex-alt and unquoted passed/failed.
+  it("MINOR-5: `grep -qE 'passed|failed'` flags F56-passed-grep", () => {
+    const cmd = "npx vitest run | grep -qE 'passed|failed'";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F56-passed-grep")).toBe(true);
+  });
+
+  it("MINOR-5: `grep -q passed` (unquoted) flags F56-passed-grep", () => {
+    const cmd = "npx vitest run | grep -q passed";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F56-passed-grep")).toBe(true);
+  });
+});
+
+describe("AC_LINT_RULES structure (Q0.5/A2 typed-export contract)", () => {
+  it("every rule has a non-empty wrongExample and rightExample", () => {
+    for (const rule of AC_LINT_RULES) {
+      expect(rule.wrongExample, `${rule.id}.wrongExample`).toBeTruthy();
+      expect(rule.rightExample, `${rule.id}.rightExample`).toBeTruthy();
+    }
+  });
+
+  it("exports exactly the 5 rules A1 shipped (no accidental drops)", () => {
+    const ids = AC_LINT_RULES.map((r) => r.id).sort();
+    expect(ids).toEqual([
+      "F36-raw-rg",
+      "F36-source-tree-grep",
+      "F55-vitest-count-grep",
+      "F56-multigrep-pipe",
+      "F56-passed-grep",
+    ]);
   });
 });
 

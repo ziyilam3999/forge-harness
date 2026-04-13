@@ -1,3 +1,20 @@
+import {
+  AC_SUBPROCESS_RULES_PROMPT,
+  AC_LINT_RULES,
+} from "./shared/ac-subprocess-rules.js";
+
+/**
+ * Render the structured rule list as a markdown block the critic can cite.
+ * Exposed so tests can assert exact rule-id coverage.
+ */
+export function renderAcLintRulesForCritic(): string {
+  const lines = AC_LINT_RULES.map(
+    (r) =>
+      `- **${r.id}**: ${r.description}\n  - Wrong: \`${r.wrongExample}\`\n  - Right: \`${r.rightExample}\``,
+  );
+  return lines.join("\n");
+}
+
 /**
  * Build the system prompt for a master plan critic agent.
  * Reviews a master plan for vision coverage and phase sequencing quality.
@@ -101,6 +118,15 @@ You see ONLY the execution plan JSON. Review it for quality and correctness.
 8. **Evidence-Gating:** If the plan references specific files, functions, or patterns in the codebase,
    are those references grounded in the codebase context? Flag any claim about the codebase that
    appears to be assumed rather than cited from provided context.
+9. **Subprocess Safety (AC Command Contract):** Every AC command runs inside
+   \`node:child_process.exec()\` — no TTY, no stdin, 30s timeout. Flag any AC
+   command that violates the rules below. When flagging, cite the specific
+   rule id (e.g. "F55-vitest-count-grep") in your \`description\`.
+
+${AC_SUBPROCESS_RULES_PROMPT}
+
+**Subprocess-safety rules (cite the id in findings):**
+${renderAcLintRulesForCritic()}
 
 ## Output Format
 

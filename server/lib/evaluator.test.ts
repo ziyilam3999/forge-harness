@@ -325,6 +325,142 @@ describe("evaluateStory", () => {
     });
   });
 
+  // Q0.5/C2 — flaky field retry semantics.
+  describe("flaky retry (C2)", () => {
+    function flakyPlan(flaky: boolean, command = "echo ok"): ExecutionPlan {
+      return {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Flaky",
+            acceptanceCriteria: [
+              { id: "AC-01", description: "maybe flaky", command, flaky },
+            ],
+          },
+        ],
+      };
+    }
+
+    it("flaky AC: run-1 FAIL + run-2 PASS → PASS with reliability=suspect", async () => {
+      mockedExecute
+        .mockResolvedValueOnce(mockResult({ status: "FAIL", evidence: "first fail" }))
+        .mockResolvedValueOnce(mockResult({ status: "PASS", evidence: "retry ok" }));
+
+      const report = await evaluateStory(flakyPlan(true), "US-01", {
+        flakyRetryGapMs: 1,
+      });
+      expect(mockedExecute).toHaveBeenCalledTimes(2);
+      expect(report.verdict).toBe("PASS");
+      expect(report.criteria[0].status).toBe("PASS");
+      expect(report.criteria[0].reliability).toBe("suspect");
+      expect(report.criteria[0].evidence).toContain("flaky-retry");
+      expect(report.criteria[0].evidence).toContain("retry ok");
+    });
+
+    it("flaky AC: both runs FAIL → FAIL, reliability=trusted", async () => {
+      mockedExecute
+        .mockResolvedValueOnce(mockResult({ status: "FAIL", evidence: "first fail" }))
+        .mockResolvedValueOnce(mockResult({ status: "FAIL", evidence: "second fail" }));
+
+      const report = await evaluateStory(flakyPlan(true), "US-01", {
+        flakyRetryGapMs: 1,
+      });
+      expect(mockedExecute).toHaveBeenCalledTimes(2);
+      expect(report.verdict).toBe("FAIL");
+      expect(report.criteria[0].status).toBe("FAIL");
+      expect(report.criteria[0].reliability).toBe("trusted");
+      expect(report.criteria[0].evidence).toContain("both runs FAIL");
+      expect(report.criteria[0].evidence).toContain("first fail");
+    });
+
+    it("flaky AC: run-1 PASS → no retry spawned", async () => {
+      mockedExecute.mockResolvedValueOnce(
+        mockResult({ status: "PASS", evidence: "clean ok" }),
+      );
+
+      const report = await evaluateStory(flakyPlan(true), "US-01", {
+        flakyRetryGapMs: 1,
+      });
+      expect(mockedExecute).toHaveBeenCalledTimes(1);
+      expect(report.verdict).toBe("PASS");
+      expect(report.criteria[0].reliability).toBe("trusted");
+      expect(report.criteria[0].evidence).toBe("clean ok");
+    });
+
+    it("lint-flagged AC with flaky:true → A1b short-circuit wins, no retry", async () => {
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Lint-flagged + flaky",
+            acceptanceCriteria: [
+              {
+                id: "AC-01",
+                description: "bad count grep marked flaky",
+                command: "npx vitest run foo.test.ts | grep -qE 'Tests[[:space:]]+[5-9]'",
+                flaky: true,
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01", { flakyRetryGapMs: 1 });
+      expect(mockedExecute).not.toHaveBeenCalled();
+      expect(report.criteria[0].status).toBe("SKIPPED");
+      expect(report.criteria[0].reliability).toBe("suspect");
+      expect(report.verdict).toBe("INCONCLUSIVE");
+    });
+
+    it("flaky AC: run-1 INCONCLUSIVE → passes through, no retry spawned", async () => {
+      mockedExecute.mockResolvedValueOnce(
+        mockResult({ status: "INCONCLUSIVE", evidence: "spawn ENOENT" }),
+      );
+
+      const report = await evaluateStory(flakyPlan(true), "US-01", {
+        flakyRetryGapMs: 1,
+      });
+      expect(mockedExecute).toHaveBeenCalledTimes(1);
+      expect(report.verdict).toBe("INCONCLUSIVE");
+      expect(report.criteria[0].status).toBe("INCONCLUSIVE");
+      expect(report.criteria[0].reliability).toBe("trusted");
+      expect(report.criteria[0].evidence).toBe("spawn ENOENT");
+      expect(report.criteria[0].evidence).not.toContain("flaky-retry");
+    });
+
+    it("flaky AC: run-1 FAIL + run-2 INCONCLUSIVE → INCONCLUSIVE with accurate evidence prefix", async () => {
+      mockedExecute
+        .mockResolvedValueOnce(mockResult({ status: "FAIL", evidence: "first fail" }))
+        .mockResolvedValueOnce(
+          mockResult({ status: "INCONCLUSIVE", evidence: "retry ENOENT" }),
+        );
+
+      const report = await evaluateStory(flakyPlan(true), "US-01", {
+        flakyRetryGapMs: 1,
+      });
+      expect(mockedExecute).toHaveBeenCalledTimes(2);
+      expect(report.criteria[0].status).toBe("INCONCLUSIVE");
+      expect(report.criteria[0].evidence).toContain("run-1 FAIL, run-2 INCONCLUSIVE");
+      expect(report.criteria[0].evidence).not.toContain("both runs FAIL");
+    });
+
+    it("non-flaky AC: run-1 FAIL → FAIL, no retry (regression guard)", async () => {
+      mockedExecute.mockResolvedValueOnce(
+        mockResult({ status: "FAIL", evidence: "real fail" }),
+      );
+
+      const report = await evaluateStory(flakyPlan(false), "US-01", {
+        flakyRetryGapMs: 1,
+      });
+      expect(mockedExecute).toHaveBeenCalledTimes(1);
+      expect(report.verdict).toBe("FAIL");
+      expect(report.criteria[0].status).toBe("FAIL");
+      expect(report.criteria[0].evidence).toBe("real fail");
+      expect(report.criteria[0].evidence).not.toContain("flaky-retry");
+    });
+  });
+
   it("runs ACs sequentially", async () => {
     const callOrder: number[] = [];
     mockedExecute

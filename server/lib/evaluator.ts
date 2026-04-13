@@ -6,6 +6,18 @@ import { lintAcCommand } from "../validation/ac-lint.js";
 export interface EvaluateOptions {
   timeoutMs?: number;
   cwd?: string;
+  /**
+   * Q0.5/C2 — gap in ms between run-1 and run-2 when an AC marked `flaky: true`
+   * returns FAIL on its first run. Default 500ms. Ignored for non-flaky ACs
+   * and for ACs short-circuited by ac-lint.
+   */
+  flakyRetryGapMs?: number;
+}
+
+const DEFAULT_FLAKY_RETRY_GAP_MS = 500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -69,11 +81,62 @@ export async function evaluateStory(
       continue;
     }
 
-    const result = await executeCommand(ac.command, execOptions);
+    const firstRun = await executeCommand(ac.command, execOptions);
+
+    // Q0.5/C2 — flaky retry gate. Only fires when (a) the AC author opted in
+    // via `flaky: true`, (b) ac-lint passed clean (we're past the A1b
+    // short-circuit), and (c) run-1 actually returned FAIL. PASS and
+    // INCONCLUSIVE are NOT retried: PASS needs no retry, and INCONCLUSIVE
+    // means the subprocess machinery itself failed (ENOENT, etc.) — retrying
+    // won't fix a missing binary.
+    if (ac.flaky === true && firstRun.status === "FAIL") {
+      // Clamp negative/NaN to zero so a malformed option can never become a
+      // long delay via setTimeout coercion (setTimeout itself already
+      // clamps, but an explicit Math.max documents intent and survives
+      // future refactors of `sleep`).
+      const rawGap = options?.flakyRetryGapMs ?? DEFAULT_FLAKY_RETRY_GAP_MS;
+      const gapMs = Number.isFinite(rawGap) ? Math.max(0, rawGap) : DEFAULT_FLAKY_RETRY_GAP_MS;
+      await sleep(gapMs);
+      const secondRun = await executeCommand(ac.command, execOptions);
+
+      if (secondRun.status === "PASS") {
+        // Flake detected — the retry passed but we can't fully trust the
+        // result because the same command failed moments ago. Report PASS
+        // so the AC doesn't block the verdict, but surface the soft signal
+        // via reliability="suspect" and an evidence prefix so callers can
+        // audit the flake rate downstream.
+        criteria.push({
+          id: ac.id,
+          status: "PASS",
+          evidence: `flaky-retry: first-run FAIL, retry PASS — ${secondRun.evidence}`,
+          reliability: "suspect",
+        });
+        continue;
+      }
+
+      // Retry did not pass. Emit an evidence prefix that accurately reflects
+      // run-2's actual status — FAIL means "both runs failed" (strongest
+      // real-failure signal), INCONCLUSIVE means "run-2 subprocess machinery
+      // broke" (e.g. ENOENT on retry; treat as flaky-then-infra rather than
+      // real failure). Forward secondRun.status either way so downstream
+      // aggregation behaves correctly.
+      const prefix =
+        secondRun.status === "FAIL"
+          ? "flaky-retry: both runs FAIL"
+          : `flaky-retry: run-1 FAIL, run-2 ${secondRun.status}`;
+      criteria.push({
+        id: ac.id,
+        status: secondRun.status,
+        evidence: `${prefix} — ${firstRun.evidence}`,
+        reliability: "trusted",
+      });
+      continue;
+    }
+
     criteria.push({
       id: ac.id,
-      status: result.status,
-      evidence: result.evidence,
+      status: firstRun.status,
+      evidence: firstRun.evidence,
       reliability: "trusted",
     });
   }

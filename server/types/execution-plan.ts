@@ -22,7 +22,24 @@ export interface AcceptanceCriterion {
   id: string;
   description: string;
   command: string;
-  flaky?: boolean; // Not populated by the planner in Phase 1. Exists for future manual annotation.
+  /**
+   * Q0.5/C2 — runtime-flaky marker. When `true`, the evaluator retries the AC
+   * once if the first run returns `status: FAIL`, waiting `flakyRetryGapMs`
+   * between runs (default 500ms). Retry semantics:
+   *   - run-1 PASS → PASS (no retry spawned)
+   *   - run-1 FAIL + run-2 PASS → PASS with `reliability: "suspect"` (flake
+   *     detected; the run passed but the trust level is degraded so callers
+   *     can surface the soft signal)
+   *   - run-1 FAIL + run-2 FAIL → FAIL (real failure, two signals)
+   *
+   * Lint-flagged suspect ACs (A1b short-circuit) do NOT enter this retry
+   * path — they are skipped before the retry gate because the command shape
+   * itself is broken and retrying would just burn CPU for the same wrong
+   * answer. The `flaky` field should only be set on ACs whose commands pass
+   * ac-lint clean but are known to vary across runs for reasons outside the
+   * code under test (network, wall-clock, race conditions).
+   */
+  flaky?: boolean;
   /**
    * Per-rule ac-lint exemptions (Q0.5/A1). When an AC's command matches a
    * deny-list pattern but the author has a justified reason (e.g. an

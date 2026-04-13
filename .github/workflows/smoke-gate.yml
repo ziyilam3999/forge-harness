@@ -1,0 +1,21 @@
+name: smoke-gate
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  smoke-gate:
+    name: smoke-gate (report-only)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run bootstrap detection
+        run: bash scripts/smoke-gate-check.sh
+
+      # Q0.5/B1 D4: report-only in the landing PR. The C1-analog follow-up PR
+      # will add a binding step here that blocks merge when a plan file is
+      # edited without a matching `.smoke.json` sidecar report.

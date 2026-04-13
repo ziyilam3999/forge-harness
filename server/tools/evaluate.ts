@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -20,6 +20,7 @@ export function computeReverseFindingId(
   return `rev-${hash}`;
 }
 import { evaluateStory } from "../lib/evaluator.js";
+import { smokeTestPlan } from "../lib/smoke-runner.js";
 import { scanCodebase } from "../lib/codebase-scan.js";
 import { loadPlan } from "../lib/plan-loader.js";
 import { RunContext, trackedCallClaude } from "../lib/run-context.js";
@@ -48,12 +49,13 @@ import type {
 
 export const evaluateInputSchema = {
   evaluationMode: z
-    .enum(["story", "coherence", "divergence"])
+    .enum(["story", "coherence", "divergence", "smoke-test"])
     .optional()
     .describe(
       'Evaluation mode. "story": run AC shell commands (default). ' +
         '"coherence": LLM-judged tier alignment (PRD <-> master <-> phase). ' +
-        '"divergence": forward (AC failures) + reverse (unplanned capabilities).',
+        '"divergence": forward (AC failures) + reverse (unplanned capabilities). ' +
+        '"smoke-test": authoring-time characterization of every AC — runs once per AC, classifies as ok/slow/empty-evidence/hung/skipped-suspect. Writes a sidecar {plan}.smoke.json file when planPath is provided.',
     ),
 
   // ── Story mode params ──
@@ -132,7 +134,7 @@ export const evaluateInputSchema = {
 // ── Types ─────────────────────────────────────────────────
 
 type EvaluateInput = {
-  evaluationMode?: "story" | "coherence" | "divergence";
+  evaluationMode?: "story" | "coherence" | "divergence" | "smoke-test";
   storyId?: string;
   planPath?: string;
   planJson?: string;
@@ -522,6 +524,62 @@ async function handleDivergenceEval(
   };
 }
 
+// ── Smoke-Test Mode Handler ───────────────────────────────
+
+/**
+ * Q0.5/B1 — smoke-test handler. Exact identifier `handleSmokeTest` is
+ * load-bearing: `scripts/smoke-gate-check.sh` detects the bootstrap-exempt
+ * state by grepping for `^export function handleSmokeTest\b` on both master
+ * and HEAD. Do NOT rename, do NOT inline — the structural signal is the
+ * presence of this function.
+ *
+ * Sidecar write contract: if `planPath` is supplied AND ends in `.json`, the
+ * report is written to `{planPath}.replace(/\.json$/, ".smoke.json")`. If
+ * planPath is missing (inline `planJson` case) or lacks the `.json` suffix,
+ * the write is a no-op and the report is returned in-band only.
+ */
+export async function handleSmokeTest(
+  input: EvaluateInput,
+): Promise<McpResponse> {
+  const plan = loadPlan(input.planPath, input.planJson);
+  const report = await smokeTestPlan(plan, {
+    cwd: input.projectPath,
+  });
+
+  // Sidecar write — only when we have a real `.json` path on disk.
+  if (input.planPath) {
+    if (/\.json$/.test(input.planPath)) {
+      const sidecarPath = input.planPath.replace(/\.json$/, ".smoke.json");
+      try {
+        // Sort entries by acId for byte-stable output — two runs of the
+        // same plan produce byte-identical sidecar files. 2-space indent
+        // matches the rest of the repo's JSON conventions.
+        const sorted = {
+          ...report,
+          entries: [...report.entries].sort((a, b) =>
+            a.acId.localeCompare(b.acId),
+          ),
+        };
+        writeFileSync(sidecarPath, JSON.stringify(sorted, null, 2));
+      } catch (err) {
+        // Defensive: sidecar write failure should not break the in-band
+        // response — the caller still needs the report.
+        console.error(
+          `forge_evaluate(smoke-test): sidecar write to ${sidecarPath} failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else {
+      console.error(
+        `forge_evaluate(smoke-test): planPath "${input.planPath}" does not end in .json; skipping sidecar write`,
+      );
+    }
+  }
+
+  return {
+    content: [{ type: "text", text: JSON.stringify(report, null, 2) }],
+  };
+}
+
 // ── Main Router ───────────────────────────────────────────
 
 export async function handleEvaluate(input: EvaluateInput): Promise<McpResponse> {
@@ -535,6 +593,8 @@ export async function handleEvaluate(input: EvaluateInput): Promise<McpResponse>
         return await handleCoherenceEval(input);
       case "divergence":
         return await handleDivergenceEval(input);
+      case "smoke-test":
+        return await handleSmokeTest(input);
       default:
         return {
           content: [

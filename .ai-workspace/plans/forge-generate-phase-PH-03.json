@@ -2,6 +2,18 @@
   "schemaVersion": "3.0.0",
   "documentTier": "phase",
   "phaseId": "PH-03",
+  "lintExempt": [
+    {
+      "scope": "plan",
+      "rules": [
+        "F36-source-tree-grep",
+        "F56-passed-grep",
+        "F56-multigrep-pipe"
+      ],
+      "batch": "2026-04-13-c1-bootstrap",
+      "rationale": "Bootstrap absorption of pre-C1-bis grep-based verification smells (F36 source-tree grep, F56 passed-grep and multi-grep-pipe variants). New drift must use F-rule-specified patterns. Unwind via grep -l 2026-04-13-c1-bootstrap .ai-workspace/plans/*.json."
+    }
+  ],
   "stories": [
     {
       "id": "PH03-US01",
@@ -24,7 +36,10 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'documentContext.*omitted\\|documentContext.*null\\|no.*document.*no.*error' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/", "server/types/"]
+      "affectedPaths": [
+        "server/lib/",
+        "server/types/"
+      ]
     },
     {
       "id": "PH03-US02",
@@ -52,12 +67,17 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'contextFiles.*empty\\|no.*contextFiles\\|omitted.*contextFiles' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/", "server/types/"]
+      "affectedPaths": [
+        "server/lib/",
+        "server/types/"
+      ]
     },
     {
       "id": "PH03-US03",
       "title": "Pass through document lineage from execution plan to brief (REQ-11)",
-      "dependencies": ["PH03-US01"],
+      "dependencies": [
+        "PH03-US01"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH03-US03-AC01",
@@ -75,7 +95,10 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'lineage.*pass.through\\|lineage.*read.*plan' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/", "server/types/"]
+      "affectedPaths": [
+        "server/lib/",
+        "server/types/"
+      ]
     }
   ]
 }

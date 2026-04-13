@@ -26,6 +26,33 @@ export interface LintExempt {
   rationale: string;
 }
 
+/**
+ * Q0.5/C1-bis — plan-level `lintExempt` variant for bootstrap absorption of
+ * pre-existing drift backlogs (see `.ai-workspace/plans/2026-04-13-q05-c1-...`).
+ *
+ * Discriminator: `scope: "plan"` present → this variant. Absent → the existing
+ * per-AC `LintExempt` shape. Field name is reused intentionally (single-locus)
+ * with a discriminated union at the type level.
+ *
+ * Semantics differ from per-AC on purpose:
+ *   - Per-AC: findings are KEPT with `exempt: true` flag (visible audit trail).
+ *   - Plan-level: findings are DROPPED entirely (bootstrap absorption — drift
+ *     is conceptually gone, not just acknowledged).
+ *
+ * Governance: plan-level entries count in a SEPARATE bucket
+ * (`lintExemptPlanEntriesCount`) with no cap. The per-AC 3-cap
+ * (`GOVERNANCE_CAP`) is unchanged and only feeds `governanceViolation`.
+ */
+export interface LintExemptPlan {
+  scope: "plan";
+  /** Non-empty. Each entry must be an id in `AC_LINT_RULES`. */
+  rules: string[];
+  /** Required. Convention: `{YYYY-MM-DD}-{context-slug}`. */
+  batch: string;
+  /** Required, non-empty. */
+  rationale: string;
+}
+
 export interface LintFinding {
   ruleId: string;
   description: string;
@@ -105,6 +132,15 @@ export function lintAcCommand(
  * objects without forcing the full schemaVersion envelope.
  */
 export interface LintablePlan {
+  /**
+   * Q0.5/C1-bis — plan-level bootstrap-absorption exemptions. Findings whose
+   * `ruleId` matches any entry here are DROPPED from `findings[]` entirely
+   * (bootstrap-absorption semantics, distinct from per-AC "keep with exempt
+   * flag"). Plan-level entries are schema-validated (non-empty `rules`, all
+   * in `AC_LINT_RULES`, non-empty `batch`, non-empty `rationale`) — invalid
+   * entries throw from `lintPlan()`.
+   */
+  lintExempt?: LintExemptPlan[];
   stories: Array<{
     id: string;
     acceptanceCriteria?: Array<{
@@ -127,19 +163,78 @@ export interface LintPlanFinding extends LintFinding {
 }
 
 export interface LintPlanReport {
-  /** Every finding across every AC, flat. */
+  /** Every finding across every AC, flat. Plan-level exempt rules are dropped. */
   findings: LintPlanFinding[];
   /** AC ids that have at least one NON-exempt finding. */
   suspectAcIds: string[];
-  /** Total `lintExempt` entries across all ACs (for the governance cap). */
+  /** Total per-AC `lintExempt` entries (feeds `governanceViolation`). */
   lintExemptCount: number;
+  /**
+   * Q0.5/C1-bis — total plan-level `lintExempt` entries (does NOT feed
+   * `governanceViolation`; no cap).
+   */
+  lintExemptPlanEntriesCount: number;
   /** True iff `lintExemptCount > 3` (plan-governance cap per Q0.5/A1). */
   governanceViolation: boolean;
 }
 
 const GOVERNANCE_CAP = 3;
 
+/**
+ * Q0.5/C1-bis — validate plan-level `lintExempt[]` entries and collect the
+ * union of exempted rule ids. Throws on any malformed entry:
+ *   - missing / non-"plan" `scope`
+ *   - empty or non-array `rules`
+ *   - rule id not in `AC_LINT_RULES`
+ *   - missing / empty `batch`
+ *   - missing / empty `rationale`
+ *
+ * Returns the union set of exempted rule ids across all batches.
+ */
+function validateAndCollectPlanLevelExempts(
+  entries: LintExemptPlan[] | undefined,
+): Set<string> {
+  const exempted = new Set<string>();
+  if (!entries) return exempted;
+  if (!Array.isArray(entries)) {
+    throw new Error("plan.lintExempt must be an array of LintExemptPlan entries");
+  }
+  const knownRuleIds = new Set(AC_LINT_RULES.map((r) => r.id));
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const where = `plan.lintExempt[${i}]`;
+    if (!e || typeof e !== "object") {
+      throw new Error(`${where}: must be an object`);
+    }
+    if (e.scope !== "plan") {
+      throw new Error(`${where}: scope must be "plan" (got ${JSON.stringify(e.scope)})`);
+    }
+    if (!Array.isArray(e.rules) || e.rules.length === 0) {
+      throw new Error(`${where}: rules must be a non-empty array`);
+    }
+    for (const r of e.rules) {
+      if (typeof r !== "string" || !knownRuleIds.has(r)) {
+        throw new Error(
+          `${where}: rule id ${JSON.stringify(r)} is not in AC_LINT_RULES ` +
+            `(known: ${Array.from(knownRuleIds).join(", ")})`,
+        );
+      }
+      exempted.add(r);
+    }
+    if (typeof e.batch !== "string" || e.batch.length === 0) {
+      throw new Error(`${where}: batch must be a non-empty string`);
+    }
+    if (typeof e.rationale !== "string" || e.rationale.length === 0) {
+      throw new Error(`${where}: rationale must be a non-empty string`);
+    }
+  }
+  return exempted;
+}
+
 export function lintPlan(plan: LintablePlan): LintPlanReport {
+  const planExemptedRules = validateAndCollectPlanLevelExempts(plan.lintExempt);
+  const lintExemptPlanEntriesCount = plan.lintExempt?.length ?? 0;
+
   const findings: LintPlanFinding[] = [];
   const suspectAcIds = new Set<string>();
   let lintExemptCount = 0;
@@ -147,17 +242,29 @@ export function lintPlan(plan: LintablePlan): LintPlanReport {
   for (const story of plan.stories ?? []) {
     const acs = story.acceptanceCriteria ?? story.acs ?? [];
     for (const ac of acs) {
-      // Count exemption entries for governance.
+      // Count per-AC exemption entries for governance (unchanged).
       if (ac.lintExempt) {
         const arr = Array.isArray(ac.lintExempt) ? ac.lintExempt : [ac.lintExempt];
         lintExemptCount += arr.length;
       }
 
       const result = lintAcCommand(ac.command, { lintExempt: ac.lintExempt });
-      for (const f of result.findings) {
+
+      // Q0.5/C1-bis — drop findings whose ruleId is in the plan-level exempt
+      // set. This is additive to the per-AC filter (which keeps findings with
+      // `exempt: true`): plan-level means "absorbed, not surfaced."
+      const visibleFindings = result.findings.filter(
+        (f) => !planExemptedRules.has(f.ruleId),
+      );
+
+      for (const f of visibleFindings) {
         findings.push({ ...f, storyId: story.id, acId: ac.id });
       }
-      if (result.suspect) {
+      // Recompute suspect from the post-plan-filter view: if all matching
+      // rules were plan-exempted, the AC is no longer suspect even though
+      // the raw `result.suspect` was true.
+      const stillSuspect = visibleFindings.some((f) => !f.exempt);
+      if (stillSuspect) {
         suspectAcIds.add(ac.id);
       }
     }
@@ -167,6 +274,7 @@ export function lintPlan(plan: LintablePlan): LintPlanReport {
     findings,
     suspectAcIds: Array.from(suspectAcIds),
     lintExemptCount,
+    lintExemptPlanEntriesCount,
     governanceViolation: lintExemptCount > GOVERNANCE_CAP,
   };
 }

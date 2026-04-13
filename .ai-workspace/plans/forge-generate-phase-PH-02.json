@@ -2,6 +2,18 @@
   "schemaVersion": "3.0.0",
   "documentTier": "phase",
   "phaseId": "PH-02",
+  "lintExempt": [
+    {
+      "scope": "plan",
+      "rules": [
+        "F36-source-tree-grep",
+        "F56-passed-grep",
+        "F56-multigrep-pipe"
+      ],
+      "batch": "2026-04-13-c1-bootstrap",
+      "rationale": "Bootstrap absorption of pre-C1-bis grep-based verification smells (F36 source-tree grep, F56 passed-grep and multi-grep-pipe variants). New drift must use F-rule-specified patterns. Unwind via grep -l 2026-04-13-c1-bootstrap .ai-workspace/plans/*.json."
+    }
+  ],
   "stories": [
     {
       "id": "PH02-US01",
@@ -34,12 +46,16 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'audit.*file\\|audit.*jsonl' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/"]
+      "affectedPaths": [
+        "server/lib/"
+      ]
     },
     {
       "id": "PH02-US02",
       "title": "Implement JSONL self-tracking to .forge/runs/data.jsonl (REQ-08)",
-      "dependencies": ["PH02-US01"],
+      "dependencies": [
+        "PH02-US01"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH02-US02-AC01",
@@ -67,12 +83,16 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'JSONL.*graceful\\|graceful.*JSONL\\|JSONL.*fail.*degrade' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/"]
+      "affectedPaths": [
+        "server/lib/"
+      ]
     },
     {
       "id": "PH02-US03",
       "title": "Implement cost estimation output with character-count heuristic (REQ-16)",
-      "dependencies": ["PH02-US01"],
+      "dependencies": [
+        "PH02-US01"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH02-US03-AC01",
@@ -100,7 +120,9 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'Max.*cost.*zero\\|Max.*user.*0\\|costEstimate.*Max' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/"]
+      "affectedPaths": [
+        "server/lib/"
+      ]
     }
   ]
 }

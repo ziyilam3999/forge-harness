@@ -4,6 +4,18 @@
   "phaseId": "PH-03",
   "masterPlanPath": ".ai-workspace/plans/forge-coordinate-master-plan.json",
   "prdPath": "docs/forge-coordinate-prd.md",
+  "lintExempt": [
+    {
+      "scope": "plan",
+      "rules": [
+        "F36-source-tree-grep",
+        "F56-passed-grep",
+        "F56-multigrep-pipe"
+      ],
+      "batch": "2026-04-13-c1-bootstrap",
+      "rationale": "Bootstrap absorption of pre-C1-bis grep-based verification smells (F36 source-tree grep, F56 passed-grep and multi-grep-pipe variants). New drift must use F-rule-specified patterns. Unwind via grep -l 2026-04-13-c1-bootstrap .ai-workspace/plans/*.json."
+    }
+  ],
   "stories": [
     {
       "id": "PH03-US-01",
@@ -52,13 +64,19 @@
           "command": "npx tsc --noEmit"
         }
       ],
-      "affectedPaths": ["server/types/coordinate-result.ts", "server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+      "affectedPaths": [
+        "server/types/coordinate-result.ts",
+        "server/lib/coordinator.ts",
+        "server/lib/coordinator.test.ts"
+      ]
     },
     {
       "id": "PH03-US-02",
       "title": "Implement collectReplanningNotes with mechanical routing from EscalationReason and EvalReport.verdict (REQ-10)",
       "description": "Implements collectReplanningNotes(result) in server/lib/coordinator.ts. Mechanical (no LLM) mapping table: plateau → partial-completion; no-op → gap-found; max-iterations → partial-completion; inconclusive → gap-found; baseline-failed → assumption-changed. Eval verdicts map: FAIL → ac-drift; INCONCLUSIVE → gap-found (rationale: INCONCLUSIVE literally means 'tool could not determine a verdict' = knowledge gap). dependency-satisfied is emitted ONLY by reconcileState (PH03-US-05) when a previously-waiting story is unblocked. Unknown EscalationReason values route to gap-found with severity informational AND a P45 console.error with the exact prefix 'WARNING: unknown EscalationReason routed to gap-found: '. Routing for any blocking note is documented in brief.recommendation; coordinate never auto-invokes forge_plan(update) — the caller decides.",
-      "dependencies": ["PH03-US-01"],
+      "dependencies": [
+        "PH03-US-01"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH03-US-02-AC01",
@@ -91,13 +109,18 @@
           "command": "! grep -nE 'from.*forge_plan|import.*plan.ts' server/lib/coordinator.ts"
         }
       ],
-      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+      "affectedPaths": [
+        "server/lib/coordinator.ts",
+        "server/lib/coordinator.test.ts"
+      ]
     },
     {
       "id": "PH03-US-03",
       "title": "Implement aggregateStatus with velocity, cost, and optional audit (REQ-11)",
       "description": "Implements aggregateStatus(projectPath, options?: {includeAudit?: boolean}) in server/lib/coordinator.ts. Returns per-story status, accumulatedCostUsd (sum of estimatedCostUsd across primary records, null/missing excluded with incompleteData flag per REQ-06), and velocityStoriesPerHour. Velocity formula: velocityStoriesPerHour = completedStoryCount / elapsedHours, where completedStoryCount is the count of distinct storyIds with at least one PRIMARY RunRecord where evalVerdict === 'PASS' within the optional plan-execution window, and elapsedHours = (now - earliestPrimaryRecordTimestampInWindow) / 3_600_000. Edge cases: zero completed stories OR zero elapsed time → velocityStoriesPerHour is 0 (NEVER NaN or Infinity). When options.includeAudit is true, the return additionally contains auditEntries: AuditEntry[] from readAuditEntries (promoted from placeholder in PH-01 US-03 to full implementation here). readAuditEntries reads .forge/audit/*.jsonl with the same graceful-degradation contract as readRunRecords.",
-      "dependencies": ["PH03-US-02"],
+      "dependencies": [
+        "PH03-US-02"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH03-US-03-AC01",
@@ -140,13 +163,20 @@
           "command": "npx vitest run server/lib/run-reader.test.ts -t 'readAuditEntries.*missing|readAuditEntries.*permission' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/run-reader.ts", "server/lib/coordinator.test.ts", "server/lib/run-reader.test.ts"]
+      "affectedPaths": [
+        "server/lib/coordinator.ts",
+        "server/lib/run-reader.ts",
+        "server/lib/coordinator.test.ts",
+        "server/lib/run-reader.test.ts"
+      ]
     },
     {
       "id": "PH03-US-04",
       "title": "Implement graduateFindings with REQ-12 v1.1 distinct-storyId dedup (REQ-12)",
       "description": "Implements graduateFindings(result, options?: {currentPlanStartTimeMs?: number}) in server/lib/coordinator.ts. Returns a wrapper object {findings: Finding[], windowInflationRisk: boolean}. Counts escalation reasons across primary RunRecords for the current plan's story IDs, then DEDUPES BY (storyId, escalationReason) BEFORE applying the ≥3 threshold. Without dedup, a single retry-exhausted story (3 primary records, all escalation 'plateau') would cross the threshold alone and self-graduate — defeating the '≥3 DISTINCT stories = real pattern' intent. Counter is re-derived per call from readRunRecords().filter(r => r.source === 'primary') (stateless, no persistent counter file). Plan-execution window: when currentPlanStartTimeMs is provided, only records with timestamp ≥ that anchor are counted and windowInflationRisk is false; otherwise the window falls back to 'all primary records for stories currently in the plan' and windowInflationRisk is true. Generator records ignored (no evalVerdict). When no escalation reason has count ≥3 → returns {findings: [], windowInflationRisk: <bool>} (never null).",
-      "dependencies": ["PH03-US-03"],
+      "dependencies": [
+        "PH03-US-03"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH03-US-04-AC01",
@@ -184,13 +214,18 @@
           "command": "! grep -nE 'hive-mind|knowledge.base|fs\\.writeFile.*finding' server/lib/coordinator.ts"
         }
       ],
-      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+      "affectedPaths": [
+        "server/lib/coordinator.ts",
+        "server/lib/coordinator.test.ts"
+      ]
     },
     {
       "id": "PH03-US-05",
       "title": "Implement reconcileState with REQ-13 v1.1 failed/dep-failed preservation and dangling-dep rule (REQ-13)",
       "description": "Implements reconcileState(plan, projectPath) in server/lib/coordinator.ts. Runs as the FIRST step inside assessPhase, before recoverState. Handles plan mutations between calls. Orphaned record (storyId field does not match any story ID in current plan) → excluded from classification, console.error warning logged. New stories (present in plan AND zero prior primary RunRecords) → initially marked pending, then flow through normal REQ-04 classification. v1.1 REQ-13 preservation guarantees: (a) failed story with unchanged ID continues failed (automatic via re-derivation, no special-case logic); (b) failed story renamed → orphaned-record warning for old ID + new pending story for new ID with retry counter starting at 0 (intentional escape hatch documented in §7); (c) failed story deleted → orphaned-record warning only; (d) dep-failed story remains dep-failed as long as upstream failed story is still in plan, automatically lifts when upstream is replanned away. Dangling-dependency rule: when any story's dependencies array references a story ID that does NOT exist in the plan → classify the downstream as 'pending' with evidence: 'dep <id> missing from plan' and a P45 console.error warning. The story is NOT dep-failed and NOT failed.",
-      "dependencies": ["PH03-US-04"],
+      "dependencies": [
+        "PH03-US-04"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH03-US-05-AC01",
@@ -233,7 +268,10 @@
           "command": "npx vitest run server/lib/coordinator.test.ts -t 'dangling.*dep|missing.*from.*plan' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+      "affectedPaths": [
+        "server/lib/coordinator.ts",
+        "server/lib/coordinator.test.ts"
+      ]
     }
   ]
 }

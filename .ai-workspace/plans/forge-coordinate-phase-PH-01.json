@@ -4,6 +4,18 @@
   "phaseId": "PH-01",
   "masterPlanPath": ".ai-workspace/plans/forge-coordinate-master-plan.json",
   "prdPath": "docs/forge-coordinate-prd.md",
+  "lintExempt": [
+    {
+      "scope": "plan",
+      "rules": [
+        "F36-source-tree-grep",
+        "F56-passed-grep",
+        "F56-multigrep-pipe"
+      ],
+      "batch": "2026-04-13-c1-bootstrap",
+      "rationale": "Bootstrap absorption of pre-C1-bis grep-based verification smells (F36 source-tree grep, F56 passed-grep and multi-grep-pipe variants). New drift must use F-rule-specified patterns. Unwind via grep -l 2026-04-13-c1-bootstrap .ai-workspace/plans/*.json."
+    }
+  ],
   "stories": [
     {
       "id": "PH01-US-00a",
@@ -62,13 +74,20 @@
           "command": "npx vitest run server/lib/run-record.test.ts 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/run-record.ts", "server/tools/evaluate.ts", "server/tools/evaluate.test.ts", "server/lib/run-record.test.ts"]
+      "affectedPaths": [
+        "server/lib/run-record.ts",
+        "server/tools/evaluate.ts",
+        "server/tools/evaluate.test.ts",
+        "server/lib/run-record.test.ts"
+      ]
     },
     {
       "id": "PH01-US-00b",
       "title": "Populate estimatedCostUsd at every other canonical writeRunRecord call site (REQ-01)",
       "description": "Per the verified grep enumeration in the impl plan (2026-04-09), the canonical writeRunRecord (from server/lib/run-record.ts) is called at three other primary sites: handleCoherenceEval (server/tools/evaluate.ts ~line 226), handleDivergenceEval (server/tools/evaluate.ts ~line 372), and the writeRunRecordIfNeeded wrapper in server/tools/plan.ts (~line 688, called from 4 forge_plan sites). Each call site populates estimatedCostUsd from its local CostTracker.totalCostUsd. The generator JSONL writer at server/lib/generator.ts is explicitly out of scope per REQ-01 AC-2 — it now uses the renamed appendGeneratorIterationRecord (post v0.16.3) and writes a different schema with no metrics sub-object.",
-      "dependencies": ["PH01-US-00a"],
+      "dependencies": [
+        "PH01-US-00a"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US-00b-AC01",
@@ -101,13 +120,20 @@
           "command": "npx vitest run server/tools/evaluate.test.ts server/tools/plan.test.ts 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/tools/evaluate.ts", "server/tools/plan.ts", "server/tools/evaluate.test.ts", "server/tools/plan.test.ts"]
+      "affectedPaths": [
+        "server/tools/evaluate.ts",
+        "server/tools/plan.ts",
+        "server/tools/evaluate.test.ts",
+        "server/tools/plan.test.ts"
+      ]
     },
     {
       "id": "PH01-US-01",
       "title": "Define CoordinateResult, StoryStatusEntry, PhaseTransitionBrief, ReplanningNote, and CoordinateMode type interfaces (REQ-05)",
       "description": "Creates server/types/coordinate-result.ts with the full type surface from REQ-05 v1.1: StoryStatusEntry with the 6-state status enum (done, ready, ready-for-retry, failed, pending, dep-failed), retryCount, retriesRemaining, priorEvalReport (non-optional with explicit null sentinel per NFR-C08), and evidence (non-optional with explicit null sentinel). PhaseTransitionBrief with the 4-case status enum (in-progress, complete, needs-replan, halted), stories[], readyStories[], depFailedStories[] (renamed from blockedStories per v1.1), failedStories[], completedCount, totalCount, budget, timeBudget, replanningNotes[], recommendation, and configSource. ReplanningNote interface deferred to PH-03 US-01 (full implementation); a placeholder type is exported here so PhaseTransitionBrief.replanningNotes can reference it.",
-      "dependencies": ["PH01-US-00a"],
+      "dependencies": [
+        "PH01-US-00a"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US-01-AC01",
@@ -155,13 +181,17 @@
           "command": "npx tsc --noEmit"
         }
       ],
-      "affectedPaths": ["server/types/coordinate-result.ts"]
+      "affectedPaths": [
+        "server/types/coordinate-result.ts"
+      ]
     },
     {
       "id": "PH01-US-02",
       "title": "Implement topoSort with Kahn's algorithm and stable lex tie-break; export detectCycles with Story[] signature (REQ-02, NFR-C02)",
       "description": "Changes the private detectCycles in server/validation/execution-plan.ts to accept (stories: Story[]) directly (currently takes a different shape — safe since the function is private with no external consumers per the impl plan's verified state). Exports detectCycles with a JSDoc contract describing purpose, parameters, return sentinel (string | null), and never-throws guarantee. Creates server/lib/topo-sort.ts implementing Kahn's algorithm: build the in-degree map, seed the ready queue with zero-in-degree stories sorted by story.id ascending (the stable lex tie-break that preserves NFR-C02 byte-identity), pop the lex-smallest ready story, decrement downstream in-degrees, re-sort the ready queue lex-ascending, repeat. Empty-input guard returns []. Cycle detection delegates to detectCycles; on cycle, throws with the cycle description. Default ordering matches pre-config behavior byte-for-byte for the 'topological' (default) storyOrdering value.",
-      "dependencies": ["PH01-US-01"],
+      "dependencies": [
+        "PH01-US-01"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US-02-AC01",
@@ -209,13 +239,20 @@
           "command": "npx vitest run server/validation/execution-plan.test.ts 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/topo-sort.ts", "server/lib/topo-sort.test.ts", "server/validation/execution-plan.ts", "server/validation/execution-plan.test.ts"]
+      "affectedPaths": [
+        "server/lib/topo-sort.ts",
+        "server/lib/topo-sort.test.ts",
+        "server/validation/execution-plan.ts",
+        "server/validation/execution-plan.test.ts"
+      ]
     },
     {
       "id": "PH01-US-03",
       "title": "Implement readRunRecords as a tagged discriminated union over PrimaryRecord and GeneratorRecord (REQ-03)",
       "description": "Creates server/lib/run-reader.ts with readRunRecords(projectPath): Promise<ReadonlyArray<PrimaryRecord | GeneratorRecord>>. PrimaryRecord = {source: 'primary', record: RunRecord} reads .forge/runs/*.json; GeneratorRecord = {source: 'generator', record: GeneratorIterationRecord} reads .forge/runs/data.jsonl. Results are sorted by timestamp ascending. Corrupt JSON, truncated JSONL lines, schema mismatches, missing directories, and EACCES/EPERM permission errors degrade gracefully: the bad entry or unreadable file is skipped, console.error is called per P44, and valid entries are still returned. Also exports a readAuditEntries placeholder (full implementation in PH-03 US-03 per REQ-11 ownership note).",
-      "dependencies": ["PH01-US-01"],
+      "dependencies": [
+        "PH01-US-01"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US-03-AC01",
@@ -263,13 +300,19 @@
           "command": "npx vitest run server/lib/run-reader.test.ts -t 'dual-source|dual.source' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/run-reader.ts", "server/lib/run-reader.test.ts"]
+      "affectedPaths": [
+        "server/lib/run-reader.ts",
+        "server/lib/run-reader.test.ts"
+      ]
     },
     {
       "id": "PH01-US-04",
       "title": "Implement assessPhase with the 6-state precedence chain and retry counter re-derivation (REQ-04)",
       "description": "Creates server/lib/coordinator.ts with assessPhase(plan, projectPath, options): CoordinateResult. Walks the topo-sorted stories from the target phase and classifies each by the explicit top-to-bottom precedence chain (first-match-wins): (1) done iff most-recent primary RunRecord for storyId has evalVerdict === 'PASS' (dominates all other rules — handles 3-FAIL-then-PASS correctly); (2) dep-failed iff any transitive dependency is terminal-failed (checked BEFORE rule 3 to prevent dep-failed/failed double-attribution); (3) failed iff retryCount >= 3 AND most recent record is not PASS AND no transitive dep is failed — does NOT require deps to be done; (4) ready-for-retry iff most recent is FAIL or INCONCLUSIVE AND retryCount < 3 AND all dependencies are done, with priorEvalReport populated from that record's embedded evalReport; (5) ready iff zero prior primary records AND all deps done; (6) pending otherwise. retryCount is re-derived per call from readRunRecords().filter(r => r.source === 'primary' && r.record.storyId === id && r.record.evalVerdict !== 'PASS').length — counts both FAIL and INCONCLUSIVE per REQ-08 v1.1. Optionally clipped by currentPlanStartTimeMs per REQ-04 v1.1.",
-      "dependencies": ["PH01-US-02", "PH01-US-03"],
+      "dependencies": [
+        "PH01-US-02",
+        "PH01-US-03"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US-04-AC01",
@@ -317,13 +360,18 @@
           "command": "npx vitest run server/lib/coordinator.test.ts -t 'generator.*not.*classification|generator.*ignored' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+      "affectedPaths": [
+        "server/lib/coordinator.ts",
+        "server/lib/coordinator.test.ts"
+      ]
     },
     {
       "id": "PH01-US-05",
       "title": "Implement assemblePhaseTransitionBrief with the 4-case status rule and LAST RETRY recommendation (REQ-05)",
       "description": "Implements assemblePhaseTransitionBrief(result, plan): PhaseTransitionBrief in server/lib/coordinator.ts. Mechanically aggregates StoryStatusEntry signals into the brief's wire format. Applies the 4-case status resolution rule top-to-bottom (first-match-wins): (1) halted iff phaseBoundaryBehavior === 'halt-hard' AND the phase is structurally complete AND haltClearedByHuman !== true (re-evaluated per call, never latched per REQ-15 v1.1); (2) complete iff every story is done; (3) needs-replan iff any story is failed OR dep-failed (with at least one blocking ReplanningNote attached); (4) in-progress otherwise. readyStories[] includes BOTH ready and ready-for-retry IDs (callers MUST cross-reference stories[] to read priorEvalReport). When any StoryStatusEntry has retriesRemaining === 1, brief.recommendation MUST contain the substring 'LAST RETRY: <storyId>' (binary-greppable warning for the caller). depFailedStories[] is populated from dep-failed entries (renamed from v1.0 blockedStories).",
-      "dependencies": ["PH01-US-04"],
+      "dependencies": [
+        "PH01-US-04"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US-05-AC01",
@@ -371,28 +419,51 @@
           "command": "npx vitest run server/lib/coordinator.test.ts -t 'NFR-C08|no absent keys|Object.keys' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/coordinator.ts", "server/lib/coordinator.test.ts"]
+      "affectedPaths": [
+        "server/lib/coordinator.ts",
+        "server/lib/coordinator.test.ts"
+      ]
     },
     {
       "id": "PH01-US-06",
       "title": "PH-01 unit test scaffold consolidation",
       "description": "Test-scaffolding story (no REQ mapping per PRD §11). Consolidates the unit-test counts mandated by US-02 (topo sort 5+), US-03 (run-reader 5+), US-04 (assessPhase 5+), and US-05 (brief 3+). Confirms NFR-C01 advisory-mode $0 holds for the PH-01 file set: no callClaude or trackedCallClaude imports in coordinator.ts, topo-sort.ts, run-reader.ts, run-record.ts, execution-plan.ts, coordinate-result.ts, or coordinate.ts. Also confirms NFR-C05 Windows compatibility on the new files (no colons in any filename written by tests, path.join used everywhere, CRLF tolerance in run-reader).",
-      "dependencies": ["PH01-US-02", "PH01-US-03", "PH01-US-04", "PH01-US-05"],
+      "dependencies": [
+        "PH01-US-02",
+        "PH01-US-03",
+        "PH01-US-04",
+        "PH01-US-05"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US-06-AC01",
-          "description": "topo-sort.test.ts has at least 5 passing tests",
-          "command": "npx vitest run server/lib/topo-sort.test.ts 2>&1 | grep -qE 'Tests[[:space:]]+[5-9]|Tests[[:space:]]+[0-9]{2,}'"
+          "description": "topo-sort.test.ts passes (exit 0)",
+          "command": "npx vitest run server/lib/topo-sort.test.ts"
+        },
+        {
+          "id": "PH01-US-06-AC01b",
+          "description": "topo-sort.test.ts has at least 5 tests (regression guard)",
+          "command": "npx vitest run server/lib/topo-sort.test.ts --reporter=json 2>/dev/null | node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const r=JSON.parse(d);const n=r.numTotalTests||0;process.exit(n>=5?0:1)}catch(e){process.exit(1)}});'"
         },
         {
           "id": "PH01-US-06-AC02",
-          "description": "run-reader.test.ts has at least 5 passing tests",
-          "command": "npx vitest run server/lib/run-reader.test.ts 2>&1 | grep -qE 'Tests[[:space:]]+[5-9]|Tests[[:space:]]+[0-9]{2,}'"
+          "description": "run-reader.test.ts passes (exit 0)",
+          "command": "npx vitest run server/lib/run-reader.test.ts"
+        },
+        {
+          "id": "PH01-US-06-AC02b",
+          "description": "run-reader.test.ts has at least 5 tests (regression guard)",
+          "command": "npx vitest run server/lib/run-reader.test.ts --reporter=json 2>/dev/null | node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const r=JSON.parse(d);const n=r.numTotalTests||0;process.exit(n>=5?0:1)}catch(e){process.exit(1)}});'"
         },
         {
           "id": "PH01-US-06-AC03",
-          "description": "coordinator.test.ts has at least 8 passing tests covering assessPhase + brief assembly",
-          "command": "npx vitest run server/lib/coordinator.test.ts 2>&1 | grep -qE 'Tests[[:space:]]+[8-9]|Tests[[:space:]]+[0-9]{2,}'"
+          "description": "coordinator.test.ts passes (exit 0)",
+          "command": "npx vitest run server/lib/coordinator.test.ts"
+        },
+        {
+          "id": "PH01-US-06-AC03b",
+          "description": "coordinator.test.ts has at least 8 tests covering assessPhase + brief assembly (regression guard)",
+          "command": "npx vitest run server/lib/coordinator.test.ts --reporter=json 2>/dev/null | node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const r=JSON.parse(d);const n=r.numTotalTests||0;process.exit(n>=8?0:1)}catch(e){process.exit(1)}});'"
         },
         {
           "id": "PH01-US-06-AC04",
@@ -407,7 +478,7 @@
         {
           "id": "PH01-US-06-AC06",
           "description": "Full test suite green",
-          "command": "npx vitest run 2>&1 | grep -q 'passed' && ! grep -q 'failed'"
+          "command": "npx vitest run"
         },
         {
           "id": "PH01-US-06-AC07",
@@ -415,7 +486,11 @@
           "command": "npx tsc --noEmit"
         }
       ],
-      "affectedPaths": ["server/lib/topo-sort.test.ts", "server/lib/run-reader.test.ts", "server/lib/coordinator.test.ts"]
+      "affectedPaths": [
+        "server/lib/topo-sort.test.ts",
+        "server/lib/run-reader.test.ts",
+        "server/lib/coordinator.test.ts"
+      ]
     }
   ]
 }

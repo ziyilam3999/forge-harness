@@ -90,7 +90,12 @@ export async function evaluateStory(
     // means the subprocess machinery itself failed (ENOENT, etc.) — retrying
     // won't fix a missing binary.
     if (ac.flaky === true && firstRun.status === "FAIL") {
-      const gapMs = options?.flakyRetryGapMs ?? DEFAULT_FLAKY_RETRY_GAP_MS;
+      // Clamp negative/NaN to zero so a malformed option can never become a
+      // long delay via setTimeout coercion (setTimeout itself already
+      // clamps, but an explicit Math.max documents intent and survives
+      // future refactors of `sleep`).
+      const rawGap = options?.flakyRetryGapMs ?? DEFAULT_FLAKY_RETRY_GAP_MS;
+      const gapMs = Number.isFinite(rawGap) ? Math.max(0, rawGap) : DEFAULT_FLAKY_RETRY_GAP_MS;
       await sleep(gapMs);
       const secondRun = await executeCommand(ac.command, execOptions);
 
@@ -109,13 +114,20 @@ export async function evaluateStory(
         continue;
       }
 
-      // Both runs failed — real failure. Keep the first run's evidence as
-      // the primary signal; a flaky AC failing twice in a row is the
-      // strongest "this is actually broken" signal we can get.
+      // Retry did not pass. Emit an evidence prefix that accurately reflects
+      // run-2's actual status — FAIL means "both runs failed" (strongest
+      // real-failure signal), INCONCLUSIVE means "run-2 subprocess machinery
+      // broke" (e.g. ENOENT on retry; treat as flaky-then-infra rather than
+      // real failure). Forward secondRun.status either way so downstream
+      // aggregation behaves correctly.
+      const prefix =
+        secondRun.status === "FAIL"
+          ? "flaky-retry: both runs FAIL"
+          : `flaky-retry: run-1 FAIL, run-2 ${secondRun.status}`;
       criteria.push({
         id: ac.id,
         status: secondRun.status,
-        evidence: `flaky-retry: both runs FAIL — ${firstRun.evidence}`,
+        evidence: `${prefix} — ${firstRun.evidence}`,
         reliability: "trusted",
       });
       continue;

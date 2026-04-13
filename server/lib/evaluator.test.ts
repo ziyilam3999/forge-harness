@@ -413,6 +413,38 @@ describe("evaluateStory", () => {
       expect(report.verdict).toBe("INCONCLUSIVE");
     });
 
+    it("flaky AC: run-1 INCONCLUSIVE → passes through, no retry spawned", async () => {
+      mockedExecute.mockResolvedValueOnce(
+        mockResult({ status: "INCONCLUSIVE", evidence: "spawn ENOENT" }),
+      );
+
+      const report = await evaluateStory(flakyPlan(true), "US-01", {
+        flakyRetryGapMs: 1,
+      });
+      expect(mockedExecute).toHaveBeenCalledTimes(1);
+      expect(report.verdict).toBe("INCONCLUSIVE");
+      expect(report.criteria[0].status).toBe("INCONCLUSIVE");
+      expect(report.criteria[0].reliability).toBe("trusted");
+      expect(report.criteria[0].evidence).toBe("spawn ENOENT");
+      expect(report.criteria[0].evidence).not.toContain("flaky-retry");
+    });
+
+    it("flaky AC: run-1 FAIL + run-2 INCONCLUSIVE → INCONCLUSIVE with accurate evidence prefix", async () => {
+      mockedExecute
+        .mockResolvedValueOnce(mockResult({ status: "FAIL", evidence: "first fail" }))
+        .mockResolvedValueOnce(
+          mockResult({ status: "INCONCLUSIVE", evidence: "retry ENOENT" }),
+        );
+
+      const report = await evaluateStory(flakyPlan(true), "US-01", {
+        flakyRetryGapMs: 1,
+      });
+      expect(mockedExecute).toHaveBeenCalledTimes(2);
+      expect(report.criteria[0].status).toBe("INCONCLUSIVE");
+      expect(report.criteria[0].evidence).toContain("run-1 FAIL, run-2 INCONCLUSIVE");
+      expect(report.criteria[0].evidence).not.toContain("both runs FAIL");
+    });
+
     it("non-flaky AC: run-1 FAIL → FAIL, no retry (regression guard)", async () => {
       mockedExecute.mockResolvedValueOnce(
         mockResult({ status: "FAIL", evidence: "real fail" }),

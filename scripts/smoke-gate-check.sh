@@ -10,6 +10,12 @@
 #   (b) `handleSmokeTest` IS exported from server/tools/evaluate.ts on HEAD
 #   (c) zero `.ai-workspace/plans/*.smoke.json` files exist on origin/master
 #
+# The grep accepts both `export function handleSmokeTest` AND
+# `export async function handleSmokeTest` via an optional `async ` group.
+# The real handler is async; the regex without the optional group missed it
+# on the B1 landing PR, emitting `smoke-gate: active` instead of
+# `bootstrap-exempt`. Fix pinned in tests 15-16 and 17-bootstrap.
+#
 # Uses `git show` and `git ls-tree` (NOT `find`) so the origin/master state is
 # inspected via the git object database, not the working tree. `find` would
 # only see the current checkout and would lie about master when HEAD is
@@ -33,13 +39,13 @@ TMPHEAD=$(mktemp)
 
 MASTER_HAS=0
 if git show "origin/master:${EVAL_FILE}" > "${TMPMASTER}" 2>/dev/null; then
-  MASTER_HAS=$(grep -c '^export function handleSmokeTest\b' "${TMPMASTER}")
+  MASTER_HAS=$(grep -c '^export \(async \)\{0,1\}function handleSmokeTest\b' "${TMPMASTER}")
   [ -z "${MASTER_HAS}" ] && MASTER_HAS=0
 fi
 
 HEAD_HAS=0
 if git show "HEAD:${EVAL_FILE}" > "${TMPHEAD}" 2>/dev/null; then
-  HEAD_HAS=$(grep -c '^export function handleSmokeTest\b' "${TMPHEAD}")
+  HEAD_HAS=$(grep -c '^export \(async \)\{0,1\}function handleSmokeTest\b' "${TMPHEAD}")
   [ -z "${HEAD_HAS}" ] && HEAD_HAS=0
 fi
 

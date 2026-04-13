@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,7 +55,7 @@ function initFixtureRepo(withHandleSmokeTestOnMaster: boolean): string {
   // Seed evaluate.ts on master
   mkdirSync(join(work, "server", "tools"), { recursive: true });
   const masterContent = withHandleSmokeTestOnMaster
-    ? "export function handleStoryEval() {}\nexport function handleSmokeTest() {}\n"
+    ? "export function handleStoryEval() {}\nexport async function handleSmokeTest() {}\n"
     : "export function handleStoryEval() {}\n";
   writeFileSync(join(work, "server", "tools", "evaluate.ts"), masterContent);
 
@@ -66,7 +72,7 @@ function initFixtureRepo(withHandleSmokeTestOnMaster: boolean): string {
   execSync(`git -C "${work}" checkout -b feat/b1`, { stdio: "ignore" });
   writeFileSync(
     join(work, "server", "tools", "evaluate.ts"),
-    "export function handleStoryEval() {}\nexport function handleSmokeTest() {}\n",
+    "export function handleStoryEval() {}\nexport async function handleSmokeTest() {}\n",
   );
   writeFileSync(join(work, ".branch-marker"), `branch: feat/b1\n`);
   execSync(`git -C "${work}" add -A`, { stdio: "ignore" });
@@ -96,6 +102,29 @@ describe("smoke-gate-check.sh / bootstrap detection", () => {
     },
     15_000,
   );
+
+  // Bootstrap sanity check (ship-fix-1): the regex MUST match the real
+  // function signature in the real evaluate.ts file on disk. If a future
+  // refactor changes `export async function handleSmokeTest` to `export
+  // const handleSmokeTest = async` or similar, this test fails loudly
+  // instead of silently flipping CI to `smoke-gate: active`.
+  //
+  // This test exists because the initial B1 landing PR (ship-fix-1 round)
+  // had a regex that matched only `export function ...` (no `async`), so
+  // the real async handler was missed and CI emitted the wrong signal.
+  // Tests 15-16 passed locally because their synthetic fixtures also
+  // lacked `async` — producer/consumer seam bug (P57-class).
+  it("regex matches the real handleSmokeTest signature on disk", () => {
+    const evalPath = resolve(
+      fileURLToPath(new URL("../tools/evaluate.ts", import.meta.url)),
+    );
+    const source = readFileSync(evalPath, "utf-8");
+    // Same pattern the bash script uses (BRE with escaped optional group).
+    // JavaScript regex equivalent: `^export (?:async )?function handleSmokeTest\b`
+    // with multiline flag.
+    const realFnRegex = /^export (?:async )?function handleSmokeTest\b/m;
+    expect(realFnRegex.test(source)).toBe(true);
+  });
 
   // Test 16 — active: handleSmokeTest already on master
   it.skipIf(!bashAvailable)(

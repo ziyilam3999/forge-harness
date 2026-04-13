@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   smokeTestPlan,
@@ -192,8 +191,9 @@ describe("smoke-runner / ac-lint interaction", () => {
     const report = await smokeTestPlan(plan, { executorOverride: executor });
     const e = report.entries[0];
     // Either (a) the executor ran and the verdict is non-skipped, or (b) the
-    // rule id isn't F55 and something else is still flagging. In case (b) the
-    // test should fail so we know to update the rule id — not silently pass.
+    // F36-source-tree-grep rule id has drifted and something else is still
+    // flagging. In case (b) the test should fail so we know to update the
+    // rule id — not silently pass.
     expect(executor).toHaveBeenCalled();
     expect(e.verdict).not.toBe("skipped-suspect");
   });
@@ -318,6 +318,96 @@ describe("smoke-runner / Windows cold-start warmup", () => {
   });
 });
 
+describe("smoke-runner / review fixes (round 1)", () => {
+  // R1a — executor rejection preserves completeness invariant
+  it("emits empty-evidence entry when executor throws, preserving invariant", async () => {
+    const executor: MockExecutor = async () => {
+      throw new Error("boom from test");
+    };
+    const plan: ExecutionPlan = {
+      schemaVersion: "3.0.0",
+      stories: [
+        {
+          id: "US-01",
+          title: "s1",
+          acceptanceCriteria: [
+            { id: "AC01", description: "", command: "one" },
+            { id: "AC02", description: "", command: "two" },
+          ],
+        },
+      ],
+    };
+    const report = await smokeTestPlan(plan, { executorOverride: executor });
+    expect(report.entries).toHaveLength(2);
+    expect(report.entries[0].verdict).toBe("empty-evidence");
+    expect(report.entries[0].exited).toBeNull();
+    expect(report.entries[0].reason).toContain("executor-threw");
+    expect(report.entries[0].reason).toContain("boom from test");
+    expect(report.entries[1].verdict).toBe("empty-evidence");
+  });
+
+  // R2 — invalid smokeTimeoutMs does NOT count as author consent
+  it("does not suppress timeoutRisk when smokeTimeoutMs is invalid-but-present", async () => {
+    const executor: MockExecutor = async () =>
+      mockOk({ elapsedMs: 25_000 });
+    // Zero is a typo (clamps to default); should still emit timeoutRisk=true.
+    const report0 = await smokeTestPlan(
+      onePlan("echo slow", { smokeTimeoutMs: 0 }),
+      { executorOverride: executor },
+    );
+    expect(report0.entries[0].verdict).toBe("slow");
+    expect(report0.entries[0].timeoutRisk).toBe(true);
+
+    // Negative is also a typo.
+    const reportNeg = await smokeTestPlan(
+      onePlan("echo slow", { smokeTimeoutMs: -5 }),
+      { executorOverride: executor },
+    );
+    expect(reportNeg.entries[0].timeoutRisk).toBe(true);
+
+    // NaN likewise.
+    const reportNaN = await smokeTestPlan(
+      onePlan("echo slow", { smokeTimeoutMs: NaN }),
+      { executorOverride: executor },
+    );
+    expect(reportNaN.entries[0].timeoutRisk).toBe(true);
+  });
+
+  // R1 — Windows warmup targets first SPAWNED AC, not first plan AC
+  it("applies Windows warmup to the first spawned AC when earlier ACs are lint-skipped", async () => {
+    const executor: MockExecutor = async () => mockOk({ elapsedMs: 1000 });
+    const plan: ExecutionPlan = {
+      schemaVersion: "3.0.0",
+      stories: [
+        {
+          id: "US-01",
+          title: "s1",
+          acceptanceCriteria: [
+            // AC01 is lint-flagged → skipped-suspect, no spawn
+            { id: "AC01", description: "", command: "grep -rn 'X' src/" },
+            // AC02 is the first real spawn → gets the 800ms subtraction
+            { id: "AC02", description: "", command: "echo two" },
+            // AC03 is the second spawn → raw elapsedMs
+            { id: "AC03", description: "", command: "echo three" },
+          ],
+        },
+      ],
+    };
+    const report = await smokeTestPlan(plan, {
+      executorOverride: executor,
+      platformOverride: "win32",
+    });
+    expect(report.entries).toHaveLength(3);
+    expect(report.entries[0].verdict).toBe("skipped-suspect");
+    expect(report.entries[0].elapsedMs).toBeNull();
+    // AC02 is the first SPAWN — gets the warmup subtraction even though
+    // it's plan-index 1.
+    expect(report.entries[1].elapsedMs).toBe(200);
+    // AC03 is the second spawn — full 1000ms.
+    expect(report.entries[2].elapsedMs).toBe(1000);
+  });
+});
+
 describe("smoke-runner / clamp rules (D2)", () => {
   // Test 13 — timeout cap
   it("clamps smokeTimeoutMs above 180000 to 180000", () => {
@@ -361,8 +451,8 @@ describe("smoke-runner / PH-01 integration (test 17)", () => {
   // Runs the fixture through the real smokeExecute (not mocked) and asserts
   // at least one AC is flagged as hung / skipped-suspect / slow+risk.
   it("flags at least one known-bad AC in the PH-01-US-06 fixture", async () => {
-    const fixturePath = join(
-      fileURLToPath(new URL("./__fixtures__/ph01-us06-smoke.plan.json", import.meta.url)),
+    const fixturePath = fileURLToPath(
+      new URL("./__fixtures__/ph01-us06-smoke.plan.json", import.meta.url),
     );
     const plan = JSON.parse(readFileSync(fixturePath, "utf-8")) as ExecutionPlan;
     const report = await smokeTestPlan(plan);

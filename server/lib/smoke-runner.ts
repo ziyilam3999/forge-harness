@@ -98,16 +98,18 @@ function classifySmokeResult(
 }
 
 /**
- * Apply the Windows cold-start warmup subtraction to the first AC's elapsed
- * time. Only applies when `platform === "win32"` AND this is the first AC
- * (index 0). Floors at zero — no negative elapsedMs in reports.
+ * Apply the Windows cold-start warmup subtraction to the first SPAWNED
+ * AC's elapsed time (R1 fix: was "first plan AC" which missed the real
+ * measurement bias when AC01 was lint-skipped). Only applies when
+ * `platform === "win32"` AND this is the first actually-executed AC.
+ * Floors at zero — no negative elapsedMs in reports.
  */
 function applyWindowsWarmup(
   elapsedMs: number,
-  isFirstAc: boolean,
+  isFirstSpawn: boolean,
   platform: NodeJS.Platform,
 ): number {
-  if (!isFirstAc) return elapsedMs;
+  if (!isFirstSpawn) return elapsedMs;
   if (platform !== "win32") return elapsedMs;
   return Math.max(0, elapsedMs - WINDOWS_COLD_START_WARMUP_MS);
 }
@@ -115,9 +117,12 @@ function applyWindowsWarmup(
 /**
  * Run smoke-test against every AC in every story of the plan.
  *
- * Invariant: `report.entries.length === total AC count` — verified by
- * test 8 in `smoke-runner.test.ts`. Every loop iteration MUST push exactly
- * one entry before `continue`ing.
+ * Invariant: `report.entries.length === total AC count`. This holds across
+ * all code paths including executor rejections — a thrown smokeExecute
+ * produces a synthetic `empty-evidence` entry with the error message as the
+ * reason. Verified by test 8 and the new executor-throws test in
+ * `smoke-runner.test.ts`. Every loop iteration MUST push exactly one entry
+ * before `continue`ing.
  */
 export async function smokeTestPlan(
   plan: ExecutionPlan,
@@ -127,12 +132,14 @@ export async function smokeTestPlan(
   const executor = options.executorOverride ?? smokeExecute;
   const entries: SmokeReportEntry[] = [];
 
-  let acIndex = 0;
+  // R1 fix: "first spawned AC" rather than "first plan AC". Windows cold-
+  // start warmup subtraction should apply to the AC that actually pays the
+  // spawn cost, not the plan-index-zero AC (which may have been
+  // lint-skipped). PH-01 fixture hits this case: AC01 is skipped, AC02 is
+  // the real first spawn.
+  let firstSpawnSeen = false;
   for (const story of plan.stories) {
     for (const ac of story.acceptanceCriteria) {
-      const isFirstAc = acIndex === 0;
-      acIndex++;
-
       // Step 1: ac-lint short-circuit. If a non-exempt rule matches, emit
       // skipped-suspect WITHOUT execution. The emission site stays inside
       // the loop — do not hoist this into the router (B1 D3).
@@ -154,25 +161,47 @@ export async function smokeTestPlan(
         continue;
       }
 
-      // Step 2: resolve the per-AC timeout budget. Clamp defends against
-      // malformed overrides per B1/D2 — every invalid value collapses to
-      // the default.
+      // Step 2: resolve the per-AC timeout budget. R2 fix: only positive
+      // finite values count as "author consent" for timeoutRisk suppression.
+      // A typo like `smokeTimeoutMs: 0` / `-5` / `NaN` clamps to default AND
+      // still surfaces the slow-verdict warning (worst-of-both-worlds
+      // prevented).
       const hadExplicitOverride =
-        ac.smokeTimeoutMs !== undefined && ac.smokeTimeoutMs !== null;
+        typeof ac.smokeTimeoutMs === "number" &&
+        Number.isFinite(ac.smokeTimeoutMs) &&
+        ac.smokeTimeoutMs > 0;
       const timeoutBudgetMs = clampSmokeTimeoutMs(ac.smokeTimeoutMs);
 
-      // Step 3: run smokeExecute. Errors bubble out — the caller decides
-      // whether a transport failure aborts the whole sweep or marks the
-      // AC. For now, let it throw: an unexpected executor error means the
-      // smoke-runner harness itself is broken and retrying won't help.
-      const raw = await executor(ac.command, {
-        timeoutMs: timeoutBudgetMs,
-        cwd: options.cwd,
-      });
+      // Step 3: run smokeExecute. R1a fix: catch executor rejections and
+      // emit a synthetic empty-evidence entry so the completeness invariant
+      // holds across failure modes. Pre-R1a the loop aborted and callers
+      // saw a partially-filled `entries` array.
+      const isFirstSpawn = !firstSpawnSeen;
+      firstSpawnSeen = true;
+
+      let raw: SmokeExecuteResult;
+      try {
+        raw = await executor(ac.command, {
+          timeoutMs: timeoutBudgetMs,
+          cwd: options.cwd,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        entries.push({
+          acId: ac.id,
+          verdict: "empty-evidence",
+          exited: null,
+          elapsedMs: 0,
+          evidenceBytes: 0,
+          timeoutRisk: false,
+          reason: `executor-threw: ${message}`,
+        });
+        continue;
+      }
 
       const elapsedMs = applyWindowsWarmup(
         raw.elapsedMs,
-        isFirstAc,
+        isFirstSpawn,
         platform,
       );
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -19,7 +19,6 @@ export function computeReverseFindingId(
     .slice(0, 12);
   return `rev-${hash}`;
 }
-import { writeFileSync } from "node:fs";
 import { evaluateStory } from "../lib/evaluator.js";
 import { smokeTestPlan } from "../lib/smoke-runner.js";
 import { scanCodebase } from "../lib/codebase-scan.js";

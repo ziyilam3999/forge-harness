@@ -36,6 +36,10 @@ SMOKE_JSON_PATH_RE='^\.ai-workspace/plans/.+\.smoke\.json$'
 
 TMPMASTER=$(mktemp)
 TMPHEAD=$(mktemp)
+# R7 fix: guarantee tmp-file cleanup even if a future refactor adds an
+# early `exit` or re-enables `set -e`. The explicit `rm -f` at the end is
+# kept as a belt-and-suspenders, but this trap is the durable fix.
+trap 'rm -f "${TMPMASTER}" "${TMPHEAD}"' EXIT
 
 MASTER_HAS=0
 if git show "origin/master:${EVAL_FILE}" > "${TMPMASTER}" 2>/dev/null; then

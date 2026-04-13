@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.0](https://github.com/ziyilam3999/forge-harness/compare/v0.23.0...v0.24.0) (2026-04-13)
+
+### Features
+
+* **q0.5-a2:** critic parity + structured AC_LINT_RULES export + regex hardening ([#169](https://github.com/ziyilam3999/forge-harness/pull/169)) — critic.ts now imports `AC_SUBPROCESS_RULES_PROMPT` + `AC_LINT_RULES` from shared module, new check category #9 "Subprocess Safety", and `renderAcLintRulesForCritic()` emits structured markdown bullets so critic findings can cite rule ids with wrong/right examples. `AcLintRule` extended with `wrongExample`/`rightExample` fields (populated from old JSDoc; zero behavior change to `lintAcCommand`). Regex hardening from forge-plan round-2 cold review: **MAJOR-2** F36-source-tree-grep false positive on `&&`/`||`/`;` chains fixed via structural anchoring (require path as direct grep argument, not trailing text); **MINOR-3** F36-raw-rg now matches bare-word args with negative lookahead allowing `rg --help`/`--version`; **MINOR-4** F56-multigrep matches `||` and `;`, not just `&&`; **MINOR-5** F56-passed-grep matches `grep -qE 'passed|failed'` and `grep -q passed` (unquoted). 640 tests pass, 4 skipped (+18 new). Follow-ups: #170 (tighter --help lookahead), #171 (passed.txt FP edge), #172 (multi-`-e` grep form).
+
 ## [0.23.0](https://github.com/ziyilam3999/forge-harness/compare/v0.22.0...v0.23.0) (2026-04-13)
 
 ### Features

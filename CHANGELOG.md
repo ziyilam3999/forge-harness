@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.0](https://github.com/ziyilam3999/forge-harness/compare/v0.25.0...v0.26.0) (2026-04-13)
+
+### Features
+
+* **ac-lint:** Q0.5/C1-bis plan-level lintExempt + bootstrap absorption (#176)
+
 ## [0.25.0](https://github.com/ziyilam3999/forge-harness/compare/v0.24.2...v0.25.0) (2026-04-13)
 
 ### Features

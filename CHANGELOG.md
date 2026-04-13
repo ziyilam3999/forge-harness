@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.23.0](https://github.com/ziyilam3999/forge-harness/compare/v0.22.0...v0.23.0) (2026-04-13)
+
+### Features
+
+* **q0.5-a1:** ac-lint module + shared subprocess rules + primitive wiring ([#167](https://github.com/ziyilam3999/forge-harness/pull/167)) — new `server/lib/prompts/shared/ac-subprocess-rules.ts` single-source-of-truth for F55/F56/F36 subprocess-safety rules; `planner.ts` now imports; new `server/validation/ac-lint.ts` with 5 deny-list rules + per-rule `lintExempt` override + governance cap of 3. Wired into `forge_plan` (advisory + `strictLint: true` throw mode) and `forge_evaluate` (suspect ACs short-circuit to SKIPPED without spawning subprocesses). Minimum A3 slice: optional `CriterionResult.reliability?: "trusted" | "suspect"`. `.github/workflows/ac-lint.yml` advisory-only with preflight ordering gate; `retroactive-critique.yml` stub lands same PR to satisfy gate (Q0.5/C1 replaces the stub body later). PH01-US-06 lint verification: exactly 6 suspect findings matching plan Appendix A. 622 tests pass (+31 new).
+* **q0-l6-followup:** Q0/L4 anchor `q0L4ProvenBy` set to L6 merge SHA ([#166](https://github.com/ziyilam3999/forge-harness/pull/166)) — watchdog "proven" state activated.
+
+### Miscellaneous
+
+None.
+
 ## [0.22.0](https://github.com/ziyilam3999/forge-harness/compare/v0.21.0...v0.22.0) (2026-04-13)
 
 ### Features

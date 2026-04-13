@@ -1,23 +1,19 @@
 /**
- * Shared source of truth for AC subprocess-safety rules (Q0.5/A2).
+ * Shared source of truth for AC subprocess-safety rules (Q0.5/A1 + A2).
  *
- * Both `planner.ts` (generation-time embedding in the LLM prompt) and
- * `server/validation/ac-lint.ts` (mechanical lint at the primitive boundary)
- * import from this file. This prevents the rule-parity gap that let
- * PH01-US-06 ship with TTY-dependent greps — there is now exactly one place
- * where the rules live.
- *
- * `critic.ts` will also import from this file when Q0.5/A2 (critic-prompt
- * update) ships. That's a separate PR.
+ * Consumers:
+ *   - `server/lib/prompts/planner.ts` — embeds AC_SUBPROCESS_RULES_PROMPT.
+ *   - `server/lib/prompts/critic.ts` — embeds AC_SUBPROCESS_RULES_PROMPT +
+ *     cites AC_LINT_RULES by id in findings (Q0.5/A2).
+ *   - `server/validation/ac-lint.ts` — mechanical lint at the primitive boundary.
  *
  * Do NOT duplicate these patterns elsewhere — import from here.
  */
 
 /**
  * Human-readable prompt block embedded into planner/critic system prompts.
- * This is the BYTE-IDENTICAL extraction of planner.ts:272-283's
- * "AC Command Contract" section. Any future edit to the rule text must
- * happen here and here only.
+ * Byte-identical extraction of the original planner "AC Command Contract"
+ * section. Any future edit to the rule text must happen here only.
  */
 export const AC_SUBPROCESS_RULES_PROMPT = `### AC Command Contract
 AC commands execute inside node:child_process.exec() with bash shell.
@@ -33,13 +29,10 @@ Exit code 0 = PASS, non-zero = FAIL. Design commands accordingly:
 - 30s timeout — keep commands focused. Use -t filters for test suites instead of running all tests.`;
 
 /**
- * Structured deny-list rules, consumed by `lintAcCommand`.
+ * Structured deny-list rules, consumed by `lintAcCommand` and cited by critic.
  *
- * Each rule's `pattern` is anchored conservatively so it does NOT false-positive
- * on benign commands like `echo 'passed'` or `jq '.passed'`. The anchoring
- * strategy is: match only when the offending construct appears as a shell
- * token (word-boundary `grep`/`rg`) with the specific flag/argument shape
- * that produces the failure mode.
+ * Each rule carries `wrongExample` + `rightExample` so the critic can surface
+ * concrete examples in its findings (Q0.5/A2 richer-scope payoff).
  */
 export interface AcLintRule {
   /** Stable identifier, e.g. "F55-vitest-count-grep". */
@@ -48,117 +41,87 @@ export interface AcLintRule {
   description: string;
   /** Regex applied to the full AC command string. */
   pattern: RegExp;
-  /** Severity — only "suspect" for now (scope of A1). */
+  /** Severity — only "suspect" for now (scope of A1/A2). */
   severity: "suspect";
+  /** Concrete WRONG example that this rule flags. */
+  wrongExample: string;
+  /** Concrete RIGHT example that demonstrates the safe alternative. */
+  rightExample: string;
 }
 
 export const AC_LINT_RULES: AcLintRule[] = [
-  /**
-   * F55 — count-based vitest summary grep.
-   *
-   * Wrong: `npx vitest run foo.test.ts 2>&1 | grep -qE 'Tests[[:space:]]+[5-9]'`
-   * Right: `npx vitest run -t 'budget'` (relies on exit code, no stdout parsing)
-   *
-   * The vitest summary line "Tests  5 passed" is TTY-dependent; in
-   * child_process.exec() (no TTY) the formatting or even the line itself
-   * may be absent, so the grep silently returns "no match" (exit 1) and
-   * the AC spuriously fails. We match the characteristic
-   * `Tests[[:space:]]+<digit-range>` regex that F55 uses.
-   */
   {
     id: "F55-vitest-count-grep",
     description:
       "count-based vitest summary grep (TTY-dependent; use exit-code -t filter instead)",
+    // Matches `grep -qE 'Tests[[:space:]]+[5-9]'` and digit-count variants.
     pattern:
       /grep\s+-[a-zA-Z]*E[a-zA-Z]*\s+['"][^'"]*Tests\s*(?:\[\[:space:\]\]|\\s|\s)\+[^'"]*[0-9][^'"]*['"]/,
     severity: "suspect",
+    wrongExample:
+      "npx vitest run foo.test.ts 2>&1 | grep -qE 'Tests[[:space:]]+[5-9]'",
+    rightExample: "npx vitest run -t 'budget'",
   },
 
-  /**
-   * F56 — multi-grep pipeline with `&&`.
-   *
-   * Wrong: `cmd | grep -q 'x' && ! grep -q 'y'`
-   * Wrong: `cmd | grep -q 'x' && grep -q 'y'`
-   * Right: `OUT=$(cmd 2>&1); echo "$OUT" | grep -q 'x' && ! echo "$OUT" | grep -q 'y'`
-   *
-   * The second grep in the `&&` chain has no stdin (the pipeline ended at
-   * the first grep), so on a system with no TTY it blocks waiting for
-   * stdin → hung process or spurious match depending on buffering.
-   *
-   * We require a pipe `|` before the first grep (so this is not a
-   * standalone grep on a file argument) and a `&& ` then optional `!` then
-   * another `grep -q` without an intervening `echo` / input source.
-   */
   {
     id: "F56-multigrep-pipe",
     description:
-      "multi-grep `&&` pipeline where the second grep has no stdin (hangs or false-passes)",
+      "multi-grep pipeline chained with `&&`/`||`/`;` where the second grep has no stdin (hangs or false-passes)",
+    // Q0.5/A2 MINOR-4 fix: accept && | || | ; as the chain operator.
     pattern:
-      /\|\s*grep\s+-[a-zA-Z]*q[a-zA-Z]*\s+['"][^'"]*['"]\s*&&\s*!?\s*grep\s+-[a-zA-Z]*q/,
+      /\|\s*grep\s+-[a-zA-Z]*q[a-zA-Z]*\s+['"][^'"]*['"]\s*(?:&&|\|\||;)\s*!?\s*grep\s+-[a-zA-Z]*q/,
     severity: "suspect",
+    wrongExample: "cmd | grep -q 'x' && ! grep -q 'y'",
+    rightExample:
+      "OUT=$(cmd 2>&1); echo \"$OUT\" | grep -q 'x' && ! echo \"$OUT\" | grep -q 'y'",
   },
 
-  /**
-   * F56 variant — lone `grep -q 'passed'` / `grep -q 'failed'` on runner output.
-   *
-   * Wrong: `npx vitest run 2>&1 | grep -q 'passed'`
-   * Wrong: `cmd | grep -q 'failed'`
-   * Right: `npx vitest run -t 'foo'` (exit-code check)
-   *
-   * Matches a pipe-into-grep-q on the literal tokens `passed` or `failed`.
-   * The benign case `echo 'passed'` is NOT matched because there's no
-   * preceding pipe into the grep. `jq '.passed'` is NOT matched because
-   * the tool name is `jq`, not `grep`.
-   */
   {
     id: "F56-passed-grep",
     description:
-      "lone `grep -q 'passed'/'failed'` on runner output (TTY-dependent summary line)",
+      "lone `grep -q 'passed'/'failed'` on runner output (TTY-dependent summary line; includes unquoted + regex-alt forms)",
+    // Q0.5/A2 MINOR-5 fix: also match `grep -qE 'passed|failed'`, unquoted
+    // `grep -q passed`, and any quoted arg containing the bare word `passed`
+    // or `failed`.
     pattern:
-      /\|\s*grep\s+-[a-zA-Z]*q[a-zA-Z]*\s+['"](?:passed|failed)['"]/,
+      /\|\s*grep\s+-[a-zA-Z]*q[a-zA-Z]*\s+(?:['"][^'"]*\b(?:passed|failed)\b[^'"]*['"]|(?:passed|failed)\b)/,
     severity: "suspect",
+    wrongExample: "npx vitest run 2>&1 | grep -q 'passed'",
+    rightExample: "npx vitest run -t 'foo'",
   },
 
-  /**
-   * F36 — source-tree grep (recursive).
-   *
-   * Wrong: `grep -rn 'Redis' src/`
-   * Wrong: `grep -n 'foo' server/lib/bar.ts server/lib/baz.ts`
-   * Right: `curl localhost:3000/api | jq '.cache'` (observable behavior)
-   *
-   * ACs must not inspect source code — they verify observable behavior.
-   * This matches both recursive `grep -rn` on a directory path AND the
-   * PH01-US-06-AC04 pattern of enumerating individual files under
-   * `src/` / `server/` / `lib/`.
-   */
   {
     id: "F36-source-tree-grep",
     description:
       "grep inspecting source tree (src/, server/, lib/) instead of verifying observable behavior",
+    // Q0.5/A2 MAJOR-2 fix: structural anchoring. Require the path token to
+    // appear as a DIRECT grep argument — flags, optional quoted pattern,
+    // then (src|server|lib)/path — NOT as trailing text anywhere after grep.
+    // This rejects benign chains like
+    //   `grep -q 'ok' out.log && curl localhost/src/main.js`
+    // (where `src/` is inside a URL, not a grep arg), while still matching
+    //   `grep -n 'callClaude\|trackedCallClaude' server/lib/coordinator.ts`
+    // (where `\|` appears inside a quoted grep pattern — the OLD lazy
+    //  `[^\n;]*?` span was too permissive and couldn't reject the &&/|| case).
     pattern:
-      /\bgrep\b[^\n;]*?(?:\s|["'])(?:src|server|lib)\/[A-Za-z0-9_\-./]*/,
+      /\bgrep\b(?:\s+-[A-Za-z]+)*\s+(?:['"][^'"]*['"]\s+)?(?:src|server|lib)\/[A-Za-z0-9_\-./]*/,
     severity: "suspect",
+    wrongExample: "grep -rn 'Redis' src/",
+    rightExample: "curl localhost:3000/api | jq '.cache'",
   },
 
-  /**
-   * F36 — raw `rg` (ripgrep) invocation.
-   *
-   * Wrong: `rg 'class UserCache' server/`
-   * Right: Use `grep` only for evidence-checking output, not source inspection.
-   *
-   * ripgrep is not guaranteed to be installed on the machine running the
-   * AC (especially in lean CI containers). Plus — same source-inspection
-   * anti-pattern as F36-source-tree-grep.
-   *
-   * Match `rg` as a standalone command token (start of line, after `|`,
-   * after `;`, or after `&&`) followed by a flag or quoted pattern. We
-   * reject leading-word matches like `rg` inside an identifier or path.
-   */
   {
     id: "F36-raw-rg",
     description:
-      "raw `rg` (ripgrep) invocation — portability risk; rg may not be installed",
-    pattern: /(?:^|[|;&]\s*)rg\s+(?:-[a-zA-Z]|['"])/,
+      "raw `rg` (ripgrep) invocation — portability risk and source-inspection anti-pattern",
+    // Q0.5/A2 MINOR-3 fix: also match bare-word arguments
+    // (`rg pattern server/`), not just quoted-or-flag forms. Negative
+    // lookahead allows `rg --help` / `rg --version` through (those are
+    // ergonomic probes, not source inspection). `rg` must be a standalone
+    // command token (start-of-line, or after `|`/`;`/`&`).
+    pattern: /(?:^|[|;&]\s*)rg\s+(?!--(?:help|version)\b)\S+/,
     severity: "suspect",
+    wrongExample: "rg 'class UserCache' server/",
+    rightExample: "curl localhost:3000/api/classes | jq '.UserCache'",
   },
 ];

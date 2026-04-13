@@ -309,3 +309,176 @@ describe("lintPlan — governance cap and plan-level aggregation", () => {
     expect(report.suspectAcIds).toEqual(["AC-02"]);
   });
 });
+
+describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
+  // Shape that matches LintablePlan (stories + optional plan-level lintExempt).
+  function mkPlanWithExempt(
+    planLevel: any,
+    acs: Array<{ id: string; command: string }>,
+  ): any {
+    return {
+      lintExempt: planLevel,
+      stories: [
+        {
+          id: "US-01",
+          acceptanceCriteria: acs.map((a) => ({
+            id: a.id,
+            description: a.id,
+            command: a.command,
+          })),
+        },
+      ],
+    };
+  }
+
+  it("baseline: plan without plan.lintExempt lints normally (unchanged)", () => {
+    const plan = mkPlanWithExempt(undefined, [
+      { id: "AC-01", command: "npx vitest run | grep -q 'passed'" },
+    ]);
+    const report = lintPlan(plan);
+    expect(report.findings.length).toBeGreaterThan(0);
+    expect(report.suspectAcIds).toEqual(["AC-01"]);
+    expect(report.lintExemptPlanEntriesCount).toBe(0);
+  });
+
+  it("plan-level F36 entry drops F36 findings but still surfaces F56 in same plan", () => {
+    const plan = mkPlanWithExempt(
+      [
+        {
+          scope: "plan",
+          rules: ["F36-source-tree-grep"],
+          batch: "2026-04-13-test",
+          rationale: "test fixture",
+        },
+      ],
+      [
+        { id: "AC-01", command: "grep -rn 'Redis' src/" }, // F36 → dropped
+        { id: "AC-02", command: "npx vitest run | grep -q 'passed'" }, // F56 → still surfaces
+      ],
+    );
+    const report = lintPlan(plan);
+    expect(report.findings.every((f) => f.ruleId !== "F36-source-tree-grep")).toBe(true);
+    expect(report.findings.some((f) => f.ruleId === "F56-passed-grep")).toBe(true);
+    expect(report.suspectAcIds).toEqual(["AC-02"]);
+    expect(report.lintExemptPlanEntriesCount).toBe(1);
+  });
+
+  it("plan-level AND per-AC: per-AC 3-cap still applies; plan-level does not contribute to cap", () => {
+    // 3 per-AC exempts (at cap) + 1 plan-level entry (no cap contribution)
+    const plan: any = {
+      lintExempt: [
+        {
+          scope: "plan",
+          rules: ["F36-source-tree-grep"],
+          batch: "2026-04-13-test",
+          rationale: "bootstrap",
+        },
+      ],
+      stories: [
+        {
+          id: "US-01",
+          acceptanceCriteria: [
+            {
+              id: "AC-01",
+              description: "a",
+              command: "cmd | grep -q 'passed'",
+              lintExempt: { ruleId: "F56-passed-grep", rationale: "ok" },
+            },
+            {
+              id: "AC-02",
+              description: "a",
+              command: "cmd | grep -q 'passed'",
+              lintExempt: { ruleId: "F56-passed-grep", rationale: "ok" },
+            },
+            {
+              id: "AC-03",
+              description: "a",
+              command: "cmd | grep -q 'passed'",
+              lintExempt: { ruleId: "F56-passed-grep", rationale: "ok" },
+            },
+          ],
+        },
+      ],
+    };
+    const report = lintPlan(plan);
+    expect(report.lintExemptCount).toBe(3);
+    expect(report.governanceViolation).toBe(false);
+    expect(report.lintExemptPlanEntriesCount).toBe(1);
+    // Plan-level count does NOT bump governance:
+    expect(report.lintExemptCount).not.toBe(4);
+  });
+
+  it("plan-level entry with empty rules → throws", () => {
+    const plan = mkPlanWithExempt(
+      [{ scope: "plan", rules: [], batch: "b", rationale: "r" }],
+      [{ id: "AC-01", command: "echo PASS" }],
+    );
+    expect(() => lintPlan(plan)).toThrow(/rules must be a non-empty array/);
+  });
+
+  it("plan-level entry with unknown rule id → throws", () => {
+    const plan = mkPlanWithExempt(
+      [
+        {
+          scope: "plan",
+          rules: ["F99-nonexistent-rule"],
+          batch: "b",
+          rationale: "r",
+        },
+      ],
+      [{ id: "AC-01", command: "echo PASS" }],
+    );
+    expect(() => lintPlan(plan)).toThrow(/not in AC_LINT_RULES/);
+  });
+
+  it("plan-level entry missing batch → throws", () => {
+    const plan = mkPlanWithExempt(
+      [{ scope: "plan", rules: ["F36-source-tree-grep"], rationale: "r" }],
+      [{ id: "AC-01", command: "echo PASS" }],
+    );
+    expect(() => lintPlan(plan)).toThrow(/batch must be a non-empty string/);
+  });
+
+  it("plan-level entry missing rationale → throws", () => {
+    const plan = mkPlanWithExempt(
+      [{ scope: "plan", rules: ["F36-source-tree-grep"], batch: "b" }],
+      [{ id: "AC-01", command: "echo PASS" }],
+    );
+    expect(() => lintPlan(plan)).toThrow(/rationale must be a non-empty string/);
+  });
+
+  it("multiple plan-level entries with different batches → union of rules applies", () => {
+    const plan = mkPlanWithExempt(
+      [
+        {
+          scope: "plan",
+          rules: ["F36-source-tree-grep"],
+          batch: "batch-a",
+          rationale: "r",
+        },
+        {
+          scope: "plan",
+          rules: ["F56-passed-grep"],
+          batch: "batch-b",
+          rationale: "r",
+        },
+      ],
+      [
+        { id: "AC-01", command: "grep -rn 'x' src/" }, // F36
+        { id: "AC-02", command: "cmd | grep -q 'passed'" }, // F56
+      ],
+    );
+    const report = lintPlan(plan);
+    expect(report.findings).toHaveLength(0);
+    expect(report.suspectAcIds).toHaveLength(0);
+    expect(report.lintExemptPlanEntriesCount).toBe(2);
+  });
+
+  it("plan-level entry with scope !== 'plan' → throws", () => {
+    const plan = mkPlanWithExempt(
+      [{ scope: "story", rules: ["F36-source-tree-grep"], batch: "b", rationale: "r" }],
+      [{ id: "AC-01", command: "echo PASS" }],
+    );
+    expect(() => lintPlan(plan)).toThrow(/scope must be "plan"/);
+  });
+});

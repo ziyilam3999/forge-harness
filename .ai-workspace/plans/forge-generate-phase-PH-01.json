@@ -2,6 +2,18 @@
   "schemaVersion": "3.0.0",
   "documentTier": "phase",
   "phaseId": "PH-01",
+  "lintExempt": [
+    {
+      "scope": "plan",
+      "rules": [
+        "F36-source-tree-grep",
+        "F56-passed-grep",
+        "F56-multigrep-pipe"
+      ],
+      "batch": "2026-04-13-c1-bootstrap",
+      "rationale": "Bootstrap absorption of pre-C1-bis grep-based verification smells (F36 source-tree grep, F56 passed-grep and multi-grep-pipe variants). New drift must use F-rule-specified patterns. Unwind via grep -l 2026-04-13-c1-bootstrap .ai-workspace/plans/*.json."
+    }
+  ],
   "stories": [
     {
       "id": "PH01-US01",
@@ -39,12 +51,17 @@
           "command": "npx tsc --noEmit"
         }
       ],
-      "affectedPaths": ["server/types/", "server/validation/"]
+      "affectedPaths": [
+        "server/types/",
+        "server/validation/"
+      ]
     },
     {
       "id": "PH01-US02",
       "title": "Define GenerateResult, GenerationBrief, FixBrief, and Escalation type interfaces",
-      "dependencies": ["PH01-US01"],
+      "dependencies": [
+        "PH01-US01"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US02-AC01",
@@ -87,12 +104,16 @@
           "command": "npx tsc --noEmit"
         }
       ],
-      "affectedPaths": ["server/types/"]
+      "affectedPaths": [
+        "server/types/"
+      ]
     },
     {
       "id": "PH01-US03",
       "title": "Extract shared plan-loader from evaluate.ts",
-      "dependencies": ["PH01-US01"],
+      "dependencies": [
+        "PH01-US01"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US03-AC01",
@@ -120,12 +141,18 @@
           "command": "npx tsc --noEmit"
         }
       ],
-      "affectedPaths": ["server/lib/", "server/tools/"]
+      "affectedPaths": [
+        "server/lib/",
+        "server/tools/"
+      ]
     },
     {
       "id": "PH01-US04",
       "title": "Implement init brief assembly (REQ-01)",
-      "dependencies": ["PH01-US02", "PH01-US03"],
+      "dependencies": [
+        "PH01-US02",
+        "PH01-US03"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US04-AC01",
@@ -153,12 +180,16 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*not found\\|buildBrief.*invalid' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/"]
+      "affectedPaths": [
+        "server/lib/"
+      ]
     },
     {
       "id": "PH01-US05",
       "title": "Implement fix brief assembly with eval hints and diff manifest (REQ-02, REQ-13, REQ-14)",
-      "dependencies": ["PH01-US02"],
+      "dependencies": [
+        "PH01-US02"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US05-AC01",
@@ -191,12 +222,16 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*evidence\\|failed.*evidence' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/"]
+      "affectedPaths": [
+        "server/lib/"
+      ]
     },
     {
       "id": "PH01-US06",
       "title": "Implement all 5 stopping conditions (REQ-03, REQ-04, REQ-05, REQ-07, REQ-15)",
-      "dependencies": ["PH01-US02"],
+      "dependencies": [
+        "PH01-US02"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US06-AC01",
@@ -239,12 +274,16 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'plateau.*boundary\\|improving.*plateau\\|0.3.*0.5.*0.5' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/"]
+      "affectedPaths": [
+        "server/lib/"
+      ]
     },
     {
       "id": "PH01-US07",
       "title": "Implement structured escalation reports (REQ-06)",
-      "dependencies": ["PH01-US06"],
+      "dependencies": [
+        "PH01-US06"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US07-AC01",
@@ -262,12 +301,19 @@
           "command": "npx vitest run server/lib/generator.test.ts -t 'diagnostics.*only.*baseline\\|baseline.*only.*diagnostics' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/lib/"]
+      "affectedPaths": [
+        "server/lib/"
+      ]
     },
     {
       "id": "PH01-US08",
       "title": "Core orchestrator function: assembleGenerateResult",
-      "dependencies": ["PH01-US04", "PH01-US05", "PH01-US06", "PH01-US07"],
+      "dependencies": [
+        "PH01-US04",
+        "PH01-US05",
+        "PH01-US06",
+        "PH01-US07"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH01-US08-AC01",
@@ -300,7 +346,9 @@
           "command": "npx tsc --noEmit"
         }
       ],
-      "affectedPaths": ["server/lib/"]
+      "affectedPaths": [
+        "server/lib/"
+      ]
     }
   ]
 }

@@ -2,6 +2,18 @@
   "schemaVersion": "3.0.0",
   "documentTier": "phase",
   "phaseId": "PH-04",
+  "lintExempt": [
+    {
+      "scope": "plan",
+      "rules": [
+        "F36-source-tree-grep",
+        "F56-passed-grep",
+        "F56-multigrep-pipe"
+      ],
+      "batch": "2026-04-13-c1-bootstrap",
+      "rationale": "Bootstrap absorption of pre-C1-bis grep-based verification smells (F36 source-tree grep, F56 passed-grep and multi-grep-pipe variants). New drift must use F-rule-specified patterns. Unwind via grep -l 2026-04-13-c1-bootstrap .ai-workspace/plans/*.json."
+    }
+  ],
   "stories": [
     {
       "id": "PH04-US01",
@@ -24,12 +36,16 @@
           "command": "npx tsc --noEmit"
         }
       ],
-      "affectedPaths": ["server/tools/"]
+      "affectedPaths": [
+        "server/tools/"
+      ]
     },
     {
       "id": "PH04-US02",
       "title": "Wire handleGenerate to call core logic from PH-01/02/03",
-      "dependencies": ["PH04-US01"],
+      "dependencies": [
+        "PH04-US01"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH04-US02-AC01",
@@ -57,12 +73,17 @@
           "command": "grep -q 'brief assembler' server/index.ts || grep -q 'GAN loop controller' server/index.ts || grep -q 'stopping conditions' server/index.ts"
         }
       ],
-      "affectedPaths": ["server/tools/", "server/index.ts"]
+      "affectedPaths": [
+        "server/tools/",
+        "server/index.ts"
+      ]
     },
     {
       "id": "PH04-US03",
       "title": "Integration tests: full init-fix-escalate cycle and NFR verification",
-      "dependencies": ["PH04-US02"],
+      "dependencies": [
+        "PH04-US02"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH04-US03-AC01",
@@ -110,12 +131,16 @@
           "command": "npx vitest run server/tools/generate.test.ts -t 'iteration.*under.*2.*second\\|iteration.*response.*time\\|fix.*performance' 2>&1 | grep -q 'passed'"
         }
       ],
-      "affectedPaths": ["server/tools/"]
+      "affectedPaths": [
+        "server/tools/"
+      ]
     },
     {
       "id": "PH04-US04",
       "title": "Dogfood: run forge_generate against a real execution plan with real ACs",
-      "dependencies": ["PH04-US03"],
+      "dependencies": [
+        "PH04-US03"
+      ],
       "acceptanceCriteria": [
         {
           "id": "PH04-US04-AC01",
@@ -138,7 +163,9 @@
           "command": "grep -q 'forge_generate' server/index.ts && grep -q 'handleGenerate' server/index.ts"
         }
       ],
-      "affectedPaths": [".ai-workspace/plans/"]
+      "affectedPaths": [
+        ".ai-workspace/plans/"
+      ]
     }
   ]
 }

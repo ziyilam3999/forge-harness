@@ -1,9 +1,33 @@
+/**
+ * Q0.5/C1-bis — plan-level `lintExempt` variant for bootstrap absorption of
+ * pre-existing drift backlogs. Separate from the per-AC `lintExempt` on
+ * `AcceptanceCriterion` (different semantics: plan-level DROPS findings,
+ * per-AC KEEPS them with `exempt: true` flag). Validated and consumed by
+ * `server/validation/ac-lint.ts`.
+ *
+ * Keep this shape in byte-identical sync with `LintExemptPlan` in
+ * `server/validation/ac-lint.ts` — the two live in separate modules to keep
+ * the types module free of validation imports.
+ */
+export interface LintExemptPlan {
+  scope: "plan";
+  rules: string[];
+  batch: string;
+  rationale: string;
+}
+
 export interface ExecutionPlan {
   schemaVersion: "3.0.0";
   prdPath?: string; // Reserved for future use; not populated by the planner in Phase 1.
   documentTier?: "phase"; // Three-tier system: marks this plan as a phase-level document.
   phaseId?: string; // PH-XX reference linking this plan to a MasterPlan phase.
   baselineCheck?: string; // Shell command to verify project health before generation (e.g. "npm run build && npm test").
+  /**
+   * Q0.5/C1-bis — plan-level bootstrap-absorption exemptions. See
+   * `LintExemptPlan` for field semantics and
+   * `server/validation/ac-lint.ts` for the validator + filter behavior.
+   */
+  lintExempt?: LintExemptPlan[];
   stories: Story[];
 }
 

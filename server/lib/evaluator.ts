@@ -1,6 +1,7 @@
 import type { ExecutionPlan } from "../types/execution-plan.js";
 import type { EvalReport, CriterionResult } from "../types/eval-report.js";
 import { executeCommand, type ExecuteOptions } from "./executor.js";
+import { lintAcCommand } from "../validation/ac-lint.js";
 
 export interface EvaluateOptions {
   timeoutMs?: number;
@@ -11,6 +12,14 @@ export interface EvaluateOptions {
  * Evaluate a single story from an execution plan by running all its ACs.
  *
  * Stateless: receives plan + storyId, runs shell commands, returns results.
+ *
+ * Q0.5/A1b — before executing each AC, run `lintAcCommand` against the
+ * command string. If any non-exempt deny-list rule matches, short-circuit
+ * the AC to `{status: "SKIPPED", reliability: "suspect"}` WITHOUT spawning
+ * a subprocess. Zero cost, zero hung-process risk, and a clear signal that
+ * the AC itself (not the code under test) is the broken thing.
+ *
+ * Exempt ACs execute normally regardless of pattern match.
  */
 export async function evaluateStory(
   plan: ExecutionPlan,
@@ -44,11 +53,28 @@ export async function evaluateStory(
   const criteria: CriterionResult[] = [];
 
   for (const ac of story.acceptanceCriteria) {
+    // Q0.5/A1b — ac-lint short-circuit (non-exempt suspect ACs never execute).
+    const lint = lintAcCommand(ac.command, { lintExempt: ac.lintExempt });
+    if (lint.suspect) {
+      const ruleIds = lint.findings
+        .filter((f) => !f.exempt)
+        .map((f) => f.ruleId)
+        .join(",");
+      criteria.push({
+        id: ac.id,
+        status: "SKIPPED",
+        evidence: `ac-lint: suspect (rules: ${ruleIds}); command NOT executed`,
+        reliability: "suspect",
+      });
+      continue;
+    }
+
     const result = await executeCommand(ac.command, execOptions);
     criteria.push({
       id: ac.id,
       status: result.status,
       evidence: result.evidence,
+      reliability: "trusted",
     });
   }
 

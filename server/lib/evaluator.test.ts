@@ -149,6 +149,80 @@ describe("evaluateStory", () => {
     expect(report.warnings).toBeUndefined();
   });
 
+  // Q0.5/A1b — ac-lint short-circuit in story mode.
+  describe("ac-lint short-circuit", () => {
+    it("suspect AC is SKIPPED with reliability=suspect; no subprocess spawned", async () => {
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Suspect",
+            acceptanceCriteria: [
+              {
+                id: "AC-01",
+                description: "bad vitest count grep",
+                command:
+                  "npx vitest run foo.test.ts 2>&1 | grep -qE 'Tests[[:space:]]+[5-9]'",
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(mockedExecute).not.toHaveBeenCalled();
+      expect(report.criteria[0].status).toBe("SKIPPED");
+      expect(report.criteria[0].reliability).toBe("suspect");
+      expect(report.criteria[0].evidence).toContain("ac-lint: suspect");
+      expect(report.criteria[0].evidence).toContain("F55-vitest-count-grep");
+    });
+
+    it("clean AC runs normally with reliability=trusted", async () => {
+      mockedExecute.mockResolvedValueOnce(mockResult({ status: "PASS", evidence: "ok" }));
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Clean",
+            acceptanceCriteria: [
+              { id: "AC-01", description: "clean", command: "npx tsc --noEmit" },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(mockedExecute).toHaveBeenCalledTimes(1);
+      expect(report.criteria[0].status).toBe("PASS");
+      expect(report.criteria[0].reliability).toBe("trusted");
+    });
+
+    it("exempt AC runs normally even though pattern matches", async () => {
+      mockedExecute.mockResolvedValueOnce(mockResult({ status: "PASS", evidence: "ok" }));
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Exempt",
+            acceptanceCriteria: [
+              {
+                id: "AC-01",
+                description: "exempt lone passed-grep",
+                command: "npx vitest run | grep -q 'passed'",
+                lintExempt: { ruleId: "F56-passed-grep", rationale: "reviewed" },
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(mockedExecute).toHaveBeenCalledTimes(1);
+      expect(report.criteria[0].status).toBe("PASS");
+      expect(report.criteria[0].reliability).toBe("trusted");
+    });
+  });
+
   it("runs ACs sequentially", async () => {
     const callOrder: number[] = [];
     mockedExecute

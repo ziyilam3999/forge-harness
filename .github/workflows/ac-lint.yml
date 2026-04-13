@@ -1,0 +1,40 @@
+name: ac-lint
+# Q0.5/A1c — advisory-only ac-lint sweep across every plan file in
+# `.ai-workspace/plans/*.json`. The binding merge gate for plan-file lint
+# violations is Q0.5/C1's retroactive-critique workflow; this workflow is
+# observability-only (continue-on-error + non-blocking).
+#
+# Gate ordering (R2/C2 minor 3 enforcement): the preflight step below fails
+# this workflow if retroactive-critique.yml is absent from both master and
+# the PR diff. Per the plan, A1c cannot land without C1 (or alongside it).
+on:
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Preflight — retroactive-critique ordering gate
+        run: |
+          if ! test -f .github/workflows/retroactive-critique.yml && \
+             ! git diff --name-only origin/master...HEAD | grep -qx '.github/workflows/retroactive-critique.yml'; then
+            echo "ac-lint.yml requires retroactive-critique.yml to be on master or added in this PR. See Q0.5/A1c gate-ordering enforcement."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Run ac-lint across all plans (advisory)
+        run: node scripts/run-ac-lint.mjs
+        continue-on-error: true

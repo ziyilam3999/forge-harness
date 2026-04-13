@@ -175,6 +175,108 @@ describe("evaluateStory", () => {
       expect(report.criteria[0].reliability).toBe("suspect");
       expect(report.criteria[0].evidence).toContain("ac-lint: suspect");
       expect(report.criteria[0].evidence).toContain("F55-vitest-count-grep");
+      // Q0.5/#168 — SKIPPED+suspect must NOT laundry to PASS.
+      expect(report.verdict).toBe("INCONCLUSIVE");
+    });
+
+    // Q0.5/#168 — computeVerdict aggregation tests for suspect-skipped ACs.
+    it("#168: all-suspect story returns INCONCLUSIVE, not PASS", async () => {
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "All suspect",
+            acceptanceCriteria: [
+              {
+                id: "AC-01",
+                description: "bad count grep",
+                command: "npx vitest run foo.test.ts | grep -qE 'Tests[[:space:]]+[5-9]'",
+              },
+              {
+                id: "AC-02",
+                description: "lone passed grep",
+                command: "npx vitest run | grep -q 'passed'",
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(mockedExecute).not.toHaveBeenCalled();
+      expect(report.verdict).toBe("INCONCLUSIVE");
+      expect(report.criteria.every((c) => c.status === "SKIPPED")).toBe(true);
+    });
+
+    it("#168: mixed PASS + suspect returns INCONCLUSIVE (suspect poisons)", async () => {
+      mockedExecute.mockResolvedValueOnce(mockResult({ status: "PASS", evidence: "ok" }));
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Mixed",
+            acceptanceCriteria: [
+              { id: "AC-01", description: "clean", command: "npx tsc --noEmit" },
+              {
+                id: "AC-02",
+                description: "bad count grep",
+                command: "npx vitest run foo.test.ts | grep -qE 'Tests[[:space:]]+[5-9]'",
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(report.verdict).toBe("INCONCLUSIVE");
+    });
+
+    it("#168: FAIL + suspect returns FAIL (hard fail wins over suspect)", async () => {
+      mockedExecute.mockResolvedValueOnce(mockResult({ status: "FAIL", evidence: "bad" }));
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Fail + suspect",
+            acceptanceCriteria: [
+              { id: "AC-01", description: "clean fail", command: "npx tsc --noEmit" },
+              {
+                id: "AC-02",
+                description: "bad count grep",
+                command: "npx vitest run foo.test.ts | grep -qE 'Tests[[:space:]]+[5-9]'",
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(report.verdict).toBe("FAIL");
+    });
+
+    it("#168: INCONCLUSIVE + suspect returns INCONCLUSIVE (no regression)", async () => {
+      mockedExecute.mockResolvedValueOnce(
+        mockResult({ status: "INCONCLUSIVE", evidence: "timeout" }),
+      );
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Inconclusive + suspect",
+            acceptanceCriteria: [
+              { id: "AC-01", description: "clean inconclusive", command: "npx tsc --noEmit" },
+              {
+                id: "AC-02",
+                description: "bad count grep",
+                command: "npx vitest run foo.test.ts | grep -qE 'Tests[[:space:]]+[5-9]'",
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(report.verdict).toBe("INCONCLUSIVE");
     });
 
     it("clean AC runs normally with reliability=trusted", async () => {

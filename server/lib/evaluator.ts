@@ -102,5 +102,16 @@ function computeVerdict(
   const hasInconclusive = criteria.some((c) => c.status === "INCONCLUSIVE");
   if (hasInconclusive) return "INCONCLUSIVE";
 
+  // Q0.5/#168 — SKIPPED criteria with reliability:"suspect" must NOT launder
+  // to PASS. These are ACs that ac-lint short-circuited because the command
+  // shape itself is broken (F55/F56/F36 rule match) — we have zero signal
+  // about the code under test. Treating them as PASS would silently green-
+  // light every story whose ACs are all deny-listed. Correct aggregation is
+  // INCONCLUSIVE: "we don't know".
+  const hasSuspectSkip = criteria.some(
+    (c) => c.status === "SKIPPED" && c.reliability === "suspect",
+  );
+  if (hasSuspectSkip) return "INCONCLUSIVE";
+
   return "PASS";
 }

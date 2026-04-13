@@ -108,6 +108,30 @@ export interface ExecuteOptions {
   maxBuffer?: number;
 }
 
+/**
+ * Q0.5/B1 — Raw smoke-test characterization result. Unlike `CriterionResult`,
+ * this DOES NOT translate the run into PASS/FAIL — it reports the raw facts
+ * (exit code, wall-clock elapsed, byte counts, timeout flag). Classification
+ * into `ok`/`slow`/`empty-evidence`/`hung` verdicts happens at the smoke-runner
+ * layer, which has access to the timeout budget for the "slow" threshold.
+ *
+ * `exitCode` is `null` when the subprocess was killed by timeout (SIGTERM/KILL)
+ * or when the spawn itself failed (ENOENT etc.). In the killed case,
+ * `hungOnTimeout === true`. In the spawn-failure case, `hungOnTimeout === false`
+ * and `elapsedMs` will be small.
+ *
+ * No `errorKind` field — classification is driven entirely by the
+ * (exitCode, hungOnTimeout, byte-count) tuple. Future additions should earn
+ * their keep with a test that actually reads them.
+ */
+export interface SmokeExecuteResult {
+  exitCode: number | null;
+  elapsedMs: number;
+  stdoutBytes: number;
+  stderrBytes: number;
+  hungOnTimeout: boolean;
+}
+
 function truncateEvidence(evidence: string): string {
   if (evidence.length <= EVIDENCE_CHAR_CAP) {
     return evidence;
@@ -118,6 +142,121 @@ function truncateEvidence(evidence: string): string {
 function buildEvidence(stdout: string, stderr: string): string {
   const combined = [stdout, stderr].filter(Boolean).join("\n");
   return truncateEvidence(combined);
+}
+
+/**
+ * Q0.5/B1 — Run a shell command for smoke characterization.
+ *
+ * Sibling of `executeCommand`. Shares the bash-resolution + platform logic,
+ * but instead of translating the outcome into PASS/FAIL it returns raw
+ * `SmokeExecuteResult`. The caller (smoke-runner) is responsible for
+ * classifying into a `SmokeVerdict` based on the timeout budget.
+ *
+ * Timing measurement brackets `exec` via `Date.now()` — the subprocess kill
+ * itself is enforced at the OS level by `exec`'s native `timeout` option
+ * (SIGTERM → SIGKILL escalation). No `setTimeout` coercion drift.
+ */
+export function smokeExecute(
+  command: string,
+  options: ExecuteOptions,
+): Promise<SmokeExecuteResult> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER;
+  const cwd = options.cwd ?? process.cwd();
+
+  return new Promise<SmokeExecuteResult>((resolve, reject) => {
+    let shellOption: { shell: string } | object = {};
+    if (platform() === "win32") {
+      try {
+        shellOption = { shell: resolveWindowsBashPath() };
+      } catch (err) {
+        // Same fail-loud policy as executeCommand: surface the resolver error
+        // as a rejection so the smoke-runner sees a single clear failure
+        // instead of N cryptic spawn errors.
+        reject(err);
+        return;
+      }
+    }
+
+    const startMs = Date.now();
+
+    exec(
+      command,
+      {
+        timeout: timeoutMs,
+        maxBuffer,
+        cwd,
+        ...shellOption,
+      },
+      (error, stdout, stderr) => {
+        const elapsedMs = Date.now() - startMs;
+        const stdoutStr = String(stdout ?? "");
+        const stderrStr = String(stderr ?? "");
+        const stdoutBytes = Buffer.byteLength(stdoutStr, "utf-8");
+        const stderrBytes = Buffer.byteLength(stderrStr, "utf-8");
+
+        if (!error) {
+          resolve({
+            exitCode: 0,
+            elapsedMs,
+            stdoutBytes,
+            stderrBytes,
+            hungOnTimeout: false,
+          });
+          return;
+        }
+
+        // Timeout kill: exec sets error.killed === true when the child was
+        // reaped by the timeout SIGTERM. exitCode is null in this case.
+        if (error.killed) {
+          resolve({
+            exitCode: null,
+            elapsedMs,
+            stdoutBytes,
+            stderrBytes,
+            hungOnTimeout: true,
+          });
+          return;
+        }
+
+        // Spawn-level failure (ENOENT etc.): error.code is a string, exitCode
+        // is unavailable. Smoke-runner classifies this as empty-evidence via
+        // the (exitCode !== 0 && bytes === 0) rule.
+        if (typeof error.code === "string") {
+          resolve({
+            exitCode: null,
+            elapsedMs,
+            stdoutBytes,
+            stderrBytes,
+            hungOnTimeout: false,
+          });
+          return;
+        }
+
+        // Non-zero exit: error.code is the numeric exit status.
+        if (typeof error.code === "number") {
+          resolve({
+            exitCode: error.code,
+            elapsedMs,
+            stdoutBytes,
+            stderrBytes,
+            hungOnTimeout: false,
+          });
+          return;
+        }
+
+        // Fallback: signal-killed or unexpected error shape. Treat as
+        // spawn-level failure (exitCode null, hungOnTimeout false).
+        resolve({
+          exitCode: null,
+          elapsedMs,
+          stdoutBytes,
+          stderrBytes,
+          hungOnTimeout: false,
+        });
+      },
+    );
+  });
 }
 
 /**

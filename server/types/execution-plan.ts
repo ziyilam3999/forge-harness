@@ -52,4 +52,23 @@ export interface AcceptanceCriterion {
    * lintExempt entries across all ACs are flagged for review.
    */
   lintExempt?: { ruleId: string; rationale: string } | Array<{ ruleId: string; rationale: string }>;
+  /**
+   * Q0.5/B1 — per-AC smoke-test timeout override, in milliseconds. Consulted
+   * only by `forge_evaluate(mode: "smoke-test")`, ignored in story/coherence/
+   * divergence modes.
+   *
+   * The smoke-runner clamps every value at runtime (single source of truth,
+   * NOT enforced via TypeScript range types — see B1 plan D2):
+   *   - undefined / null / NaN / !Number.isFinite(v) → default 30000ms
+   *   - v < 0  → default 30000ms (negative = "use default", not instant-fail)
+   *   - v === 0 → default 30000ms (same reason)
+   *   - v > 180000 → 180000ms (hard cap: 3 min)
+   *   - otherwise → v
+   *
+   * Setting this field explicitly also suppresses the `timeoutRisk: true`
+   * modifier on `slow` verdicts — opt-in consent that the AC is expected to
+   * use the larger budget. Authors should only set this when they understand
+   * why a particular command legitimately needs more than 30 seconds.
+   */
+  smokeTimeoutMs?: number;
 }

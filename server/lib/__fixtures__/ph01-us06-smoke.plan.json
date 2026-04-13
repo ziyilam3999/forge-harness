@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "3.0.0",
+  "stories": [
+    {
+      "id": "US-06",
+      "title": "PH-01 fixture for B1 smoke-test integration AC",
+      "acceptanceCriteria": [
+        {
+          "id": "AC01",
+          "description": "F36-source-tree-grep violation: greps the source tree instead of verifying observable behavior. ac-lint flags this at shape time; smoke-runner emits skipped-suspect without executing.",
+          "command": "grep -rn 'Redis' src/"
+        },
+        {
+          "id": "AC02",
+          "description": "Intentionally hung command — sleeps past the default 30s timeout so smokeExecute reports hungOnTimeout=true and the runner classifies as 'hung'. Uses 40s to sit comfortably outside the 30s default budget without wasting too much test wall-clock.",
+          "command": "sleep 40",
+          "smokeTimeoutMs": 2000
+        },
+        {
+          "id": "AC03",
+          "description": "Clean fast command as a control — should classify as 'ok' and prove the fixture exercises the happy path alongside the two failure modes.",
+          "command": "echo ok"
+        }
+      ]
+    }
+  ]
+}

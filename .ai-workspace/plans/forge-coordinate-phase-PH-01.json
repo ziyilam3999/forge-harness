@@ -441,14 +441,29 @@
           "command": "npx vitest run server/lib/topo-sort.test.ts"
         },
         {
+          "id": "PH01-US-06-AC01b",
+          "description": "topo-sort.test.ts has at least 5 tests (regression guard)",
+          "command": "npx vitest run server/lib/topo-sort.test.ts --reporter=json 2>/dev/null | node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const r=JSON.parse(d);const n=r.numTotalTests||0;process.exit(n>=5?0:1)}catch(e){process.exit(1)}});'"
+        },
+        {
           "id": "PH01-US-06-AC02",
           "description": "run-reader.test.ts passes (exit 0)",
           "command": "npx vitest run server/lib/run-reader.test.ts"
         },
         {
+          "id": "PH01-US-06-AC02b",
+          "description": "run-reader.test.ts has at least 5 tests (regression guard)",
+          "command": "npx vitest run server/lib/run-reader.test.ts --reporter=json 2>/dev/null | node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const r=JSON.parse(d);const n=r.numTotalTests||0;process.exit(n>=5?0:1)}catch(e){process.exit(1)}});'"
+        },
+        {
           "id": "PH01-US-06-AC03",
           "description": "coordinator.test.ts passes (exit 0)",
           "command": "npx vitest run server/lib/coordinator.test.ts"
+        },
+        {
+          "id": "PH01-US-06-AC03b",
+          "description": "coordinator.test.ts has at least 8 tests covering assessPhase + brief assembly (regression guard)",
+          "command": "npx vitest run server/lib/coordinator.test.ts --reporter=json 2>/dev/null | node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const r=JSON.parse(d);const n=r.numTotalTests||0;process.exit(n>=8?0:1)}catch(e){process.exit(1)}});'"
         },
         {
           "id": "PH01-US-06-AC04",

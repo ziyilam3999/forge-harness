@@ -12,7 +12,7 @@
 
 ## ELI5
 
-The repo has 9 plan files carrying 245 old lint findings — author-era paranoia that grep'd stdout instead of using exit codes. Those findings are accumulated from when `ac-lint.yml` ran in advisory-only mode and never blocked anything. Q0.5/C1 flips the linter from advisory to blocking (via a PostToolUse hook). Before flipping, we need a way to silence the 245 pre-existing findings in one auditable move without changing per-AC governance.
+The repo has 8 committed plan files carrying 244 old lint findings (plus 1 local-only gitignored file with 1 more, total 245 across 9 files on disk) — author-era paranoia that grep'd stdout instead of using exit codes. Those findings are accumulated from when `ac-lint.yml` ran in advisory-only mode and never blocked anything. Q0.5/C1 flips the linter from advisory to blocking (via a PostToolUse hook). Before flipping, we need a way to silence the 245 pre-existing findings in one auditable move without changing per-AC governance.
 
 C1-bis adds a plan-level `lintExempt` variant that drops specific enumerated rule IDs (e.g. `F36-source-tree-grep`) from `lintPlan()`'s report when the plan file carries a top-level batch entry. This is distinct from per-AC `lintExempt`, which stays capped at 3 per plan and still counts for governance.
 
@@ -80,15 +80,20 @@ Per forge-plan's T2115 directive, the C1-bis plan file explicitly records:
 
 The governance boundary is explicit: Option B did not loosen the 3-cap, it added an orthogonal bootstrap-only mechanism.
 
+### Note on AC-06 + F56-multigrep-pipe dead batch path
+
+`PH01-US-06-AC06` was originally rewritten inline from `| grep -q 'passed' && ! grep -q 'failed'` to plain `npx vitest run`. The inline fix eliminates the `F56-multigrep-pipe` finding on that AC. The batch allowlist still contains `F56-multigrep-pipe` across all 9 files — that coverage is now dead for PH-01 (the only file with an F56-multigrep-pipe finding). This is intentional: keeping the batch uniform across all files is simpler than a per-file rule-list, and the filter is idempotent so the dead path is harmless. It also provides forward-compat coverage if a future `F56-multigrep-pipe` violation lands in any of the other 8 files before the unwind PR.
+
 ## Sweep record
 
 | Run | Findings | Suspect ACs | Note |
 |---|---|---|---|
-| T2045 (master before C1-bis) | 245 | 245 | Pre-C1-bis advisory-era backlog |
+| T2045 (master before C1-bis) | 244 (+1 local only) | 244 (+1 local only) | Pre-C1-bis advisory-era backlog on the 8 committed files |
 | T2205 (after batch with 2 rules) | 4 | 4 | STOP trigger #1 — F55 ×3 + F56-multigrep ×1 |
-| T2209 (after batch extended + 4 ACs fixed) | **0** | **0** | Bootstrap absorption complete |
+| T2209 (after batch extended + 4 ACs fixed) | 0 | 0 | Initial bootstrap absorption |
+| T2245 (round-0 MAJOR-1 fix: count-floor ACs added) | **0** | **0** | Round-0 fixes applied (count-floor restored) |
 
-245 → 0. Batch absorbed 241 findings; 4 fixed inline.
+**244 → 0 across 8 committed plan files.** Batch absorbed 240 findings; 4 fixed inline (PH01-US-06-AC01/02/03/06); 3 new count-floor companion ACs (AC01b/AC02b/AC03b) restore the regression-guard contract the original count-based greps enforced.
 
 ## Files changed
 
@@ -99,9 +104,8 @@ The governance boundary is explicit: Option B did not loosen the 3-cap, it added
 ### Tests
 - `server/validation/ac-lint.test.ts` — +9 test cases: 1 baseline + 1 F36-only filter + 1 cap-preservation + 1 multi-batch union + 5 schema-rejection (the 5th rejection covers the `scope !== "plan"` discriminator). 9 new, 47/47 total.
 
-### Plan files (9 × batch injection + 1 × 4 AC command rewrites)
-- `.ai-workspace/plans/2026-04-02-phase2-forge-plan-output.json`
-- `.ai-workspace/plans/forge-coordinate-phase-PH-01.json` ← also: 4 AC command rewrites in `PH01-US-06`
+### Plan files in the PR (8 committed × batch injection + 1 × AC command rewrites + 3 new count-floor ACs)
+- `.ai-workspace/plans/forge-coordinate-phase-PH-01.json` ← plan-level batch + PH01-US-06 command rewrites (AC01/02/03/06) + 3 new count-floor ACs (AC01b/AC02b/AC03b)
 - `.ai-workspace/plans/forge-coordinate-phase-PH-02.json`
 - `.ai-workspace/plans/forge-coordinate-phase-PH-03.json`
 - `.ai-workspace/plans/forge-coordinate-phase-PH-04.json`
@@ -109,6 +113,9 @@ The governance boundary is explicit: Option B did not loosen the 3-cap, it added
 - `.ai-workspace/plans/forge-generate-phase-PH-02.json`
 - `.ai-workspace/plans/forge-generate-phase-PH-03.json`
 - `.ai-workspace/plans/forge-generate-phase-PH-04.json`
+
+### Not in the PR (gitignored, local-only)
+- `.ai-workspace/plans/2026-04-02-phase2-forge-plan-output.json` — pre-existing gitignored phase-2 artifact that had 1 suspect AC in the original sweep. The local sweep patched it for dev ergonomics, but the file is not tracked by git so it is out of scope for the PR. CI sweeps will not encounter it. The "244 → 0" contract applies to the 8 committed files; the extra 1 finding is a local-only dev artifact with no CI impact.
 
 ### Out of scope
 - C1 hook files (`.claude/settings.json`, `scripts/*-hook.sh`, fixtures, tests) stay uncommitted as C1 branch WIP. `.claude/settings.json` is parked as `.claude/settings.json.parked-during-c1bis` throughout C1-bis implementation and will be restored when switching to the C1 branch for the follow-up PR.

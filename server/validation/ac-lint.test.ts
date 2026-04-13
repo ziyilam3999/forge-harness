@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { lintAcCommand, lintPlan } from "./ac-lint.js";
+import { lintAcCommand, lintPlan, type LintExemptPlan } from "./ac-lint.js";
+import type { LintExemptPlan as LintExemptPlanMirror } from "../types/execution-plan.js";
 import { AC_LINT_RULES } from "../lib/prompts/shared/ac-subprocess-rules.js";
+
+// MINOR-1 (round-0): structural compat check between the two LintExemptPlan
+// declarations. `ac-lint.ts` and `types/execution-plan.ts` must stay byte-
+// identical shapes; if they drift, this assignment fails to typecheck.
+const _typeMirrorCheck: LintExemptPlanMirror = {} as LintExemptPlan;
+void _typeMirrorCheck;
 
 describe("lintAcCommand — WRONG patterns (must flag)", () => {
   it("F55: vitest count-based grep with [5-9]", () => {
@@ -480,5 +487,62 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
       [{ id: "AC-01", command: "echo PASS" }],
     );
     expect(() => lintPlan(plan)).toThrow(/scope must be "plan"/);
+  });
+
+  // MINOR-3 (round-0): prove governance does not read lintExemptPlanEntriesCount
+  // even when that count is large and per-AC count is zero.
+  it("4 plan-level entries with 0 per-AC entries → governanceViolation remains false", () => {
+    const plan = mkPlanWithExempt(
+      [
+        { scope: "plan", rules: ["F36-source-tree-grep"], batch: "batch-1", rationale: "r1" },
+        { scope: "plan", rules: ["F56-passed-grep"], batch: "batch-2", rationale: "r2" },
+        { scope: "plan", rules: ["F56-multigrep-pipe"], batch: "batch-3", rationale: "r3" },
+        { scope: "plan", rules: ["F36-raw-rg"], batch: "batch-4", rationale: "r4" },
+      ],
+      [{ id: "AC-01", command: "echo PASS" }],
+    );
+    const report = lintPlan(plan);
+    expect(report.lintExemptPlanEntriesCount).toBe(4);
+    expect(report.lintExemptCount).toBe(0);
+    expect(report.governanceViolation).toBe(false);
+  });
+
+  // MINOR-4 (round-0): deeper negative coverage — non-string rule element,
+  // empty-string rationale distinct from missing, array-of-non-object entries.
+  it("plan-level entry with non-string rule element → throws", () => {
+    const plan = mkPlanWithExempt(
+      [{ scope: "plan", rules: [123 as any], batch: "b", rationale: "r" }],
+      [{ id: "AC-01", command: "echo PASS" }],
+    );
+    expect(() => lintPlan(plan)).toThrow(/not in AC_LINT_RULES/);
+  });
+
+  it("plan-level entry with empty-string rationale → throws", () => {
+    const plan = mkPlanWithExempt(
+      [{ scope: "plan", rules: ["F36-source-tree-grep"], batch: "b", rationale: "" }],
+      [{ id: "AC-01", command: "echo PASS" }],
+    );
+    expect(() => lintPlan(plan)).toThrow(/rationale must be a non-empty string/);
+  });
+
+  it("plan-level entry array element is null → throws", () => {
+    const plan: any = {
+      lintExempt: [null],
+      stories: [
+        {
+          id: "US-01",
+          acceptanceCriteria: [{ id: "AC-01", description: "a", command: "echo PASS" }],
+        },
+      ],
+    };
+    expect(() => lintPlan(plan)).toThrow(/must be an object/);
+  });
+
+  it("plan-level entry with empty-string batch → throws", () => {
+    const plan = mkPlanWithExempt(
+      [{ scope: "plan", rules: ["F36-source-tree-grep"], batch: "", rationale: "r" }],
+      [{ id: "AC-01", command: "echo PASS" }],
+    );
+    expect(() => lintPlan(plan)).toThrow(/batch must be a non-empty string/);
   });
 });

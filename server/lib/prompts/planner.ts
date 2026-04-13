@@ -278,7 +278,15 @@ ${modeRules[mode]}
 
 ### Fields NOT to Populate
 - Do NOT include "prdPath" in the output (reserved for future use).
-- Do NOT include "flaky" in any AC (reserved for future use).
+
+### Optional: the "flaky" AC field
+- Add "flaky": true to an AC only when the command is known to be timing-sensitive or
+  non-deterministic (e.g. hits a network endpoint, depends on wall-clock, exercises a
+  race-condition-prone path). The evaluator retries a flaky AC once on first-run FAIL;
+  if the retry passes, the result is reported as PASS with reliability="suspect".
+- Default is to omit the field. Do NOT mark an AC flaky just to silence a real failure —
+  that is laundering the signal. Only mark it when the command's output genuinely
+  varies across runs for reasons outside the code under test.
 
 ### Quality Checks
 - Ensure every story's ACs actually verify the story's title/goal.

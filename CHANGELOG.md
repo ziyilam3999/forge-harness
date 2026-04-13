@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.2](https://github.com/ziyilam3999/forge-harness/compare/v0.24.1...v0.24.2) (2026-04-13)
+
+### Bug Fixes
+
+- **evaluator:** Q0.5/C2 reactivate `flaky` field with retry-on-failure ([#174](https://github.com/ziyilam3999/forge-harness/pull/174)) — closes **F59** ("Reserved for Future Use" escape hatches become dead code). The `flaky?: boolean` field on `AcceptanceCriterion` was inert metadata since Phase 1; this wires it up as a runtime retry gate. When `flaky: true` and run-1 returns FAIL, the evaluator waits `flakyRetryGapMs` (default 500ms) and retries once. Semantics: run-1 PASS → PASS/trusted; run-1 FAIL + run-2 PASS → PASS with `reliability: "suspect"` and evidence prefix `flaky-retry: first-run FAIL, retry PASS — ...`; both FAIL → FAIL/trusted. ac-lint-flagged ACs bypass the retry gate structurally via the A1b short-circuit. PASS+suspect does NOT poison `computeVerdict` (only `SKIPPED+suspect` does, per #168). Planner prompt updated: removed "Do NOT include flaky" directive and added when-to-annotate guidance with explicit anti-laundering warning. +7 new evaluator tests (5 core semantics + 2 edge-case run-1-INCONCLUSIVE and run-2-INCONCLUSIVE pinning the evidence-prefix accuracy). Input-validation clamp `Math.max(0, ...)` + `Number.isFinite` on `flakyRetryGapMs`. First of three parallel unblocker tracks {B1, C1, C2} — unblocks A3.
+
 ## [0.24.1](https://github.com/ziyilam3999/forge-harness/compare/v0.24.0...v0.24.1) (2026-04-13)
 
 ### Bug Fixes

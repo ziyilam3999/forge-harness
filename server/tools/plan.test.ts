@@ -207,6 +207,56 @@ describe("handlePlan", () => {
     });
   });
 
+  describe("ac-lint gate (Q0.5/A1a)", () => {
+    function planWithSuspectAc() {
+      return {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Suspect",
+            dependencies: [],
+            acceptanceCriteria: [
+              {
+                id: "AC-01",
+                description: "bad",
+                command:
+                  "npx vitest run 2>&1 | grep -qE 'Tests[[:space:]]+[5-9]'",
+              },
+            ],
+            affectedPaths: ["src/"],
+          },
+        ],
+      };
+    }
+
+    it("strictLint=true + suspect AC → throws", async () => {
+      const plan = planWithSuspectAc();
+      mockedCallClaude
+        .mockResolvedValueOnce(makeCallResult(plan))
+        .mockResolvedValueOnce(makeCriticResult())
+        .mockResolvedValueOnce(makeCriticResult());
+
+      await expect(
+        handlePlan({ intent: "add feature", strictLint: true }),
+      ).rejects.toThrow(/ac-lint found/);
+    });
+
+    it("default (advisory) + suspect AC → attaches lintReport, does not throw", async () => {
+      const plan = planWithSuspectAc();
+      mockedCallClaude
+        .mockResolvedValueOnce(makeCallResult(plan))
+        .mockResolvedValueOnce(makeCriticResult())
+        .mockResolvedValueOnce(makeCriticResult());
+
+      const result = await handlePlan({ intent: "add feature" });
+      expect((result as any).lintReport).toBeDefined();
+      expect((result as any).lintReport.suspectAcIds).toEqual(["AC-01"]);
+      expect((result as any).lintReport.findings.length).toBeGreaterThan(0);
+      expect(result.content[0].text).toContain("AC-LINT WARNINGS");
+    });
+  });
+
   describe("mode auto-detection", () => {
     it('detects "fix" keyword as bugfix', async () => {
       const plan = makeValidPlan();

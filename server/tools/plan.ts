@@ -15,6 +15,7 @@ import {
 import { buildCriticPrompt, buildCriticUserMessage, buildMasterCriticPrompt, buildMasterCriticUserMessage } from "../lib/prompts/critic.js";
 import { buildCorrectorPrompt, buildCorrectorUserMessage, buildMasterCorrectorPrompt, buildMasterCorrectorUserMessage } from "../lib/prompts/corrector.js";
 import { validateExecutionPlan } from "../validation/execution-plan.js";
+import { lintPlan, type LintPlanReport } from "../validation/ac-lint.js";
 import { validateMasterPlan } from "../validation/master-plan.js";
 import { writeRunRecord, type RunRecord } from "../lib/run-record.js";
 import { RunContext, trackedCallClaude } from "../lib/run-context.js";
@@ -138,6 +139,15 @@ export const planInputSchema = {
     .describe(
       "Maximum character budget for injected context. Default: 50000. " +
       "Entries are dropped whole (last first) to stay within budget.",
+    ),
+  strictLint: z
+    .boolean()
+    .optional()
+    .describe(
+      "Q0.5/A1a: when true, ac-lint suspect findings or governance-cap violations " +
+      "(more than 3 lintExempt entries) cause forge_plan to throw. When false/omitted, " +
+      "lint findings are attached as a non-blocking `lintReport` sidecar field on the " +
+      "response for observability (advisory mode).",
     ),
 };
 
@@ -780,7 +790,7 @@ async function handleMasterPlan(options: HandlePlanOptions) {
  * Handle phase plan generation: expand one master plan phase into stories with ACs.
  */
 async function handlePhasePlan(options: HandlePlanOptions) {
-  const { visionDoc, masterPlan, phaseId, projectPath, mode, tier, context, maxContextChars } = options;
+  const { visionDoc, masterPlan, phaseId, projectPath, mode, tier, context, maxContextChars, strictLint } = options;
   if (!visionDoc || !masterPlan || !phaseId) {
     return {
       content: [{ type: "text" as const, text: "Error: visionDoc, masterPlan, and phaseId are required for documentTier 'phase'." }],
@@ -838,6 +848,14 @@ async function handlePhasePlan(options: HandlePlanOptions) {
     );
   }
 
+  // Q0.5/A1a — ac-lint gate (strict throws, advisory attaches).
+  const lintReport = runAcLintGate(plan, strictLint);
+  if (lintReport.suspectAcIds.length > 0) {
+    console.error(
+      `forge_plan: ac-lint flagged ${lintReport.suspectAcIds.length} suspect AC(s): ${lintReport.suspectAcIds.join(", ")}`,
+    );
+  }
+
   // Build output
   const sections: string[] = [
     `=== PHASE PLAN (${phaseId}) ===`,
@@ -853,6 +871,17 @@ async function handlePhasePlan(options: HandlePlanOptions) {
     ].join("\n"));
   }
 
+  if (lintReport.suspectAcIds.length > 0 || lintReport.governanceViolation) {
+    sections.push([
+      `=== AC-LINT WARNINGS (${lintReport.findings.length}) ===`,
+      `Suspect ACs: ${lintReport.suspectAcIds.join(", ") || "(none)"}`,
+      `lintExempt entries: ${lintReport.lintExemptCount} (governance cap: 3${lintReport.governanceViolation ? " — VIOLATED" : ""})`,
+      ...lintReport.findings.map(
+        (f) => `${f.storyId}/${f.acId} [${f.ruleId}${f.exempt ? " — EXEMPT" : ""}]: ${f.description}`,
+      ),
+    ].join("\n"));
+  }
+
   const critiqueSummary = formatCritiqueSummary(critiqueRounds);
   if (critiqueSummary) sections.push(critiqueSummary);
   sections.push(buildUsageSection(ctx));
@@ -861,14 +890,17 @@ async function handlePhasePlan(options: HandlePlanOptions) {
     projectPath, startTime, "phase", effectiveMode, effectiveTier, critiqueRounds, validationRetries, ctx,
   );
 
-  return { content: [{ type: "text" as const, text: sections.join("\n\n") }] };
+  return {
+    content: [{ type: "text" as const, text: sections.join("\n\n") }],
+    lintReport,
+  };
 }
 
 /**
  * Handle update mode: revise an existing plan based on implementation notes.
  */
 async function handleUpdatePlan(options: HandlePlanOptions) {
-  const { currentPlan, implementationNotes, projectPath, tier, context, maxContextChars } = options;
+  const { currentPlan, implementationNotes, projectPath, tier, context, maxContextChars, strictLint } = options;
   if (!currentPlan || !implementationNotes) {
     return {
       content: [{ type: "text" as const, text: "Error: currentPlan and implementationNotes are required for documentTier 'update'." }],
@@ -917,11 +949,30 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
     }
   }
 
+  // Q0.5/A1a — ac-lint gate on the revised plan too.
+  const lintReport = runAcLintGate(plan, strictLint);
+  if (lintReport.suspectAcIds.length > 0) {
+    console.error(
+      `forge_plan (update): ac-lint flagged ${lintReport.suspectAcIds.length} suspect AC(s): ${lintReport.suspectAcIds.join(", ")}`,
+    );
+  }
+
   // Build output
   const sections: string[] = [
     "=== UPDATED PLAN ===",
     JSON.stringify(plan, null, 2),
   ];
+
+  if (lintReport.suspectAcIds.length > 0 || lintReport.governanceViolation) {
+    sections.push([
+      `=== AC-LINT WARNINGS (${lintReport.findings.length}) ===`,
+      `Suspect ACs: ${lintReport.suspectAcIds.join(", ") || "(none)"}`,
+      `lintExempt entries: ${lintReport.lintExemptCount} (governance cap: 3${lintReport.governanceViolation ? " — VIOLATED" : ""})`,
+      ...lintReport.findings.map(
+        (f) => `${f.storyId}/${f.acId} [${f.ruleId}${f.exempt ? " — EXEMPT" : ""}]: ${f.description}`,
+      ),
+    ].join("\n"));
+  }
 
   const critiqueSummary = formatCritiqueSummary(critiqueRounds);
   if (critiqueSummary) sections.push(critiqueSummary);
@@ -952,6 +1003,7 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
     content: [{ type: "text" as const, text: sections.join("\n\n") }],
     updatedPlan: plan,
     critiqueRounds: critiqueRounds.length > 0 ? critiqueRounds : null,
+    lintReport,
   };
 }
 
@@ -959,7 +1011,7 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
  * Handle default (no documentTier) — original execution plan pipeline, fully backward compatible.
  */
 async function handleDefaultPlan(options: HandlePlanOptions) {
-  const { intent, projectPath, mode, tier, context, maxContextChars } = options;
+  const { intent, projectPath, mode, tier, context, maxContextChars, strictLint } = options;
   const startTime = Date.now();
   const effectiveMode = mode ?? detectMode(intent);
   const effectiveTier = tier ?? "thorough";
@@ -1009,6 +1061,14 @@ async function handleDefaultPlan(options: HandlePlanOptions) {
     );
   }
 
+  // Q0.5/A1a — mechanical ac-lint gate. Strict mode throws; advisory mode attaches.
+  const lintReport = runAcLintGate(plan, strictLint);
+  if (lintReport.suspectAcIds.length > 0) {
+    console.error(
+      `forge_plan: ac-lint flagged ${lintReport.suspectAcIds.length} suspect AC(s): ${lintReport.suspectAcIds.join(", ")}`,
+    );
+  }
+
   // Build output
   const sections: string[] = [
     "=== EXECUTION PLAN ===",
@@ -1024,6 +1084,17 @@ async function handleDefaultPlan(options: HandlePlanOptions) {
     ].join("\n"));
   }
 
+  if (lintReport.suspectAcIds.length > 0 || lintReport.governanceViolation) {
+    sections.push([
+      `=== AC-LINT WARNINGS (${lintReport.findings.length}) ===`,
+      `Suspect ACs: ${lintReport.suspectAcIds.join(", ") || "(none)"}`,
+      `lintExempt entries: ${lintReport.lintExemptCount} (governance cap: 3${lintReport.governanceViolation ? " — VIOLATED" : ""})`,
+      ...lintReport.findings.map(
+        (f) => `${f.storyId}/${f.acId} [${f.ruleId}${f.exempt ? " — EXEMPT" : ""}]: ${f.description}`,
+      ),
+    ].join("\n"));
+  }
+
   const critiqueSummary = formatCritiqueSummary(critiqueRounds);
   if (critiqueSummary) sections.push(critiqueSummary);
   sections.push(buildUsageSection(ctx));
@@ -1032,7 +1103,10 @@ async function handleDefaultPlan(options: HandlePlanOptions) {
     projectPath, startTime, null, effectiveMode, effectiveTier, critiqueRounds, validationRetries, ctx,
   );
 
-  return { content: [{ type: "text" as const, text: sections.join("\n\n") }] };
+  return {
+    content: [{ type: "text" as const, text: sections.join("\n\n") }],
+    lintReport,
+  };
 }
 
 // ── Main handler ──
@@ -1050,6 +1124,41 @@ interface HandlePlanOptions {
   currentPlan?: string;
   context?: Array<{ label: string; content: string }>;
   maxContextChars?: number;
+  strictLint?: boolean;
+}
+
+/**
+ * Q0.5/A1a — run ac-lint on a generated plan. In strict mode, any non-exempt
+ * suspect finding or a governance-cap violation throws. In advisory mode,
+ * the report is returned for attachment as a sidecar.
+ */
+function runAcLintGate(
+  plan: ExecutionPlan,
+  strictLint: boolean | undefined,
+): LintPlanReport {
+  const report = lintPlan(plan);
+  if (strictLint) {
+    if (report.governanceViolation) {
+      throw new Error(
+        `forge_plan: ac-lint governance cap exceeded — ${report.lintExemptCount} lintExempt entries (max 3). Add a 'lint-exempt-governance-override: <reason>' line to the PR body or reduce exemptions.`,
+      );
+    }
+    if (report.suspectAcIds.length > 0) {
+      const detail = report.suspectAcIds
+        .map((id) => {
+          const rules = report.findings
+            .filter((f) => f.acId === id && !f.exempt)
+            .map((f) => f.ruleId)
+            .join(",");
+          return `${id} [${rules}]`;
+        })
+        .join("; ");
+      throw new Error(
+        `forge_plan: ac-lint found ${report.suspectAcIds.length} suspect AC(s) in strictLint mode: ${detail}`,
+      );
+    }
+  }
+  return report;
 }
 
 /**

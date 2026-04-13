@@ -1,3 +1,5 @@
+import { AC_SUBPROCESS_RULES_PROMPT } from "./shared/ac-subprocess-rules.js";
+
 /**
  * Build the system prompt for the master plan planner agent.
  * Master plans decompose a PRD/vision into phases with dependencies and I/O chains.
@@ -269,18 +271,7 @@ Respond with ONLY a JSON object matching this exact schema (execution-plan v3.0.
   the command must include the build step as a prerequisite (e.g., \`npm run build && node ...\`).
   Without this, the AC fails in a clean environment where the build output doesn't exist.
 
-### AC Command Contract
-AC commands execute inside node:child_process.exec() with bash shell.
-Environment: no TTY, no stdin, stdout/stderr captured as evidence, 30s timeout.
-Exit code 0 = PASS, non-zero = FAIL. Design commands accordingly:
-- Prefer exit-code checks over stdout parsing:
-  GOOD: \`npx vitest run -t 'budget'\` (exits 0 on pass)
-  BAD:  \`npx vitest run -t 'budget' 2>&1 | grep -qE 'Tests[[:space:]]+[5-9]'\`
-- Never pipe then && to another grep (second grep has no stdin, hangs forever):
-  BAD:  \`cmd | grep -q 'x' && ! grep -q 'y'\`
-  GOOD: \`OUT=$(cmd 2>&1); echo "$OUT" | grep -q 'x' && ! echo "$OUT" | grep -q 'y'\`
-- No count-based regex on test runner summary lines (format is TTY-dependent).
-- 30s timeout — keep commands focused. Use -t filters for test suites instead of running all tests.
+${AC_SUBPROCESS_RULES_PROMPT}
 
 ### Mode-Specific Rules (mode: ${mode})
 ${modeRules[mode]}

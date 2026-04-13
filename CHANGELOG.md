@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.1](https://github.com/ziyilam3999/forge-harness/compare/v0.24.0...v0.24.1) (2026-04-13)
+
+### Bug Fixes
+
+- **evaluator:** #168 `computeVerdict` must not launder `SKIPPED+suspect` as PASS ([#173](https://github.com/ziyilam3999/forge-harness/pull/173)) — Q0.5 closure blocker. A story whose ACs were ALL short-circuited by ac-lint (`SKIPPED` with `reliability:"suspect"`) previously returned verdict `PASS`. Now returns `INCONCLUSIVE`. Precedence: `FAIL > INCONCLUSIVE > suspect-skip > PASS`. +4 aggregation tests; existing A1b suspect test extended to assert `report.verdict`.
+
 ## [0.24.0](https://github.com/ziyilam3999/forge-harness/compare/v0.23.0...v0.24.0) (2026-04-13)
 
 ### Features

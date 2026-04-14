@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.4](https://github.com/ziyilam3999/forge-harness/compare/v0.30.3...v0.30.4) (2026-04-15)
+
+### Bug Fixes
+
+- **fix(q05-task34):** kill 40 pre-existing `server/**` lint errors and wire `npm run lint` into `.github/workflows/ci.yml` as a required step. 10 files touched: `server/lib/audit.ts` (rewrote `for await (const _entry of dir)` → `while ((await dir.read()) !== null)` to drop the unused iteration var without touching ESLint config), plus 9 test files where `no-explicit-any` was replaced with real imported types (`LintablePlan`, `LintExempt`, `CallClaudeOptions`-shaped structural types), `no-this-alias` inlined (arrow functions already closed over `this`), and one `no-unsafe-function-type` narrowed to the real `exec` callback signature. Zero `eslint-disable` comments introduced, zero rule-config changes. CI now runs lint as a required step with no `continue-on-error`, so the AC-11 contract from PR #207 can be promoted back to `npm run lint exits 0` on future PRs. Plan file `.ai-workspace/plans/2026-04-14-q05-task34-lint-debt-ci-wiring.md` was amended mid-PR from a 9-file baseline to 10 after `server/lib/audit.ts` was surfaced by the executor on first-pass re-enumeration; amendment rode the PR branch per planner/executor doctrine. ([#208](https://github.com/ziyilam3999/forge-harness/pull/208))
+
 ## [0.30.3](https://github.com/ziyilam3999/forge-harness/compare/v0.30.2...v0.30.3) (2026-04-14)
 
 ### Miscellaneous

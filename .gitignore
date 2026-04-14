@@ -5,4 +5,3 @@ dist/
 .ai-workspace/
 tmp/
 *.tgz
-.deferred-c1-retroactive/

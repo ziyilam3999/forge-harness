@@ -33,7 +33,11 @@ function simulateExec(
   stderr: string,
 ) {
   mockedExec.mockImplementationOnce((_cmd, _opts, callback) => {
-    (callback as Function)(error, stdout, stderr);
+    (callback as (err: Error | null, stdout: string, stderr: string) => void)(
+      error,
+      stdout,
+      stderr,
+    );
     return {} as ReturnType<typeof exec>;
   });
 }

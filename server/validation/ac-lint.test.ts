@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { lintAcCommand, lintPlan, type LintExemptPlan } from "./ac-lint.js";
+import {
+  lintAcCommand,
+  lintPlan,
+  type LintExemptPlan,
+  type LintablePlan,
+  type LintExempt,
+} from "./ac-lint.js";
 import type { LintExemptPlan as LintExemptPlanMirror } from "../types/execution-plan.js";
 import { AC_LINT_RULES } from "../lib/prompts/shared/ac-subprocess-rules.js";
 
@@ -249,7 +255,13 @@ describe("lintAcCommand — lintExempt precedence", () => {
 });
 
 describe("lintPlan — governance cap and plan-level aggregation", () => {
-  function mkPlan(acs: Array<{ id: string; command: string; lintExempt?: any }>) {
+  function mkPlan(
+    acs: Array<{
+      id: string;
+      command: string;
+      lintExempt?: LintExempt | LintExempt[];
+    }>,
+  ): LintablePlan {
     return {
       stories: [
         {
@@ -326,11 +338,11 @@ describe("lintPlan — governance cap and plan-level aggregation", () => {
 describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
   // Shape that matches LintablePlan (stories + optional plan-level lintExempt).
   function mkPlanWithExempt(
-    planLevel: any,
+    planLevel: unknown,
     acs: Array<{ id: string; command: string }>,
-  ): any {
+  ): LintablePlan {
     return {
-      lintExempt: planLevel,
+      lintExempt: planLevel as LintExemptPlan[] | undefined,
       stories: [
         {
           id: "US-01",
@@ -378,7 +390,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
 
   it("plan-level AND per-AC: per-AC 3-cap still applies; plan-level does not contribute to cap", () => {
     // 3 per-AC exempts (at cap) + 1 plan-level entry (no cap contribution)
-    const plan: any = {
+    const plan = {
       lintExempt: [
         {
           scope: "plan",
@@ -412,7 +424,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
           ],
         },
       ],
-    };
+    } as unknown as LintablePlan;
     const report = lintPlan(plan);
     expect(report.lintExemptCount).toBe(3);
     expect(report.governanceViolation).toBe(false);
@@ -517,7 +529,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
   // empty-string rationale distinct from missing, array-of-non-object entries.
   it("plan-level entry with non-string rule element → throws", () => {
     const plan = mkPlanWithExempt(
-      [{ scope: "plan", rules: [123 as any], batch: "b", rationale: "r" }],
+      [{ scope: "plan", rules: [123 as unknown as string], batch: "b", rationale: "r" }],
       [{ id: "AC-01", command: "echo PASS" }],
     );
     expect(() => lintPlan(plan)).toThrow(/not in AC_LINT_RULES/);
@@ -532,7 +544,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
   });
 
   it("plan-level entry array element is null → throws", () => {
-    const plan: any = {
+    const plan = {
       lintExempt: [null],
       stories: [
         {
@@ -540,7 +552,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
           acceptanceCriteria: [{ id: "AC-01", description: "a", command: "echo PASS" }],
         },
       ],
-    };
+    } as unknown as LintablePlan;
     expect(() => lintPlan(plan)).toThrow(/must be an object/);
   });
 

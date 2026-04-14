@@ -25,11 +25,14 @@ export function extractPlanJson(text: string): string {
  * specified content strings. Useful for identifying specific LLM calls
  * without relying on fragile index positions.
  */
-export function findCallByContent(
-  mockCalls: Array<[any, ...any[]]>,
+export function findCallByContent<
+  T = { messages: Array<{ content: string }> },
+>(
+  mockCalls: ReadonlyArray<readonly unknown[]>,
   contentMatches: string[],
-): any {
-  const match = mockCalls.find(([arg]) => {
+): T {
+  const match = mockCalls.find((call) => {
+    const arg = call[0] as { messages?: Array<{ content?: unknown }> };
     const messages: Array<{ content?: unknown }> = arg?.messages ?? [];
     const text = messages
       .map((m) => (typeof m?.content === "string" ? m.content : ""))
@@ -41,5 +44,5 @@ export function findCallByContent(
       `No mock call found containing all of: ${contentMatches.join(", ")}`,
     );
   }
-  return match[0];
+  return match[0] as T;
 }

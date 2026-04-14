@@ -71,7 +71,7 @@ export class AuditLog {
       let count = 0;
       let exceeded = false;
       try {
-        for await (const _entry of dir) {
+        while ((await dir.read()) !== null) {
           count++;
           if (count >= FILE_COUNT_WARNING_THRESHOLD) {
             exceeded = true;
@@ -79,16 +79,10 @@ export class AuditLog {
           }
         }
       } finally {
-        // opendir's async iterator closes the handle automatically when
-        // exhausted, but an early `break` leaves it open — close it.
-        if (!exceeded) {
-          // Iterator already closed the handle on exhaustion; nothing to do.
-        } else {
-          try {
-            await dir.close();
-          } catch {
-            // Already closed — ignore.
-          }
+        try {
+          await dir.close();
+        } catch {
+          // Already closed — ignore.
         }
       }
 

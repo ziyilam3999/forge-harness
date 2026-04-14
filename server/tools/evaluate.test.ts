@@ -59,10 +59,9 @@ vi.mock("../lib/run-context.js", async () => {
     toolName = "forge_evaluate";
 
     constructor() {
-      const self = this;
       this.cost.summarize = () => ({
-        inputTokens: self._inputTokens,
-        outputTokens: self._outputTokens,
+        inputTokens: this._inputTokens,
+        outputTokens: this._outputTokens,
         estimatedCostUsd: 0.001,
         breakdown: [],
         isOAuthAuth: false,
@@ -73,8 +72,15 @@ vi.mock("../lib/run-context.js", async () => {
   return {
     RunContext: MockRunContext,
     trackedCallClaude: vi.fn(
-      async (ctx: any, _stage: string, _role: string, options: any) => {
-        const result = await mockedClaude(options);
+      async (
+        ctx: { _inputTokens?: number; _outputTokens?: number } | null,
+        _stage: string,
+        _role: string,
+        options: unknown,
+      ) => {
+        const result = await mockedClaude(
+          options as Parameters<typeof mockedClaude>[0],
+        );
         if (ctx && result.usage) {
           ctx._inputTokens =
             (ctx._inputTokens ?? 0) + result.usage.inputTokens;

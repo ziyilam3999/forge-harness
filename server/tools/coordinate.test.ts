@@ -291,7 +291,11 @@ describe("handleCoordinate — integration", () => {
     const b2 = JSON.parse(r2.content[0].text).brief;
 
     // Compare all fields except configSource
-    const strip = (b: Record<string, unknown>) => { const { configSource: _cs, ...rest } = b; return rest; };
+    const strip = (b: Record<string, unknown>) => {
+      const rest = { ...b };
+      delete rest.configSource;
+      return rest;
+    };
     expect(JSON.stringify(strip(b1))).toBe(JSON.stringify(strip(b2)));
   });
 

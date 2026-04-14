@@ -30,8 +30,8 @@ vi.mock("../lib/run-context.js", async () => {
     _outputTokens = 0;
     cost = {
       summarize: () => ({
-        inputTokens: (this as any)._inputTokens ?? 0,
-        outputTokens: (this as any)._outputTokens ?? 0,
+        inputTokens: this._inputTokens ?? 0,
+        outputTokens: this._outputTokens ?? 0,
         estimatedCostUsd: 0.001,
         breakdown: [],
         isOAuthAuth: false,
@@ -43,11 +43,9 @@ vi.mock("../lib/run-context.js", async () => {
     toolName = "forge_plan";
 
     constructor() {
-      // Bind summarize to the instance
-      const self = this;
       this.cost.summarize = () => ({
-        inputTokens: self._inputTokens,
-        outputTokens: self._outputTokens,
+        inputTokens: this._inputTokens,
+        outputTokens: this._outputTokens,
         estimatedCostUsd: 0.001,
         breakdown: [],
         isOAuthAuth: false,
@@ -57,8 +55,15 @@ vi.mock("../lib/run-context.js", async () => {
 
   return {
     RunContext: MockRunContext,
-    trackedCallClaude: vi.fn(async (ctx: any, _stage: string, _role: string, options: any) => {
-      const result = await mockedClaude(options);
+    trackedCallClaude: vi.fn(async (
+      ctx: { _inputTokens?: number; _outputTokens?: number } | null,
+      _stage: string,
+      _role: string,
+      options: unknown,
+    ) => {
+      const result = await mockedClaude(
+        options as Parameters<typeof mockedClaude>[0],
+      );
       if (ctx && result.usage) {
         ctx._inputTokens = (ctx._inputTokens ?? 0) + result.usage.inputTokens;
         ctx._outputTokens = (ctx._outputTokens ?? 0) + result.usage.outputTokens;
@@ -253,9 +258,12 @@ describe("handlePlan", () => {
         .mockResolvedValueOnce(makeCriticResult());
 
       const result = await handlePlan({ intent: "add feature" });
-      expect((result as any).lintReport).toBeDefined();
-      expect((result as any).lintReport.suspectAcIds).toEqual(["AC-01"]);
-      expect((result as any).lintReport.findings.length).toBeGreaterThan(0);
+      const lintResult = result as {
+        lintReport: { suspectAcIds: string[]; findings: unknown[] };
+      };
+      expect(lintResult.lintReport).toBeDefined();
+      expect(lintResult.lintReport.suspectAcIds).toEqual(["AC-01"]);
+      expect(lintResult.lintReport.findings.length).toBeGreaterThan(0);
       expect(result.content[0].text).toContain("AC-LINT WARNINGS");
     });
   });
@@ -723,7 +731,7 @@ describe("documentTier: master", () => {
 
     expect(result.content[0].text).toContain("Error");
     expect(result.content[0].text).toContain("visionDoc");
-    expect((result as any).isError).toBe(true);
+    expect((result as { isError?: boolean }).isError).toBe(true);
   });
 
   it("runs master critique loop on thorough tier", async () => {
@@ -833,7 +841,7 @@ describe("documentTier: phase", () => {
     });
 
     expect(result.content[0].text).toContain("Error");
-    expect((result as any).isError).toBe(true);
+    expect((result as { isError?: boolean }).isError).toBe(true);
   });
 
   it("includes phase context rules in the planner prompt", async () => {
@@ -946,7 +954,7 @@ describe("documentTier: update", () => {
     });
 
     expect(result.content[0].text).toContain("Error");
-    expect((result as any).isError).toBe(true);
+    expect((result as { isError?: boolean }).isError).toBe(true);
   });
 
   it("defaults to standard tier (1 critique round) for updates", async () => {

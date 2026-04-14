@@ -29,7 +29,7 @@ Executor is done when ALL of these hold. Each is checkable with a single command
 - [ ] AC-8 — **New plan files auto-track.** Create `.ai-workspace/plans/test-ac8.md`, run `git status --porcelain .ai-workspace/plans/test-ac8.md`, see the file listed as untracked (i.e., NOT ignored). Clean up the test file before commit.
 - [ ] AC-9 — **New dogfood files stay ignored.** Create `.ai-workspace/dogfood/test-ac9.json`, run `git status --porcelain .ai-workspace/dogfood/test-ac9.json`, see empty output. Clean up before commit.
 - [ ] AC-10 — **Tests still green.** `npm test` exits `0`.
-- [ ] AC-11 — **Lint still green.** `npm run lint` exits `0`.
+- [ ] AC-11 — **Lint introduces no NEW errors.** `npm run lint` on this branch reports the same error set (count + file list) as `npm run lint` on master's HEAD. Pre-existing latent lint debt (40 `@typescript-eslint/no-explicit-any` errors in `server/**/*.test.ts` on v0.30.2) is explicitly out of scope — tracked as follow-up task #34. **Rationale for amendment:** discovered by lucky-iris 2026-04-14T23:00. The debt has zero causal connection to this PR (only `package.json` + `.gitignore` changed); bundling the fix would be F7 "fix two things in one PR, break both". CI never ran `npm run lint` before (only `npm ci --ignore-scripts`, `npm run build`, dist-drift guard, `npm test`), so the debt grew unchecked. Follow-up task #34 adds the lint fix AND wires `npm run lint` into CI so the debt can't regrow.
 - [ ] AC-12 — **Build still green.** `npm run build` exits `0`.
 - [ ] AC-13 — **CI green on the PR.** All required checks on the PR pass before merge.
 

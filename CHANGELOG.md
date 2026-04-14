@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.0](https://github.com/ziyilam3999/forge-harness/compare/v0.29.1...v0.30.0) (2026-04-14)
+
+### Features
+
+- **q05-a3bis:** dual-trigger lintExempt refresh + plan.ts hook ([#197](https://github.com/ziyilam3999/forge-harness/pull/197))
+  - New `forge_lint_refresh` primitive re-validates every `lintExempt` (per-AC AND plan-level) against the current ac-lint rule surface. Two staleness triggers: `rule-change` (sha256 drift of `AC_SUBPROCESS_RULES_PROMPT` + `AC_LINT_RULES` via new `getAcLintRulesHash()`) and `14d-elapsed` (calendar timeout).
+  - Auto-fires as a non-fatal side effect at the end of `forge_plan(documentTier: "update")` when `planPath` is provided. Hook failure is swallowed into `lintRefresh: { error }` so the update path is never blocked.
+  - Reports only — never mutates the plan. Humans (or a follow-up `forge_reconcile`) decide whether to drop, rewrite, or re-accept each stale exemption.
+  - Audit state persists under `.ai-workspace/lint-audit/{planSlug}.audit.json`. Slug format `<parentDir>__<basename>` for cross-dir collision resistance.
+  - 16 new tests: AC-bis-01..13 all binary-pass. 720 total tests green.
+  - Follow-up polish issues #198–203 tracked from ship-review.
+
 ## [0.29.1](https://github.com/ziyilam3999/forge-harness/compare/v0.29.0...v0.29.1) (2026-04-14)
 
 ### Miscellaneous

@@ -85,6 +85,9 @@ project_dir="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 # M2: capture lint exit status explicitly. On non-zero exit, surface a
 # "linter crashed" additionalContext so the session author sees the failure
 # instead of the old `if ! ...; then :; fi` silent swallow.
+# E3 (single-file lint passthrough) DEFERRED — see parent plan Q0.5/C1 final-closure
+# stamp. Perf is not load-bearing at current plan-corpus size (9 files); revisit when
+# corpus grows or run-ac-lint.mjs gains CLI arg handling.
 set +e
 lint_output="$(cd "$project_dir" && node scripts/run-ac-lint.mjs 2>&1)"
 lint_rc=$?

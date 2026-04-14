@@ -402,6 +402,7 @@ async function handleDivergenceEval(
             acId: criterion.id,
             status: criterion.status,
             evidence: criterion.evidence,
+            reliability: criterion.reliability,
           });
         }
       }
@@ -515,6 +516,19 @@ async function handleDivergenceEval(
 
   const totalDivergences = forwardDivergences.length + reverseDivergences.length;
 
+  // Q0.5/A3 — split forward count by reliability so analytics can separate
+  // real failures (trusted) from suspect (ac-lint short-circuit) and
+  // unverified (fired lintExempt override). Undefined reliability is
+  // treated as "trusted" for backward compatibility with pre-A3 reports.
+  let trustedCount = 0;
+  let suspectCount = 0;
+  let unverifiedCount = 0;
+  for (const fd of forwardDivergences) {
+    if (fd.reliability === "suspect") suspectCount++;
+    else if (fd.reliability === "unverified") unverifiedCount++;
+    else trustedCount++;
+  }
+
   const report: DivergenceReport = {
     evaluationMode: "divergence",
     status: "complete",
@@ -523,7 +537,8 @@ async function handleDivergenceEval(
     selfHealingCycles: 0, // incremented by calling agent across invocations
     maxCyclesReached: false, // set by calling agent based on cycle count vs max
     summary:
-      `Forward: ${forwardDivergences.length} AC failure(s). ` +
+      `Forward: ${forwardDivergences.length} AC failure(s) ` +
+      `(${trustedCount} trusted / ${suspectCount} suspect / ${unverifiedCount} unverified). ` +
       `Reverse: ${reverseDivergences.length} unplanned capability(ies). ` +
       reverseSummary,
   };

@@ -10,21 +10,27 @@ export interface CriterionResult {
   status: "PASS" | "FAIL" | "SKIPPED" | "INCONCLUSIVE";
   evidence: string;
   /**
-   * Reliability of this result (Q0.5/A3 minimum slice).
+   * Reliability classification for this criterion's result.
    *
-   * - Absent (undefined): treat as "trusted" for backward compatibility.
-   *   Existing consumers that don't know about this field see the same shape
-   *   as before A3 shipped.
-   * - "trusted": result is mechanically verifiable — the AC command passed
-   *   ac-lint clean and executed.
-   * - "suspect": ac-lint flagged this AC's command as matching a subprocess-
-   *   safety deny-list rule (F55/F56/F36). The command was NOT executed;
-   *   `status` is set to "SKIPPED" and `evidence` carries the matched rule
-   *   ids. Downstream readers should treat this as "we don't know the real
-   *   answer, the AC itself is broken".
+   * - "trusted": the AC's command passed ac-lint subprocess-safety checks
+   *   cleanly (no findings, OR findings exist but none were marked exempt).
+   *   The verdict reflects a real run against real safety guarantees.
    *
-   * Note: the full A3 PR will add a third "unverified" value (for the
-   * `lintExempt` override path). A1 ships only the trusted/suspect split.
+   * - "suspect": ac-lint flagged a non-exempted finding and the AC was
+   *   short-circuited to SKIPPED (or flaky-retry suspect path). Verdict
+   *   is provisional pending author cleanup.
+   *
+   * - "unverified": the AC ran to completion BUT one or more per-AC
+   *   `lintExempt` entries actively suppressed a finding during this run.
+   *   The author exercised an override; the safety check was bypassed for
+   *   this command. The verdict stands (PASS still passes, FAIL still
+   *   fails) but the reliability of the signal is reduced. Surfaced as a
+   *   warning in EvalReport.warnings[], never downgrades verdict.
+   *
+   * Plan-level `ExecutionPlan.lintExempt[]` (scope: "plan") absorbs
+   * findings entirely and is OUT OF SCOPE for this tag — those ACs report
+   * "trusted" by construction. Plan-level coverage is deferred to
+   * Q0.5/A3-bis (dual-trigger refresh tool).
    */
-  reliability?: "trusted" | "suspect";
+  reliability?: "trusted" | "suspect" | "unverified";
 }

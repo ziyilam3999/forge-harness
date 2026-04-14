@@ -8,6 +8,13 @@ export interface ForwardDivergence {
   acId: string;
   status: "FAIL" | "INCONCLUSIVE";
   evidence: string;
+  /**
+   * Q0.5/A3 — reliability propagated from the source `CriterionResult`.
+   * Optional for backward compatibility. Lets downstream consumers split
+   * "real failures" (trusted) from "suspect failures" (ac-lint short-
+   * circuit or flaky-retry suspect) and unverified-bypass failures.
+   */
+  reliability?: "trusted" | "suspect" | "unverified";
 }
 
 export interface ReverseDivergence {

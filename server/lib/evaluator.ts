@@ -63,6 +63,9 @@ export async function evaluateStory(
   };
 
   const criteria: CriterionResult[] = [];
+  // Q0.5/A3 — per-AC warnings for flaky+fired-exemption collision. Collected
+  // inside the loop and concatenated into `warnings` after.
+  const dualFlagWarnings: string[] = [];
 
   for (const ac of story.acceptanceCriteria) {
     // Q0.5/A1b — ac-lint short-circuit (non-exempt suspect ACs never execute).
@@ -79,6 +82,26 @@ export async function evaluateStory(
         reliability: "suspect",
       });
       continue;
+    }
+
+    // Q0.5/A3 — Option 2 detection (per forge-plan T1545). An AC whose
+    // per-AC `lintExempt` entry FIRED (actively suppressed a real finding)
+    // is tagged "unverified" on the normal execution path. Vestigial
+    // exemptions (declared but nothing matched) stay "trusted". Plan-level
+    // `ExecutionPlan.lintExempt[]` absorptions are OUT OF SCOPE — those
+    // drop findings entirely and report "trusted" by construction
+    // (deferred to Q0.5/A3-bis).
+    const exemptionFired = lint.findings.some((f) => f.exempt === true);
+
+    // Q0.5/A3 — dual-flag warning (T1510 blessed + T1545 clarified). A flaky
+    // AC whose exemption fired is reported as "suspect" (runtime signal
+    // outranks authoring override) — but the collision itself is a soft
+    // smell that deserves an explicit, per-AC warning so analytics can
+    // grep for it. Rolled warnings hide the signal.
+    if (ac.flaky === true && exemptionFired) {
+      dualFlagWarnings.push(
+        `AC '${ac.id}' has flaky: true AND a lintExempt entry whose exemption fired during this run — reporting as suspect (flake takes precedence). Override review recommended.`,
+      );
     }
 
     const firstRun = await executeCommand(ac.command, execOptions);
@@ -128,7 +151,7 @@ export async function evaluateStory(
         id: ac.id,
         status: secondRun.status,
         evidence: `${prefix} — ${firstRun.evidence}`,
-        reliability: "trusted",
+        reliability: exemptionFired ? "unverified" : "trusted",
       });
       continue;
     }
@@ -137,9 +160,21 @@ export async function evaluateStory(
       id: ac.id,
       status: firstRun.status,
       evidence: firstRun.evidence,
-      reliability: "trusted",
+      reliability: exemptionFired ? "unverified" : "trusted",
     });
   }
+
+  // Q0.5/A3 — aggregate unverified-count warning (per T1545 text).
+  const unverifiedCount = criteria.filter(
+    (c) => c.reliability === "unverified",
+  ).length;
+  if (unverifiedCount > 0) {
+    warnings.push(
+      `${unverifiedCount} AC(s) ran with a fired lintExempt override — reliability is unverified`,
+    );
+  }
+  // Q0.5/A3 — dual-flag per-AC warnings (flaky + fired exemption collision).
+  warnings.push(...dualFlagWarnings);
 
   const verdict = computeVerdict(criteria);
 

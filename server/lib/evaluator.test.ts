@@ -299,7 +299,7 @@ describe("evaluateStory", () => {
       expect(report.criteria[0].reliability).toBe("trusted");
     });
 
-    it("exempt AC runs normally even though pattern matches", async () => {
+    it("exempt AC runs normally even though pattern matches — Q0.5/A3 Option 2: tagged unverified because exemption fired", async () => {
       mockedExecute.mockResolvedValueOnce(mockResult({ status: "PASS", evidence: "ok" }));
       const plan: ExecutionPlan = {
         schemaVersion: "3.0.0",
@@ -321,7 +321,138 @@ describe("evaluateStory", () => {
       const report = await evaluateStory(plan, "US-01");
       expect(mockedExecute).toHaveBeenCalledTimes(1);
       expect(report.criteria[0].status).toBe("PASS");
+      // AC-A3-02: firing per-AC exemption → unverified (verdict still PASS).
+      expect(report.criteria[0].reliability).toBe("unverified");
+      // AC-A3-08: aggregate warning surfaces the unverified count.
+      expect(report.warnings).toBeDefined();
+      expect(report.warnings!.some((w) => /unverified/i.test(w))).toBe(true);
+    });
+
+    // Q0.5/A3 — AC-A3-02b: vestigial-exemption negative test (pins Option 2).
+    it("AC-A3-02b: vestigial lintExempt (declared but nothing fires) → reliability=trusted", async () => {
+      mockedExecute.mockResolvedValueOnce(mockResult({ status: "PASS", evidence: "ok" }));
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Vestigial",
+            acceptanceCriteria: [
+              {
+                id: "AC-01",
+                description: "clean command, exemption that won't match",
+                command: "echo ok",
+                lintExempt: {
+                  ruleId: "F56-passed-grep",
+                  rationale: "defensive, unlikely to match",
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(report.criteria[0].status).toBe("PASS");
+      // Exemption was declared but no finding was suppressed — stays trusted.
       expect(report.criteria[0].reliability).toBe("trusted");
+      // No unverified warning either.
+      expect(
+        (report.warnings ?? []).some((w) => /unverified/i.test(w)),
+      ).toBe(false);
+    });
+
+    // Q0.5/A3 — AC-A3-03: unverified tag survives a FAIL status.
+    it("AC-A3-03: firing exemption + FAIL command → status=FAIL, reliability=unverified", async () => {
+      mockedExecute.mockResolvedValueOnce(
+        mockResult({ status: "FAIL", evidence: "boom" }),
+      );
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Firing exempt FAIL",
+            acceptanceCriteria: [
+              {
+                id: "AC-01",
+                description: "matched rule, exempted, command fails",
+                command: "npx vitest run | grep -q 'passed'",
+                lintExempt: { ruleId: "F56-passed-grep", rationale: "reviewed" },
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(report.verdict).toBe("FAIL");
+      expect(report.criteria[0].status).toBe("FAIL");
+      // Unverified tag survives failure — author overrode the safety gate
+      // and the command still failed.
+      expect(report.criteria[0].reliability).toBe("unverified");
+      expect(
+        (report.warnings ?? []).some((w) => /unverified/i.test(w)),
+      ).toBe(true);
+    });
+
+    // Q0.5/A3 — AC-A3-04: no lintExempt field → trusted (backward compat).
+    it("AC-A3-04: AC with no lintExempt field → reliability=trusted", async () => {
+      mockedExecute.mockResolvedValueOnce(mockResult({ status: "PASS", evidence: "ok" }));
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Clean",
+            acceptanceCriteria: [
+              { id: "AC-01", description: "no exemption", command: "echo ok" },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01");
+      expect(report.criteria[0].reliability).toBe("trusted");
+      expect(
+        (report.warnings ?? []).some((w) => /unverified/i.test(w)),
+      ).toBe(false);
+    });
+
+    // Q0.5/A3 — dual-flag warning: flaky + fired exemption collision.
+    // Flake wins on the reliability tag (runtime signal > authoring override),
+    // but a per-AC warning is emitted so analytics can grep the collision.
+    it("dual-flag: flaky + fired exemption → reliability=suspect, per-AC warning", async () => {
+      mockedExecute
+        .mockResolvedValueOnce(mockResult({ status: "FAIL", evidence: "first fail" }))
+        .mockResolvedValueOnce(mockResult({ status: "PASS", evidence: "retry ok" }));
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Dual flag",
+            acceptanceCriteria: [
+              {
+                id: "AC-01",
+                description: "flaky AND exempted",
+                command: "npx vitest run | grep -q 'passed'",
+                flaky: true,
+                lintExempt: { ruleId: "F56-passed-grep", rationale: "reviewed" },
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01", { flakyRetryGapMs: 1 });
+      expect(report.verdict).toBe("PASS");
+      expect(report.criteria[0].status).toBe("PASS");
+      // Flake wins over unverified.
+      expect(report.criteria[0].reliability).toBe("suspect");
+      // Per-AC dual-flag warning fired — matches the analytics regex.
+      expect(report.warnings).toBeDefined();
+      expect(
+        report.warnings!.some((w) =>
+          /flaky.*lintExempt|lintExempt.*flaky/i.test(w),
+        ),
+      ).toBe(true);
     });
   });
 

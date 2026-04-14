@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.2](https://github.com/ziyilam3999/forge-harness/compare/v0.30.1...v0.30.2) (2026-04-14)
+
+### Miscellaneous
+
+- **docs(q0.5):** verification sweep — F59 phantom citations replaced across 4 plan files; line 288 self-reflexive AC marked RETRACTED; 5 P62/P63 + 3 F55/F56 mis-citations flagged without auto-correction; SUPERSEDED note on `ac-authoring-guidelines.md:3` verified PASS; new audit report at `.ai-workspace/audits/2026-04-14-q05-verification-sweep.md`; 4 gitignored plan files force-added for reviewability. Zero code changes. ([#206](https://github.com/ziyilam3999/forge-harness/pull/206))
+
 ## [0.30.1](https://github.com/ziyilam3999/forge-harness/compare/v0.30.0...v0.30.1) (2026-04-14)
 
 ### Miscellaneous

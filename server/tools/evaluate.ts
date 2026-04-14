@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -28,7 +28,12 @@ import {
   writeRunRecord,
   canonicalizeEvalReport,
   type RunRecord,
+  type CriticEvalReport,
 } from "../lib/run-record.js";
+import {
+  buildCriticPrompt,
+  buildCriticUserMessage,
+} from "../lib/prompts/critic.js";
 import {
   buildCoherenceEvalPrompt,
   buildCoherenceEvalUserMessage,
@@ -49,13 +54,24 @@ import type {
 
 export const evaluateInputSchema = {
   evaluationMode: z
-    .enum(["story", "coherence", "divergence", "smoke-test"])
+    .enum(["story", "coherence", "divergence", "smoke-test", "critic"])
     .optional()
     .describe(
       'Evaluation mode. "story": run AC shell commands (default). ' +
         '"coherence": LLM-judged tier alignment (PRD <-> master <-> phase). ' +
         '"divergence": forward (AC failures) + reverse (unplanned capabilities). ' +
-        '"smoke-test": authoring-time characterization of every AC — runs once per AC, classifies as ok/slow/empty-evidence/hung/skipped-suspect. Writes a sidecar {plan}.smoke.json file when planPath is provided.',
+        '"smoke-test": authoring-time characterization of every AC — runs once per AC, classifies as ok/slow/empty-evidence/hung/skipped-suspect. Writes a sidecar {plan}.smoke.json file when planPath is provided. ' +
+        '"critic": LLM-judged plan review — runs the critic prompt against one or more execution plan JSON files, returns per-plan findings. If planPaths is omitted, globs `.ai-workspace/plans/*.json` under projectPath.',
+    ),
+
+  // ── Critic mode params ──
+  planPaths: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Plan file paths to critique. Used only by critic mode. If omitted, ' +
+        'critic mode globs `.ai-workspace/plans/*.json` under projectPath (or cwd ' +
+        'as a fallback). Required only when the caller wants to scope the sweep.',
     ),
 
   // ── Story mode params ──
@@ -134,10 +150,11 @@ export const evaluateInputSchema = {
 // ── Types ─────────────────────────────────────────────────
 
 type EvaluateInput = {
-  evaluationMode?: "story" | "coherence" | "divergence" | "smoke-test";
+  evaluationMode?: "story" | "coherence" | "divergence" | "smoke-test" | "critic";
   storyId?: string;
   planPath?: string;
   planJson?: string;
+  planPaths?: string[];
   timeoutMs?: number;
   prdContent?: string;
   masterPlanContent?: string;
@@ -580,6 +597,108 @@ export async function handleSmokeTest(
   };
 }
 
+// ── Critic Mode Handler ───────────────────────────────────
+
+/**
+ * Q0.5/C1 — critic eval mode. Loads N plan files, fans out N critic prompt
+ * calls via `trackedCallClaude`, aggregates findings into a `CriticEvalReport`.
+ *
+ * Per-plan failure tolerance: if a single plan fails to read, parse, or the
+ * LLM call errors, the corresponding result carries an `error` field with
+ * `findings: []`; the overall run continues with the remaining plans. Mirrors
+ * the coherence-eval graceful-degradation pattern.
+ *
+ * No new prompt files: reuses `buildCriticPrompt(1)` + `buildCriticUserMessage`
+ * from `server/lib/prompts/critic.ts` (same prompt that forge_plan uses for
+ * its internal round-1 critique).
+ */
+async function handleCriticEval(input: EvaluateInput): Promise<McpResponse> {
+  const ctx = new RunContext({
+    toolName: "forge_evaluate",
+    projectPath: input.projectPath,
+    stages: ["critic-eval"],
+  });
+  const startTime = Date.now();
+
+  // Resolve plan paths: explicit list, or glob `.ai-workspace/plans/*.json`
+  // under projectPath (BUG-DIV-CWD fix from PR #151: honor projectPath, not cwd).
+  let resolvedPaths: string[];
+  if (input.planPaths && input.planPaths.length > 0) {
+    resolvedPaths = input.planPaths;
+  } else {
+    const root = input.projectPath ?? process.cwd();
+    const plansDir = join(root, ".ai-workspace", "plans");
+    try {
+      resolvedPaths = readdirSync(plansDir)
+        .filter((f) => f.endsWith(".json"))
+        .map((f) => join(plansDir, f))
+        .sort();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `forge_evaluate(critic) error: could not read ${plansDir}: ${message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  const results: CriticEvalReport["results"] = [];
+
+  for (const planPath of resolvedPaths) {
+    try {
+      const planJson = readFileSync(planPath, "utf-8");
+      // Parse-validate: a non-JSON plan file is a per-plan failure, not a crash.
+      JSON.parse(planJson);
+
+      const system = buildCriticPrompt(1);
+      const userMessage = buildCriticUserMessage(planJson);
+      const result = await trackedCallClaude(ctx, "critic-eval", "critic", {
+        system,
+        messages: [{ role: "user", content: userMessage }],
+        jsonMode: true,
+      });
+
+      const parsed = result.parsed as Record<string, unknown>;
+      const findings = Array.isArray(parsed.findings)
+        ? (parsed.findings as unknown[])
+        : [];
+      results.push({ planPath, findings });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(
+        `forge_evaluate(critic): ${planPath} failed (continuing): ${message}`,
+      );
+      results.push({ planPath, findings: [], error: message });
+    }
+  }
+
+  const report: CriticEvalReport = {
+    evaluationMode: "critic",
+    results,
+  };
+
+  if (input.projectPath) {
+    const findingsTotal = results.reduce(
+      (n, r) => n + r.findings.length,
+      0,
+    );
+    const base = buildRunRecord(ctx, startTime, findingsTotal);
+    await writeRunRecord(input.projectPath, {
+      ...base,
+      criticReport: report,
+    });
+  }
+
+  return {
+    content: [{ type: "text", text: JSON.stringify(report, null, 2) }],
+  };
+}
+
 // ── Main Router ───────────────────────────────────────────
 
 export async function handleEvaluate(input: EvaluateInput): Promise<McpResponse> {
@@ -595,6 +714,8 @@ export async function handleEvaluate(input: EvaluateInput): Promise<McpResponse>
         return await handleDivergenceEval(input);
       case "smoke-test":
         return await handleSmokeTest(input);
+      case "critic":
+        return await handleCriticEval(input);
       default:
         return {
           content: [

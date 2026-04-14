@@ -4,6 +4,23 @@ import { randomBytes } from "node:crypto";
 import type { EvalReport, CriterionResult } from "../types/eval-report.js";
 
 /**
+ * Q0.5/C1 critic-eval report — per-plan critic findings aggregated across
+ * one or more plan files. Populated by `forge_evaluate(mode:"critic")`.
+ *
+ * Per-plan failure tolerance: if a single plan fails to parse or the LLM
+ * call errors, the corresponding entry carries an `error` field and
+ * `findings: []`; the overall run continues with the remaining plans.
+ */
+export interface CriticEvalReport {
+  evaluationMode: "critic";
+  results: Array<{
+    planPath: string;
+    findings: unknown[];
+    error?: string;
+  }>;
+}
+
+/**
  * A run record captures metrics from a single forge primitive invocation.
  * Written to `.forge/runs/` for self-improvement analytics across runs.
  *
@@ -21,6 +38,12 @@ export interface RunRecord {
   evalVerdict?: "PASS" | "FAIL" | "INCONCLUSIVE";
   escalationReason?: string;
   evalReport?: EvalReport;
+  /**
+   * Q0.5/C1 critic-eval mode output. Populated only when the run was a
+   * `forge_evaluate(mode:"critic")` invocation. Additive optional field,
+   * mirrors the `evalReport?` pattern above (no schema version bump).
+   */
+  criticReport?: CriticEvalReport;
   metrics: {
     inputTokens: number;
     outputTokens: number;

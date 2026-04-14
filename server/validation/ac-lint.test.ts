@@ -8,6 +8,12 @@ import { AC_LINT_RULES } from "../lib/prompts/shared/ac-subprocess-rules.js";
 // identical shapes; if they drift, this assignment fails to typecheck.
 const _typeMirrorCheck: LintExemptPlanMirror = {} as LintExemptPlan;
 void _typeMirrorCheck;
+// MINOR-5a (round-1 follow-up): reverse direction. The forward check above
+// catches drift if types/execution-plan.ts tightens; this reverse check
+// catches drift if ac-lint.ts tightens. Together they enforce byte-identical
+// shapes in both directions.
+const _typeMirrorCheckReverse: LintExemptPlan = {} as LintExemptPlanMirror;
+void _typeMirrorCheckReverse;
 
 describe("lintAcCommand — WRONG patterns (must flag)", () => {
   it("F55: vitest count-based grep with [5-9]", () => {

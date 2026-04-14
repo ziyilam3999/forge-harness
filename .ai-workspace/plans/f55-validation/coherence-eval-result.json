@@ -1,0 +1,71 @@
+{
+  "evaluationMode": "coherence",
+  "status": "complete",
+  "gaps": [
+    {
+      "id": "GAP-01",
+      "severity": "MAJOR",
+      "sourceDocument": "masterPlan",
+      "targetDocument": "phasePlan",
+      "description": "PH-03 phase plan stories are missing required metadata fields present in PH-01 and PH-02 phase plans. Stories in PH-03 lack 'title', 'description', and 'affectedPaths' fields at the story level (only US-01 and US-03 have affectedPaths inline in the acceptanceCriteria node; US-02 and US-04 have them but US-05 has them). More critically, the PH-03 plan omits 'masterPlanPath' and 'prdPath' top-level fields required by the schema, and story IDs use plain 'US-xx' notation instead of 'PH03-US-xx' breaking the declared PHxx-US-yy convention from the PRD §11.",
+      "missingRequirement": "PH-03 stories should use 'PH03-US-xx' IDs per the PRD §11 convention and the phase plan schema should include masterPlanPath and prdPath fields matching PH-01 and PH-02."
+    },
+    {
+      "id": "GAP-02",
+      "severity": "MAJOR",
+      "sourceDocument": "masterPlan",
+      "targetDocument": "phasePlan",
+      "description": "PH-03 phase plan stories all have 'dependencies': [] or no dependencies declared (US-01, US-03, US-04, US-05 all list empty dependencies), yet the master plan states PH-03 depends on both PH-01 and PH-02. More specifically, reconcileState (US-05) must run as the first step inside assessPhase and must operate on the already-reconciled view — this requires the coordinator.ts functions from PH-02. The master plan output for PH-03 explicitly states 'reconcileState with REQ-13 v1.1 preservation' and dependencies on PH-01/PH-02 outputs, but US-05 in PH-03 declares no intra-phase or cross-phase story dependencies.",
+      "missingRequirement": "PH-03 US-05 (reconcileState) should declare a dependency on the PH-02 outputs (recoverState, assessPhase) since reconcileState runs as the first step inside assessPhase per REQ-13 and the master plan."
+    },
+    {
+      "id": "GAP-03",
+      "severity": "MAJOR",
+      "sourceDocument": "masterPlan",
+      "targetDocument": "phasePlan",
+      "description": "PH-03 phase plan acceptance criteria use compiled dist/ artifact paths (e.g., 'node -e \"const { collectReplanningNotes } = require('./dist/server/lib/coordinator.js')\"') rather than the vitest-based test runner pattern used consistently in PH-01 and PH-02. This deviates from the master plan's stated approach of unit tests in coordinator.test.ts and run-reader.test.ts, and means the ACs depend on a build step that is not declared as a dependency. The master plan output for PH-03 lists coordinator.test.ts additions but the phase plan ACs don't exercise them via vitest.",
+      "missingRequirement": "PH-03 ACs should use 'npx vitest run server/lib/coordinator.test.ts -t ...' pattern consistent with PH-01/PH-02 and the master plan's stated test file outputs."
+    },
+    {
+      "id": "GAP-04",
+      "severity": "MAJOR",
+      "sourceDocument": "masterPlan",
+      "targetDocument": "phasePlan",
+      "description": "PH-04 phase plan stories US-01, US-01b, and US-05 all declare 'dependencies': [] (empty), but US-01b and US-05 depend on artifacts that US-01 produces (the MCP handler and coordinator wiring). More critically, PH-04 US-04 (US-04 in PH-04) uses 'US-03' and 'US-01' as dependency IDs without the PH04- prefix, which would be interpreted as cross-plan references rather than intra-phase references. The master plan requires the dogfood story to depend on integration tests being complete.",
+      "missingRequirement": "PH-04 story dependency IDs should use the full 'PH04-US-xx' format per the PRD §11 convention, and US-01b and US-05 should declare dependencies on US-01 since they require the wired MCP handler to test config override and spec-vocabulary integration."
+    },
+    {
+      "id": "GAP-05",
+      "severity": "MAJOR",
+      "sourceDocument": "masterPlan",
+      "targetDocument": "phasePlan",
+      "description": "The master plan PH-03 outputs include 'server/lib/run-reader.ts (readAuditEntries promoted from placeholder to full implementation)' and 'server/lib/run-reader.test.ts (readAuditEntries graceful-degradation tests)'. However, PH-03 US-03 (aggregateStatus/velocity) tests readAuditEntries via dist/ require() calls that mock behavior, not through the actual readAuditEntries implementation in run-reader.ts. There are no PH-03 ACs that verify the full readAuditEntries implementation with graceful degradation (corrupt JSONL, missing directory, permission-denied) as required by REQ-11 and the master plan.",
+      "missingRequirement": "PH-03 needs ACs that promote readAuditEntries from placeholder to full implementation with graceful degradation tests matching the master plan output 'readAuditEntries graceful-degradation tests' in server/lib/run-reader.test.ts."
+    },
+    {
+      "id": "GAP-06",
+      "severity": "MINOR",
+      "sourceDocument": "masterPlan",
+      "targetDocument": "phasePlan",
+      "description": "PH-01 estimated stories is 8 (matches actual: PH01-US-00a, PH01-US-00b, PH01-US-01 through PH01-US-06 = 8 stories). PH-02 estimated is 4 (matches: 4 stories). PH-03 estimated is 5 (matches: 5 stories). PH-04 estimated is 6 but the phase plan contains only 5 stories (US-01, US-01b, US-02, US-03, US-04, US-05 = 6 if US-01b counts, which it should). This is actually within range. However, PH-04 AC-05 for US-01 uses 'grep -n' against server/index.ts with a specific pattern that may not match the actual registration string format — it requires the description to contain 'fourth.*primitive' or 'coordinate.*dispatch.*brief' which is a testability concern but not a gap per se.",
+      "missingRequirement": "PH-04 story count is 6 (US-01, US-01b, US-02, US-03, US-04, US-05) matching the estimated 6 — no actual deviation. Minor concern: PH-04 US-01 AC-05 grep pattern for tool registration is fragile."
+    },
+    {
+      "id": "GAP-07",
+      "severity": "MINOR",
+      "sourceDocument": "prd",
+      "targetDocument": "phasePlan",
+      "description": "REQ-04 requires the retry counter to optionally clip by 'currentPlanStartTimeMs' for cross-plan contamination prevention. PH-01-US-04 (assessPhase implementation) mentions this in its description but none of its 9 ACs explicitly test the currentPlanStartTimeMs clipping behavior. The clipping AC is present in PH-02-US-03 only indirectly (through the INCONCLUSIVE tests). The PRD's SC-04 lists 'retry counter currentPlanStartTimeMs clipping' as a required test.",
+      "missingRequirement": "A dedicated AC in PH-01-US-04 or PH-02 should verify that when currentPlanStartTimeMs is provided, only primary records with timestamp >= currentPlanStartTimeMs count toward retryCount, per REQ-04 'Retry counter scoping to current plan execution' AC."
+    },
+    {
+      "id": "GAP-08",
+      "severity": "MINOR",
+      "sourceDocument": "prd",
+      "targetDocument": "phasePlan",
+      "description": "REQ-15 requires the halt-hard state machine to be non-latching: 're-evaluated on every call against the current reconciled state'. PH-01-US-05 handles the halt-hard rule in assemblePhaseTransitionBrief, and PH-04 integration tests mention 'halt-hard 3-step clearing state machine' in the description but PH-04-US-03 ACs only include 8 integration test patterns (AC-01 through AC-08), none of which explicitly names the halt-hard non-latching test or the halt-hard clearing-safety test that REQ-15 and SC-04 require.",
+      "missingRequirement": "PH-04 US-03 should include explicit ACs for the halt-hard non-latching scenario (halted phase + injected failure → needs-replan) and halt-hard clearing-safety (cleared + failed story → needs-replan not complete) per REQ-15 and SC-04."
+    }
+  ],
+  "summary": "The three-tier alignment is largely sound for PH-01 and PH-02, which faithfully implement their master plan phase descriptions with proper story IDs, vitest-based ACs, and dependency chains. PH-03 and PH-04 have structural issues: PH-03 uses bare 'US-xx' IDs (violating the PRD §11 PHxx-US-yy convention), relies on compiled dist/ artifacts instead of vitest, and omits graceful-degradation tests for readAuditEntries that the master plan explicitly requires; PH-04 has dependency declaration gaps and missing halt-hard non-latching integration test ACs required by REQ-15 and SC-04."
+}

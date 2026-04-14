@@ -25,5 +25,13 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  }
+  },
+  "files": [
+    "dist/",
+    "server/",
+    "scripts/",
+    "schema/",
+    "README.md",
+    "CHANGELOG.md"
+  ]
 }

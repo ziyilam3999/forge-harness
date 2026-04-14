@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="refresh" content="5">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forge Coordinate — Dashboard</title>
+  <style>
+    /* ── Reset & Design System Tokens ─────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --white: #f7f5f0;
+      --off-white: #efece5;
+      --light-green: #e8f0e8;
+      --border: #ccc8be;
+      --border-light: #ddd9d0;
+      --text: #2c2c28;
+      --text-secondary: #5c5c54;
+      --text-dim: #8c8c82;
+
+      --green: #16a34a;
+      --green-light: #d4edda;
+      --green-bg: #e8f0e8;
+      --amber: #b8860b;
+      --amber-light: #fdf3d0;
+      --amber-bg: #fdf8e8;
+      --red: #c03030;
+      --red-light: #f5dada;
+      --red-bg: #faf0f0;
+      --grey: #8c8c82;
+      --grey-light: #ddd9d0;
+
+      --font-ui: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      --shadow-sm: 0 1px 3px rgba(60,55,45,0.10);
+      --shadow-md: 0 2px 10px rgba(60,55,45,0.12);
+    }
+
+    html { font-size: 15px; }
+    body {
+      font-family: var(--font-ui);
+      line-height: 1.6;
+      background: var(--off-white);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Honeycomb Overlay ─────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100' viewBox='0 0 56 100'%3E%3Cpath d='M28 66L0 50L0 16L28 0L56 16L56 50L28 66Z' fill='none' stroke='%2316a34a' stroke-width='0.6'/%3E%3Cpath d='M28 100L0 84L0 50L28 34L56 50L56 84L28 100Z' fill='none' stroke='%2316a34a' stroke-width='0.6'/%3E%3C/svg%3E");
+      background-size: 56px 100px;
+      opacity: 0.04;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ────────────────────────────────────────────── */
+    .dashboard {
+      position: relative;
+      z-index: 1;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* ── Top Bar ───────────────────────────────────────────── */
+    .top-bar {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: var(--shadow-sm);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .top-bar::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--green-light), var(--green), var(--green-light));
+      opacity: 0.5;
+      border-radius: 10px 10px 0 0;
+    }
+
+    .top-bar-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .logo {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .logo span { color: var(--green); }
+    .logo-divider { color: var(--border); font-weight: 300; font-size: 16px; margin: 0 2px; }
+    .logo-sub { font-size: 13px; font-weight: 500; color: var(--text-secondary); letter-spacing: 0.02em; }
+
+    .phase-tag {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--green);
+      background: var(--green-bg);
+      padding: 3px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--green-light);
+      letter-spacing: 0.03em;
+    }
+
+    .phase-status {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 14px;
+      border-radius: 6px;
+    }
+    .phase-status.in-progress { background: var(--amber-light); color: var(--amber); border: 1px solid var(--amber); }
+    .phase-status.complete { background: var(--green-light); color: var(--green); border: 1px solid var(--green); }
+    .phase-status.needs-replan { background: var(--red-light); color: var(--red); border: 1px solid var(--red); }
+
+    /* ── Stats Row ─────────────────────────────────────────── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .stat-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 10px 10px 0 0;
+      opacity: 0.5;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .stat-main {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1.2;
+      color: var(--text);
+    }
+    .stat-value.green { color: var(--green); }
+    .stat-value.amber { color: var(--amber); }
+    .stat-value.red { color: var(--red); }
+
+    .stat-unit {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+    }
+
+    .stat-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      margin-top: 2px;
+    }
+
+    .stat-bar {
+      margin-top: 8px;
+      height: 6px;
+      background: var(--grey-light);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .stat-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.6s ease;
+    }
+    .stat-bar-fill.green { background: var(--green); }
+    .stat-bar-fill.amber { background: var(--amber); }
+    .stat-bar-fill.red { background: var(--red); }
+
+    /* ── Liveness Banner ───────────────────────────────────── */
+    .liveness {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      padding: 8px 16px;
+      border-radius: 8px;
+      background: var(--white);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+    .liveness.live { border-color: var(--green-light); background: var(--green-bg); color: var(--green); }
+    .liveness.aging { border-color: var(--amber-light); background: var(--amber-bg); color: var(--amber); }
+    .liveness.stale { border-color: var(--red-light); background: var(--red-bg); color: var(--red); }
+
+    .liveness-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .liveness.live .liveness-dot { background: var(--green); animation: pulse 2s ease-in-out infinite; }
+    .liveness.aging .liveness-dot { background: var(--amber); animation: pulse 1.5s ease-in-out infinite; }
+    .liveness.stale .liveness-dot { background: var(--red); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    /* ── Kanban Board ──────────────────────────────────────── */
+    .kanban {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 12px;
+      min-height: 280px;
+    }
+
+    .kanban-col {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .kanban-col::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 10px 10px 0 0;
+      opacity: 0.6;
+    }
+
+    .kanban-col.col-backlog::before { background: var(--grey); }
+    .kanban-col.col-ready::before { background: linear-gradient(90deg, var(--border), var(--text-dim), var(--border)); }
+    .kanban-col.col-in-progress::before { background: linear-gradient(90deg, var(--amber-light), var(--amber), var(--amber-light)); }
+    .kanban-col.col-retry::before { background: linear-gradient(90deg, var(--amber-light), var(--amber), var(--amber-light)); opacity: 0.4; }
+    .kanban-col.col-done::before { background: linear-gradient(90deg, var(--green-light), var(--green), var(--green-light)); }
+    .kanban-col.col-blocked::before { background: linear-gradient(90deg, var(--red-light), var(--red), var(--red-light)); }
+
+    .kanban-header {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .kanban-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+    }
+
+    .kanban-count {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      background: var(--off-white);
+      padding: 1px 7px;
+      border-radius: 4px;
+    }
+
+    .kanban-cards {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .kanban-empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 10px;
+    }
+
+    .kanban-empty-hex {
+      width: 32px;
+      height: 32px;
+      clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+      background: var(--grey-light);
+      opacity: 0.4;
+    }
+
+    /* ── Story Card ────────────────────────────────────────── */
+    .story-card {
+      background: var(--off-white);
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .story-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .story-id {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--green);
+    }
+
+    .story-hex {
+      width: 14px;
+      height: 14px;
+      clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+      flex-shrink: 0;
+    }
+    .story-hex.pending { background: var(--grey-light); }
+    .story-hex.ready { background: var(--text-dim); }
+    .story-hex.done { background: var(--green); }
+    .story-hex.failed { background: var(--red); }
+    .story-hex.retry { background: var(--amber); }
+
+    .story-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      line-height: 1.4;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
+    .story-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .story-tag {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 1px 6px;
+      border-radius: 3px;
+    }
+    .story-tag.pass { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-light); }
+    .story-tag.fail { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-light); }
+    .story-tag.inconclusive { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-light); }
+    .story-tag.dep-failed { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-light); }
+
+    .story-cost {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    .story-evidence {
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.4;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      border-left: 2px solid var(--border-light);
+      padding-left: 8px;
+      margin-top: 2px;
+    }
+
+    .retry-badge {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--amber);
+      background: var(--amber-bg);
+      padding: 1px 6px;
+      border-radius: 3px;
+      border: 1px solid var(--amber-light);
+    }
+
+    /* ── In-Progress Card (distinct) ───────────────────────── */
+    .story-card.active {
+      background: var(--amber-bg);
+      border-color: var(--amber);
+      border-width: 1.5px;
+      position: relative;
+    }
+
+    .active-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .active-hex {
+      width: 14px;
+      height: 14px;
+      clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+      background: var(--amber);
+      animation: hexPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes hexPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    .active-tool {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--amber);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .active-stage {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .active-timer {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--amber);
+      background: var(--white);
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--amber-light);
+    }
+
+    .active-progress {
+      margin-top: 4px;
+    }
+
+    .active-progress-bar {
+      height: 4px;
+      background: var(--amber-light);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .active-progress-fill {
+      height: 100%;
+      background: var(--amber);
+      border-radius: 2px;
+      transition: width 0.6s ease;
+    }
+    .active-progress-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 2px;
+      text-align: right;
+    }
+
+    /* ── Activity Feed ─────────────────────────────────────── */
+    .feed {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .feed::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--border-light), var(--border), var(--border-light));
+      opacity: 0.5;
+      border-radius: 10px 10px 0 0;
+    }
+
+    .feed-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .feed-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+    }
+
+    .feed-entries {
+      max-height: 180px;
+      overflow-y: auto;
+    }
+
+    .feed-entry {
+      display: grid;
+      grid-template-columns: 80px 100px 80px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--border-light);
+      font-size: 12px;
+    }
+    .feed-entry:last-child { border-bottom: none; }
+
+    .feed-time {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-dim);
+    }
+
+    .feed-tool {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .feed-story {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--green);
+    }
+
+    .feed-action {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .feed-dot {
+      width: 8px;
+      height: 8px;
+      clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+      display: inline-block;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .feed-dot.gen { background: var(--amber); }
+    .feed-dot.eval { background: var(--green); }
+    .feed-dot.coord { background: var(--text-dim); }
+
+    /* ── Replanning Notes ──────────────────────────────────── */
+    .replan-bar {
+      background: var(--amber-bg);
+      border: 1px solid var(--amber-light);
+      border-radius: 8px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--amber);
+    }
+
+    .replan-bar.blocking {
+      background: var(--red-bg);
+      border-color: var(--red-light);
+      color: var(--red);
+    }
+
+    .replan-label {
+      font-weight: 600;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 2px 8px;
+      border-radius: 3px;
+      background: var(--white);
+      flex-shrink: 0;
+    }
+    .replan-bar.blocking .replan-label { color: var(--red); }
+
+    .replan-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    /* ── Footer ────────────────────────────────────────────── */
+    .footer {
+      text-align: center;
+      padding: 16px 0 12px;
+      opacity: 0.3;
+    }
+
+    .footer svg { width: 24px; height: 24px; }
+
+    /* ── Animation ─────────────────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .animate-in { animation: fadeUp 0.35s ease both; }
+    .delay-1 { animation-delay: 0.05s; }
+    .delay-2 { animation-delay: 0.10s; }
+    .delay-3 { animation-delay: 0.15s; }
+    .delay-4 { animation-delay: 0.20s; }
+    .delay-5 { animation-delay: 0.25s; }
+  </style>
+</head>
+<body>
+
+<div class="dashboard">
+
+  <!-- ── Top Bar ──────────────────────────────────────────── -->
+  <div class="top-bar animate-in">
+    <div class="top-bar-left">
+      <div class="logo">Hive <span>Mind</span></div>
+      <span class="logo-divider">/</span>
+      <span class="logo-sub">Forge Coordinate</span>
+      <span class="phase-tag">PH-03</span>
+      <span class="phase-status in-progress">IN-PROGRESS</span>
+    </div>
+    <div class="liveness live" id="liveness">
+      <span class="liveness-dot"></span>
+      <span id="liveness-text">Live -- last update 3s ago</span>
+    </div>
+  </div>
+
+  <!-- ── Stats Row ────────────────────────────────────────── -->
+  <div class="stats-row animate-in delay-1">
+    <div class="stat-card">
+      <div class="stat-label">Stories</div>
+      <div class="stat-main">
+        <span class="stat-value green">4</span>
+        <span class="stat-unit">/ 9 done</span>
+      </div>
+      <div class="stat-bar">
+        <div class="stat-bar-fill green" style="width: 44%"></div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Budget</div>
+      <div class="stat-main">
+        <span class="stat-value">$2.15</span>
+        <span class="stat-unit">/ $10.00</span>
+      </div>
+      <div class="stat-bar">
+        <div class="stat-bar-fill green" style="width: 21%"></div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Time Elapsed</div>
+      <div class="stat-main">
+        <span class="stat-value">12m</span>
+        <span class="stat-unit">/ 30m max</span>
+      </div>
+      <div class="stat-bar">
+        <div class="stat-bar-fill amber" style="width: 40%"></div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Recommendation</div>
+      <div class="stat-sub" style="font-size: 12px; font-family: var(--font-ui); color: var(--text-secondary); margin-top: 4px; line-height: 1.4;">
+        Continue execution. Pick next ready story: US-04. Budget and time within limits.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Replanning Note (conditional) ────────────────────── -->
+  <div class="replan-bar animate-in delay-2">
+    <span class="replan-label">SHOULD-ADDRESS</span>
+    <span class="replan-text">AC drift detected in US-02: acceptance criteria modified after initial generation. Affected stories: US-02, US-06.</span>
+  </div>
+
+  <!-- ── Kanban Board ─────────────────────────────────────── -->
+  <div class="kanban animate-in delay-3">
+
+    <!-- Backlog -->
+    <div class="kanban-col col-backlog" id="col-backlog">
+      <div class="kanban-header">
+        <span class="kanban-title">Backlog</span>
+        <span class="kanban-count">2</span>
+      </div>
+      <div class="kanban-cards">
+        <div class="story-card">
+          <div class="story-card-top">
+            <span class="story-id">US-05</span>
+            <span class="story-hex pending"></span>
+          </div>
+          <div class="story-title">Add rate limiting middleware</div>
+          <div class="story-meta">
+            <span class="story-tag" style="background: var(--off-white); color: var(--text-dim); border: 1px solid var(--border-light);">waiting on US-04</span>
+          </div>
+        </div>
+        <div class="story-card">
+          <div class="story-card-top">
+            <span class="story-id">US-06</span>
+            <span class="story-hex pending"></span>
+          </div>
+          <div class="story-title">Integration test suite</div>
+          <div class="story-meta">
+            <span class="story-tag" style="background: var(--off-white); color: var(--text-dim); border: 1px solid var(--border-light);">waiting on US-02, US-04</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ready -->
+    <div class="kanban-col col-ready" id="col-ready">
+      <div class="kanban-header">
+        <span class="kanban-title">Ready</span>
+        <span class="kanban-count">1</span>
+      </div>
+      <div class="kanban-cards">
+        <div class="story-card">
+          <div class="story-card-top">
+            <span class="story-id">US-04</span>
+            <span class="story-hex ready"></span>
+          </div>
+          <div class="story-title">Configure database connection pooling</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- In Progress -->
+    <div class="kanban-col col-in-progress" id="col-in-progress">
+      <div class="kanban-header">
+        <span class="kanban-title">In Progress</span>
+        <span class="kanban-count">1</span>
+      </div>
+      <div class="kanban-cards">
+        <div class="story-card active">
+          <div class="story-card-top">
+            <span class="story-id">US-03</span>
+            <div class="active-indicator">
+              <span class="active-hex"></span>
+              <span class="active-tool">GENERATE</span>
+            </div>
+          </div>
+          <div class="active-stage">Running critic round 2</div>
+          <div class="story-meta">
+            <span class="active-timer" id="active-timer">1m 32s</span>
+          </div>
+          <div class="active-progress">
+            <div class="active-progress-bar">
+              <div class="active-progress-fill" style="width: 60%"></div>
+            </div>
+            <div class="active-progress-label">3 / 5 iterations</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Retry -->
+    <div class="kanban-col col-retry" id="col-retry">
+      <div class="kanban-header">
+        <span class="kanban-title">Retry</span>
+        <span class="kanban-count">1</span>
+      </div>
+      <div class="kanban-cards">
+        <div class="story-card">
+          <div class="story-card-top">
+            <span class="story-id">US-07</span>
+            <span class="story-hex retry"></span>
+          </div>
+          <div class="story-title">OAuth callback handler</div>
+          <div class="story-meta">
+            <span class="retry-badge">1/3 retries</span>
+            <span class="story-tag fail">FAIL</span>
+          </div>
+          <div class="story-evidence">AC-03 failed: redirect URI mismatch on callback validation</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Done -->
+    <div class="kanban-col col-done" id="col-done">
+      <div class="kanban-header">
+        <span class="kanban-title">Done</span>
+        <span class="kanban-count">4</span>
+      </div>
+      <div class="kanban-cards">
+        <div class="story-card">
+          <div class="story-card-top">
+            <span class="story-id">US-01</span>
+            <span class="story-hex done"></span>
+          </div>
+          <div class="story-title">User authentication endpoint</div>
+          <div class="story-meta">
+            <span class="story-tag pass">PASS</span>
+            <span class="story-cost">$0.42</span>
+          </div>
+        </div>
+        <div class="story-card">
+          <div class="story-card-top">
+            <span class="story-id">US-02</span>
+            <span class="story-hex done"></span>
+          </div>
+          <div class="story-title">Session token management</div>
+          <div class="story-meta">
+            <span class="story-tag pass">PASS</span>
+            <span class="story-cost">$0.38</span>
+          </div>
+        </div>
+        <div class="story-card">
+          <div class="story-card-top">
+            <span class="story-id">US-08</span>
+            <span class="story-hex done"></span>
+          </div>
+          <div class="story-title">Health check endpoint</div>
+          <div class="story-meta">
+            <span class="story-tag pass">PASS</span>
+            <span class="story-cost">$0.18</span>
+          </div>
+        </div>
+        <div class="story-card">
+          <div class="story-card-top">
+            <span class="story-id">US-09</span>
+            <span class="story-hex done"></span>
+          </div>
+          <div class="story-title">Logging middleware</div>
+          <div class="story-meta">
+            <span class="story-tag pass">PASS</span>
+            <span class="story-cost">$0.31</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Blocked -->
+    <div class="kanban-col col-blocked" id="col-blocked">
+      <div class="kanban-header">
+        <span class="kanban-title">Blocked</span>
+        <span class="kanban-count">0</span>
+      </div>
+      <div class="kanban-cards">
+        <div class="kanban-empty">
+          <div class="kanban-empty-hex"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Activity Feed ────────────────────────────────────── -->
+  <div class="feed animate-in delay-4">
+    <div class="feed-header">
+      <span class="feed-title">Activity Feed</span>
+      <span class="kanban-count">last 10 events</span>
+    </div>
+    <div class="feed-entries">
+      <div class="feed-entry">
+        <span class="feed-time">10:32:15</span>
+        <span class="feed-tool"><span class="feed-dot gen"></span>generate</span>
+        <span class="feed-story">US-03</span>
+        <span class="feed-action">Critic round 2 started (score: 7/10)</span>
+      </div>
+      <div class="feed-entry">
+        <span class="feed-time">10:31:42</span>
+        <span class="feed-tool"><span class="feed-dot gen"></span>generate</span>
+        <span class="feed-story">US-03</span>
+        <span class="feed-action">Critic round 1 complete (score: 5/10)</span>
+      </div>
+      <div class="feed-entry">
+        <span class="feed-time">10:30:00</span>
+        <span class="feed-tool"><span class="feed-dot gen"></span>generate</span>
+        <span class="feed-story">US-03</span>
+        <span class="feed-action">Generation started (iteration 3)</span>
+      </div>
+      <div class="feed-entry">
+        <span class="feed-time">10:29:55</span>
+        <span class="feed-tool"><span class="feed-dot eval"></span>evaluate</span>
+        <span class="feed-story">US-02</span>
+        <span class="feed-action">Verdict: PASS (all 5 AC criteria met)</span>
+      </div>
+      <div class="feed-entry">
+        <span class="feed-time">10:25:12</span>
+        <span class="feed-tool"><span class="feed-dot gen"></span>generate</span>
+        <span class="feed-story">US-02</span>
+        <span class="feed-action">Generation complete (3 iterations, $0.38)</span>
+      </div>
+      <div class="feed-entry">
+        <span class="feed-time">10:20:05</span>
+        <span class="feed-tool"><span class="feed-dot coord"></span>coordinate</span>
+        <span class="feed-story">--</span>
+        <span class="feed-action">Phase transition brief assembled (4/9 done)</span>
+      </div>
+      <div class="feed-entry">
+        <span class="feed-time">10:19:48</span>
+        <span class="feed-tool"><span class="feed-dot eval"></span>evaluate</span>
+        <span class="feed-story">US-07</span>
+        <span class="feed-action">Verdict: FAIL (AC-03 redirect URI mismatch)</span>
+      </div>
+      <div class="feed-entry">
+        <span class="feed-time">10:15:30</span>
+        <span class="feed-tool"><span class="feed-dot gen"></span>generate</span>
+        <span class="feed-story">US-07</span>
+        <span class="feed-action">Generation complete (5 iterations, $0.52)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Footer ───────────────────────────────────────────── -->
+  <div class="footer animate-in delay-5">
+    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="50,30 63,38 63,54 50,62 37,54 37,38" fill="none" stroke="#1a2e1a" stroke-width="2.5"/>
+      <line x1="50" y1="30" x2="50" y2="62" stroke="#1a2e1a" stroke-width="1.2" opacity="0.4"/>
+      <line x1="37" y1="38" x2="63" y2="54" stroke="#1a2e1a" stroke-width="1.2" opacity="0.4"/>
+      <line x1="63" y1="38" x2="37" y2="54" stroke="#1a2e1a" stroke-width="1.2" opacity="0.4"/>
+      <line x1="50" y1="30" x2="50" y2="12" stroke="#5a6e5a" stroke-width="1.5"/>
+      <line x1="63" y1="38" x2="78" y2="24" stroke="#5a6e5a" stroke-width="1.5"/>
+      <line x1="63" y1="54" x2="78" y2="68" stroke="#5a6e5a" stroke-width="1.5"/>
+      <line x1="50" y1="62" x2="50" y2="80" stroke="#5a6e5a" stroke-width="1.5"/>
+      <line x1="37" y1="54" x2="22" y2="68" stroke="#5a6e5a" stroke-width="1.5"/>
+      <line x1="37" y1="38" x2="22" y2="24" stroke="#5a6e5a" stroke-width="1.5"/>
+      <circle cx="50" cy="12" r="3" fill="#5a6e5a"/>
+      <circle cx="78" cy="24" r="3" fill="#5a6e5a"/>
+      <circle cx="78" cy="68" r="3" fill="#5a6e5a"/>
+      <circle cx="50" cy="80" r="3" fill="#5a6e5a"/>
+      <circle cx="22" cy="68" r="3" fill="#5a6e5a"/>
+      <circle cx="22" cy="24" r="3" fill="#5a6e5a"/>
+    </svg>
+  </div>
+
+</div>
+
+<!-- ── Staleness Detection JS ─────────────────────────────── -->
+<script>
+  (function() {
+    // Baked-in at render time by dashboard-renderer.ts
+    var LAST_UPDATE = "2026-04-11T10:32:15Z";
+    var ACTIVITY_STARTED = "2026-04-11T10:30:43Z";
+
+    var lastUpdateMs = new Date(LAST_UPDATE).getTime();
+    var activityStartMs = new Date(ACTIVITY_STARTED).getTime();
+    var liveness = document.getElementById("liveness");
+    var livenessText = document.getElementById("liveness-text");
+    var timer = document.getElementById("active-timer");
+
+    function update() {
+      var now = Date.now();
+      var elapsed = now - lastUpdateMs;
+      var elapsedSec = Math.round(elapsed / 1000);
+
+      // Liveness banner
+      if (elapsed > 120000) {
+        liveness.className = "liveness stale";
+        livenessText.textContent = "No update for " + Math.round(elapsed / 60000) + "m -- may be hung";
+      } else if (elapsed > 60000) {
+        liveness.className = "liveness aging";
+        livenessText.textContent = "Last update: " + elapsedSec + "s ago";
+      } else {
+        liveness.className = "liveness live";
+        livenessText.textContent = "Live -- last update " + elapsedSec + "s ago";
+      }
+
+      // Active timer (time since activity started)
+      if (timer && activityStartMs) {
+        var activeElapsed = now - activityStartMs;
+        var mins = Math.floor(activeElapsed / 60000);
+        var secs = Math.floor((activeElapsed % 60000) / 1000);
+        timer.textContent = mins + "m " + secs + "s";
+      }
+    }
+
+    update();
+    setInterval(update, 1000);
+  })();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,139 @@
+{
+  "schemaVersion": "3.0.0",
+  "lintExempt": [
+    {
+      "scope": "plan",
+      "rules": [
+        "F36-source-tree-grep",
+        "F56-passed-grep",
+        "F56-multigrep-pipe"
+      ],
+      "batch": "2026-04-13-c1-bootstrap",
+      "rationale": "Bootstrap absorption of pre-C1-bis grep-based verification smells (F36 source-tree grep, F56 passed-grep and multi-grep-pipe variants). New drift must use F-rule-specified patterns. Unwind via grep -l 2026-04-13-c1-bootstrap .ai-workspace/plans/*.json."
+    }
+  ],
+  "stories": [
+    {
+      "id": "US-01",
+      "title": "Eval report types and validation",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "EvalReport and CriterionResult interfaces are exported from server/types/eval-report.ts",
+          "command": "npx tsc --noEmit && grep -q 'export interface EvalReport' server/types/eval-report.ts && grep -q 'export interface CriterionResult' server/types/eval-report.ts && echo PASS"
+        },
+        {
+          "id": "AC-02",
+          "description": "validateEvalReport returns valid:true for a correct report",
+          "command": "node --input-type=module -e \"import('./dist/validation/eval-report.js').then(m=>{const r=m.validateEvalReport({storyId:'US-01',verdict:'PASS',criteria:[{id:'AC-01',status:'PASS',evidence:'ok'}]});process.exit(r.valid?0:1)})\""
+        },
+        {
+          "id": "AC-03",
+          "description": "validateEvalReport returns valid:false for missing storyId",
+          "command": "node --input-type=module -e \"import('./dist/validation/eval-report.js').then(m=>{const r=m.validateEvalReport({verdict:'PASS',criteria:[]});process.exit(r.valid?1:0)})\""
+        }
+      ],
+      "affectedPaths": [
+        "server/types/",
+        "server/validation/"
+      ]
+    },
+    {
+      "id": "US-02",
+      "title": "Shell command executor with timeout and output capture",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "executeCommand runs a passing command and returns status PASS with captured stdout",
+          "command": "node --input-type=module -e \"import('./dist/lib/executor.js').then(m=>m.executeCommand('node -e \\\"console.log(42)\\\"',{}).then(r=>{process.exit(r.status==='PASS'&&r.evidence.includes('42')?0:1)}))\""
+        },
+        {
+          "id": "AC-02",
+          "description": "executeCommand runs a failing command and returns status FAIL",
+          "command": "node --input-type=module -e \"import('./dist/lib/executor.js').then(m=>m.executeCommand('node -e \\\"process.exit(1)\\\"',{}).then(r=>{process.exit(r.status==='FAIL'?0:1)}))\""
+        },
+        {
+          "id": "AC-03",
+          "description": "executeCommand times out and returns status FAIL with timeout evidence",
+          "command": "node --input-type=module -e \"import('./dist/lib/executor.js').then(m=>m.executeCommand('node -e \\\"setTimeout(()=>{},30000)\\\"',{timeoutMs:1000}).then(r=>{process.exit(r.status==='FAIL'&&r.evidence.toLowerCase().includes('timeout')?0:1)}))\""
+        }
+      ],
+      "affectedPaths": [
+        "server/lib/"
+      ]
+    },
+    {
+      "id": "US-03",
+      "title": "Story evaluator pipeline — run all ACs and produce eval report",
+      "dependencies": [
+        "US-01",
+        "US-02"
+      ],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "evaluateStory returns PASS verdict when all ACs pass",
+          "command": "npx vitest run server/lib/evaluator.test.ts -t 'returns PASS when all ACs pass' && echo PASS"
+        },
+        {
+          "id": "AC-02",
+          "description": "evaluateStory returns FAIL verdict when any AC fails",
+          "command": "npx vitest run server/lib/evaluator.test.ts -t 'returns FAIL when any AC fails' && echo PASS"
+        },
+        {
+          "id": "AC-03",
+          "description": "evaluateStory throws when storyId not found in plan",
+          "command": "npx vitest run server/lib/evaluator.test.ts -t 'throws when story not found' && echo PASS"
+        },
+        {
+          "id": "AC-04",
+          "description": "evaluateStory captures stdout and stderr as evidence for each AC",
+          "command": "npx vitest run server/lib/evaluator.test.ts -t 'captures evidence' && echo PASS"
+        },
+        {
+          "id": "AC-05",
+          "description": "evaluateStory returns INCONCLUSIVE when command execution fails (e.g., binary not found)",
+          "command": "npx vitest run server/lib/evaluator.test.ts -t 'returns INCONCLUSIVE' && echo PASS"
+        }
+      ],
+      "affectedPaths": [
+        "server/lib/"
+      ]
+    },
+    {
+      "id": "US-04",
+      "title": "MCP tool integration — replace placeholder with real forge_evaluate",
+      "dependencies": [
+        "US-03"
+      ],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "forge_evaluate input schema accepts storyId (required), planPath (optional), planJson (optional), timeoutMs (optional)",
+          "command": "grep -q 'storyId' server/tools/evaluate.ts && grep -q 'planPath' server/tools/evaluate.ts && grep -q 'planJson' server/tools/evaluate.ts && grep -q 'timeoutMs' server/tools/evaluate.ts && echo PASS"
+        },
+        {
+          "id": "AC-02",
+          "description": "forge_evaluate returns eval report JSON in MCP response format",
+          "command": "npx vitest run server/tools/evaluate.test.ts -t 'returns eval report' && echo PASS"
+        },
+        {
+          "id": "AC-03",
+          "description": "TypeScript compiles with zero errors",
+          "command": "npx tsc --noEmit && echo PASS"
+        },
+        {
+          "id": "AC-04",
+          "description": "All tests pass",
+          "command": "npx vitest run && echo PASS"
+        }
+      ],
+      "affectedPaths": [
+        "server/tools/",
+        "server/index.ts"
+      ]
+    }
+  ]
+}

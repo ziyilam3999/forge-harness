@@ -1,0 +1,234 @@
+{
+  "schemaVersion": "3.0.0",
+  "documentTier": "phase",
+  "phaseId": "PH-04",
+  "stories": [
+    {
+      "id": "US-01",
+      "title": "MCP handler with expanded input schema",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "coordinateInputSchema includes all required and optional fields per REQ-14",
+          "command": "node -e \"const schema = require('./server/tools/coordinate.js').coordinateInputSchema; const keys = Object.keys(schema.shape || schema._def.shape()); const required = ['planPath', 'phaseId']; const optional = ['masterPlanPath', 'coordinateMode', 'budgetUsd', 'maxTimeMs', 'startTimeMs', 'currentPlanStartTimeMs', 'projectPath', 'prdContent', 'replanningNotes', 'haltClearedByHuman']; const hasAll = required.every(k => keys.includes(k)) && optional.every(k => keys.includes(k)); process.exit(hasAll ? 0 : 1)\""
+        },
+        {
+          "id": "AC-02",
+          "description": "Schema rejects malformed inputs with structured MCP error response",
+          "command": "node -e \"const {handleCoordinate} = require('./server/tools/coordinate.js'); handleCoordinate({planPath: 123, phaseId: 'PH-01'}).then(r => process.exit(r.isError ? 0 : 1)).catch(() => process.exit(0))\""
+        },
+        {
+          "id": "AC-03",
+          "description": "Non-existent planPath returns structured error response",
+          "command": "node -e \"const {handleCoordinate} = require('./server/tools/coordinate.js'); handleCoordinate({planPath: '/nonexistent/plan.json', phaseId: 'PH-01'}).then(r => process.exit(r.isError ? 0 : 1)).catch(() => process.exit(0))\""
+        },
+        {
+          "id": "AC-04",
+          "description": "handleCoordinate wires input to assessPhase and returns serialized PhaseTransitionBrief",
+          "command": "npm run build && node -e \"const {handleCoordinate} = require('./dist/server/tools/coordinate.js'); const plan = {schemaVersion: '3.0.0', stories: [{id: 'US-01', title: 'Test', dependencies: [], acceptanceCriteria: [], affectedPaths: []}], phases: [{id: 'PH-01', title: 'Test Phase', stories: ['US-01']}]}; require('fs').writeFileSync('./test-plan.json', JSON.stringify(plan)); handleCoordinate({planPath: './test-plan.json', phaseId: 'PH-01'}).then(r => process.exit(r.content && r.content[0].text.includes('phaseId') ? 0 : 1))\""
+        },
+        {
+          "id": "AC-05",
+          "description": "Tool is registered in server/index.ts with description reflecting 4th forge primitive role",
+          "command": "grep -n 'forge_coordinate.*fourth.*primitive\\|coordinate.*dispatch.*brief' server/index.ts"
+        },
+        {
+          "id": "AC-06",
+          "description": "Schema intentionally omits maxRetries field per REQ-14 v1.1",
+          "command": "node -e \"const schema = require('./server/tools/coordinate.js').coordinateInputSchema; const keys = Object.keys(schema.shape || schema._def.shape()); process.exit(keys.includes('maxRetries') ? 1 : 0)\""
+        }
+      ],
+      "affectedPaths": [
+        "server/tools/",
+        "server/index.ts"
+      ]
+    },
+    {
+      "id": "US-01b",
+      "title": "Output-shaping config file loader",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "loadCoordinateConfig reads .forge/coordinate.config.json with single fs.readFile call",
+          "command": "npm run build && node -e \"const {loadCoordinateConfig} = require('./dist/server/lib/coordinator.js'); require('fs').mkdirSync('.forge', {recursive: true}); require('fs').writeFileSync('.forge/coordinate.config.json', '{}'); const config = loadCoordinateConfig('.'); process.exit(config ? 0 : 1)\""
+        },
+        {
+          "id": "AC-02",
+          "description": "Missing config file returns empty config without error",
+          "command": "npm run build && node -e \"const {loadCoordinateConfig} = require('./dist/server/lib/coordinator.js'); require('fs').rmSync('.forge/coordinate.config.json', {force: true}); const config = loadCoordinateConfig('.'); process.exit(Object.keys(config).length === 0 ? 0 : 1)\""
+        },
+        {
+          "id": "AC-03",
+          "description": "Schema has exactly four optional fields with correct defaults",
+          "command": "npm run build && node -e \"const {loadCoordinateConfig} = require('./dist/server/lib/coordinator.js'); const config = loadCoordinateConfig('.'); const expected = {storyOrdering: 'topological', phaseBoundaryBehavior: 'auto-advance', briefVerbosity: 'concise', observability: {}}; const matches = config.storyOrdering === expected.storyOrdering && config.phaseBoundaryBehavior === expected.phaseBoundaryBehavior && config.briefVerbosity === expected.briefVerbosity; process.exit(matches ? 0 : 1)\""
+        },
+        {
+          "id": "AC-04",
+          "description": "Zod schema uses .strict() and rejects unknown top-level fields with P45 warning",
+          "command": "npm run build && node -e \"require('fs').mkdirSync('.forge', {recursive: true}); require('fs').writeFileSync('.forge/coordinate.config.json', JSON.stringify({budgetUsd: 100, unknownField: true})); const {loadCoordinateConfig} = require('./dist/server/lib/coordinator.js'); loadCoordinateConfig('.'); process.exit(0)\" 2>&1 | grep -q 'budgetUsd'"
+        },
+        {
+          "id": "AC-05",
+          "description": "writeRunRecord:false config emits P45 warning and brief recommendation prefix",
+          "command": "npm run build && node -e \"require('fs').mkdirSync('.forge', {recursive: true}); require('fs').writeFileSync('.forge/coordinate.config.json', JSON.stringify({observability: {writeRunRecord: false}})); const {loadCoordinateConfig} = require('./dist/server/lib/coordinator.js'); loadCoordinateConfig('.'); process.exit(0)\" 2>&1 | grep -q 'WARNING.*crash recovery disabled'"
+        },
+        {
+          "id": "AC-06",
+          "description": "MCP input args override config file fields with configSource provenance",
+          "command": "npm run build && node -e \"require('fs').mkdirSync('.forge', {recursive: true}); require('fs').writeFileSync('.forge/coordinate.config.json', JSON.stringify({briefVerbosity: 'detailed'})); const {handleCoordinate} = require('./dist/server/tools/coordinate.js'); const plan = {schemaVersion: '3.0.0', stories: [], phases: [{id: 'PH-01', title: 'Test', stories: []}]}; require('fs').writeFileSync('./test-plan.json', JSON.stringify(plan)); handleCoordinate({planPath: './test-plan.json', phaseId: 'PH-01', briefVerbosity: 'concise'}).then(r => { const brief = JSON.parse(r.content[0].text); process.exit(brief.configSource.briefVerbosity === 'args' ? 0 : 1); })\""
+        }
+      ],
+      "affectedPaths": [
+        "server/lib/coordinator.ts",
+        ".forge/"
+      ]
+    },
+    {
+      "id": "US-02",
+      "title": "Checkpoint gates as brief-only outputs",
+      "dependencies": [
+        "US-01"
+      ],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "Advisory mode uses brief.status as complete checkpoint signal with no separate checkpointRequired field",
+          "command": "npm run build && node -e \"const {handleCoordinate} = require('./dist/server/tools/coordinate.js'); const plan = {schemaVersion: '3.0.0', stories: [], phases: [{id: 'PH-01', title: 'Test', stories: []}]}; require('fs').writeFileSync('./test-plan.json', JSON.stringify(plan)); handleCoordinate({planPath: './test-plan.json', phaseId: 'PH-01', coordinateMode: 'advisory'}).then(r => { const brief = JSON.parse(r.content[0].text); process.exit(brief.hasOwnProperty('checkpointRequired') ? 1 : 0); })\""
+        },
+        {
+          "id": "AC-02",
+          "description": "Brief status field contains valid values per REQ-05 4-case resolution rule",
+          "command": "npm run build && node -e \"const {handleCoordinate} = require('./dist/server/tools/coordinate.js'); const plan = {schemaVersion: '3.0.0', stories: [], phases: [{id: 'PH-01', title: 'Test', stories: []}]}; require('fs').writeFileSync('./test-plan.json', JSON.stringify(plan)); handleCoordinate({planPath: './test-plan.json', phaseId: 'PH-01'}).then(r => { const brief = JSON.parse(r.content[0].text); const valid = ['in-progress', 'complete', 'needs-replan', 'halted'].includes(brief.status); process.exit(valid ? 0 : 1); })\""
+        },
+        {
+          "id": "AC-03",
+          "description": "Resuming from checkpoint via re-invocation with same inputs produces identical brief",
+          "command": "npm run build && node -e \"const {handleCoordinate} = require('./dist/server/tools/coordinate.js'); const plan = {schemaVersion: '3.0.0', stories: [{id: 'US-01', title: 'Test', dependencies: [], acceptanceCriteria: [], affectedPaths: []}], phases: [{id: 'PH-01', title: 'Test', stories: ['US-01']}]}; require('fs').writeFileSync('./test-plan.json', JSON.stringify(plan)); const input = {planPath: './test-plan.json', phaseId: 'PH-01'}; Promise.all([handleCoordinate(input), handleCoordinate(input)]).then(([r1, r2]) => { const brief1 = JSON.parse(r1.content[0].text); const brief2 = JSON.parse(r2.content[0].text); delete brief1.timestamp; delete brief2.timestamp; process.exit(JSON.stringify(brief1) === JSON.stringify(brief2) ? 0 : 1); })\""
+        }
+      ],
+      "affectedPaths": [
+        "server/tools/coordinate.ts"
+      ]
+    },
+    {
+      "id": "US-03",
+      "title": "Integration test suite covering end-to-end workflows",
+      "dependencies": [
+        "US-01",
+        "US-01b",
+        "US-02"
+      ],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "Multi-story dispatch integration test with dependency ordering",
+          "command": "npm test -- --testNamePattern=\"multi-story dispatch.*dependency.*order\""
+        },
+        {
+          "id": "AC-02",
+          "description": "Budget enforcement integration test with exceeded threshold",
+          "command": "npm test -- --testNamePattern=\"budget.*exceed.*advisory\""
+        },
+        {
+          "id": "AC-03",
+          "description": "Halt-hard 3-step clearing state machine integration test",
+          "command": "npm test -- --testNamePattern=\"halt.hard.*clear.*state.machine\""
+        },
+        {
+          "id": "AC-04",
+          "description": "ConfigSource end-to-end provenance test with file-args-default chain",
+          "command": "npm test -- --testNamePattern=\"configSource.*provenance.*file.*args.*default\""
+        },
+        {
+          "id": "AC-05",
+          "description": "Plan mutation reconciliation integration test with failed-story rename",
+          "command": "npm test -- --testNamePattern=\"plan.mutation.*reconcil.*failed.*rename\""
+        },
+        {
+          "id": "AC-06",
+          "description": "Ready-for-retry integration test with priorEvalReport feed",
+          "command": "npm test -- --testNamePattern=\"ready.for.retry.*priorEvalReport\""
+        },
+        {
+          "id": "AC-07",
+          "description": "Dep-failed transitive propagation integration test with chain classification",
+          "command": "npm test -- --testNamePattern=\"dep.failed.*transitive.*propagation.*chain\""
+        },
+        {
+          "id": "AC-08",
+          "description": "Mixed failed+ready phase escalates to needs-replan integration test",
+          "command": "npm test -- --testNamePattern=\"mixed.*failed.*ready.*needs.replan\""
+        }
+      ],
+      "affectedPaths": [
+        "server/tools/coordinate.test.ts",
+        "server/lib/coordinator.test.ts"
+      ]
+    },
+    {
+      "id": "US-04",
+      "title": "Dogfood run with multi-story execution plan",
+      "dependencies": [
+        "US-03"
+      ],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "Dogfood run executes against valid multi-story execution plan without crashes",
+          "command": "npm run build && node -e \"const {handleCoordinate} = require('./dist/server/tools/coordinate.js'); const plan = {schemaVersion: '3.0.0', stories: [{id: 'US-01', title: 'First', dependencies: [], acceptanceCriteria: [{id: 'AC-01', description: 'Test', command: 'echo test'}], affectedPaths: []}, {id: 'US-02', title: 'Second', dependencies: ['US-01'], acceptanceCriteria: [{id: 'AC-01', description: 'Test', command: 'echo test'}], affectedPaths: []}], phases: [{id: 'PH-01', title: 'Test Phase', stories: ['US-01', 'US-02']}]}; require('fs').writeFileSync('./dogfood-plan.json', JSON.stringify(plan)); handleCoordinate({planPath: './dogfood-plan.json', phaseId: 'PH-01'}).then(r => process.exit(r.isError ? 1 : 0))\""
+        },
+        {
+          "id": "AC-02",
+          "description": "Brief shows correct topological ordering with US-01 before US-02",
+          "command": "npm run build && node -e \"const {handleCoordinate} = require('./dist/server/tools/coordinate.js'); const plan = {schemaVersion: '3.0.0', stories: [{id: 'US-02', title: 'Second', dependencies: ['US-01'], acceptanceCriteria: [], affectedPaths: []}, {id: 'US-01', title: 'First', dependencies: [], acceptanceCriteria: [], affectedPaths: []}], phases: [{id: 'PH-01', title: 'Test Phase', stories: ['US-02', 'US-01']}]}; require('fs').writeFileSync('./dogfood-plan.json', JSON.stringify(plan)); handleCoordinate({planPath: './dogfood-plan.json', phaseId: 'PH-01'}).then(r => { const brief = JSON.parse(r.content[0].text); const us01Index = brief.stories.findIndex(s => s.storyId === 'US-01'); const us02Index = brief.stories.findIndex(s => s.storyId === 'US-02'); process.exit(us01Index < us02Index ? 0 : 1); })\""
+        },
+        {
+          "id": "AC-03",
+          "description": "Dogfood report checked in under .ai-workspace/plans/",
+          "command": "test -f .ai-workspace/plans/forge-coordinate-dogfood-report.md"
+        }
+      ],
+      "affectedPaths": [
+        ".ai-workspace/plans/"
+      ]
+    },
+    {
+      "id": "US-05",
+      "title": "Spec-vs-types vocabulary drift check for forge_evaluate coherence mode",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "verifySpecVocabulary helper parses TypeScript interfaces under server/types/",
+          "command": "npm run build && node -e \"const {verifySpecVocabulary} = require('./dist/server/lib/spec-vocabulary-check.js'); const result = verifySpecVocabulary('server/types/', 'docs/forge-coordinate-prd.md'); process.exit(Array.isArray(result) ? 0 : 1)\""
+        },
+        {
+          "id": "AC-02",
+          "description": "Helper scans PRD for backtick-quoted TypeName.fieldName references",
+          "command": "npm run build && node -e \"const {verifySpecVocabulary} = require('./dist/server/lib/spec-vocabulary-check.js'); const fs = require('fs'); fs.writeFileSync('./test-prd.md', 'Test \\`EvalReport.criteria\\` reference'); const result = verifySpecVocabulary('server/types/', './test-prd.md'); process.exit(result.some(r => r.includes('EvalReport.criteria')) ? 0 : 1)\""
+        },
+        {
+          "id": "AC-03",
+          "description": "Helper emits coherence findings for orphan field references not found in types",
+          "command": "npm run build && node -e \"const {verifySpecVocabulary} = require('./dist/server/lib/spec-vocabulary-check.js'); const fs = require('fs'); fs.writeFileSync('./test-prd.md', 'Test \\`FakeType.orphanField\\` reference'); const result = verifySpecVocabulary('server/types/', './test-prd.md'); process.exit(result.some(r => r.includes('orphan') || r.includes('FakeType.orphanField')) ? 0 : 1)\""
+        },
+        {
+          "id": "AC-04",
+          "description": "Real PRD regression check against current server/types/ finds no orphan references",
+          "command": "npm run build && node -e \"const {verifySpecVocabulary} = require('./dist/server/lib/spec-vocabulary-check.js'); const result = verifySpecVocabulary('server/types/', 'docs/forge-coordinate-prd.md'); const orphans = result.filter(r => r.includes('orphan')); process.exit(orphans.length === 0 ? 0 : 1)\""
+        },
+        {
+          "id": "AC-05",
+          "description": "forge_evaluate coherence mode integrates spec-vocabulary check as new coherence finding",
+          "command": "npm run build && node -e \"const fs = require('fs'); const evaluateJs = fs.readFileSync('dist/server/tools/evaluate.js', 'utf8'); process.exit(evaluateJs.includes('verifySpecVocabulary') || evaluateJs.includes('spec-vocabulary-check') ? 0 : 1)\""
+        }
+      ],
+      "affectedPaths": [
+        "server/lib/spec-vocabulary-check.ts",
+        "server/tools/evaluate.ts"
+      ]
+    }
+  ]
+}

@@ -659,6 +659,98 @@ describe("handleEvaluate — divergence mode", () => {
     expect(report.forward[0].status).toBe("FAIL");
   });
 
+  // Q0.5/A3 — AC-A3-06: mixed-reliability forward split.
+  // Three failing ACs (trusted-FAIL, suspect-SKIPPED, unverified-FAIL) land
+  // in forward[] each carrying the correct reliability tag from the source
+  // criterion.
+  it("AC-A3-06: propagates reliability into ForwardDivergence entries", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(
+      makeEvalReport({
+        storyId: "US-01",
+        verdict: "FAIL",
+        criteria: [
+          {
+            id: "AC-01",
+            status: "FAIL",
+            evidence: "real failure",
+            reliability: "trusted",
+          },
+          {
+            id: "AC-02",
+            status: "SKIPPED",
+            evidence: "ac-lint: suspect",
+            reliability: "suspect",
+          },
+          {
+            id: "AC-03",
+            status: "FAIL",
+            evidence: "override, failed anyway",
+            reliability: "unverified",
+          },
+        ],
+      }),
+    );
+
+    const result = await handleEvaluate({
+      evaluationMode: "divergence",
+      planJson: makeValidPlanJson(),
+    });
+
+    const report = JSON.parse(result.content[0].text);
+    // SKIPPED doesn't land in forward[] (handler filters on FAIL/INCONCLUSIVE).
+    expect(report.forward).toHaveLength(2);
+    const byAcId = Object.fromEntries(
+      report.forward.map((fd: { acId: string; reliability?: string }) => [
+        fd.acId,
+        fd.reliability,
+      ]),
+    );
+    expect(byAcId["AC-01"]).toBe("trusted");
+    expect(byAcId["AC-03"]).toBe("unverified");
+  });
+
+  // Q0.5/A3 — AC-A3-07: summary string carries split counts.
+  it("AC-A3-07: DivergenceReport.summary reports trusted/suspect/unverified counts", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(
+      makeEvalReport({
+        storyId: "US-01",
+        verdict: "FAIL",
+        criteria: [
+          {
+            id: "AC-01",
+            status: "FAIL",
+            evidence: "real failure",
+            reliability: "trusted",
+          },
+          {
+            id: "AC-02",
+            status: "FAIL",
+            evidence: "override failed",
+            reliability: "unverified",
+          },
+          {
+            id: "AC-03",
+            status: "INCONCLUSIVE",
+            evidence: "infra broke",
+            // undefined reliability → counted as trusted per backward compat.
+          },
+        ],
+      }),
+    );
+
+    const result = await handleEvaluate({
+      evaluationMode: "divergence",
+      planJson: makeValidPlanJson(),
+    });
+
+    const report = JSON.parse(result.content[0].text);
+    expect(report.forward).toHaveLength(3);
+    // Summary string should be greppable for each reliability count.
+    expect(report.summary).toContain("2 trusted");
+    expect(report.summary).toContain("0 suspect");
+    expect(report.summary).toContain("1 unverified");
+  });
+
   it("detects reverse divergence (unplanned capabilities) via LLM", async () => {
     mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport());
 

@@ -103,16 +103,40 @@ Guidance only — executor chooses the exact edits.
 
 - [x] Plan drafted (planner)
 - [x] Baseline captured: 40 errors on v0.30.3 (done, see Context)
-- [x] Plan amendment applied: file list corrected from 9 to 10 (added `server/lib/audit.ts`); root cause was planner tail-reading lint output on the first pass, caught by executor's first-pass re-enumeration (commit 2 on this branch, 2026-04-15)
-- [ ] Brief delivered to lucky-iris on thread `q05-task34-lint-debt`
-- [ ] Executor acks with dirty-worktree pre-flight + HEAD SHA + tool check
-- [ ] AC-1..AC-8 pass locally on executor's branch
-- [ ] AC-10 (belt-and-braces zero-count check) passes
-- [ ] PR opened with `plan-refresh: no-op`
-- [ ] AC-9 (CI green, including new lint step) passes
-- [ ] Stateless review PASS
-- [ ] Merged + released
-- [ ] Plan updated to reflect shipped reality (planner, post-merge)
+- [x] Plan amendment applied: file list corrected from 9 to 10 (added `server/lib/audit.ts`); root cause was planner tail-reading lint output on the first pass, caught by executor's first-pass re-enumeration
+- [x] Brief delivered to lucky-iris on thread `q05-task34-lint-debt`
+- [x] Executor acked with dirty-worktree pre-flight + HEAD SHA d9a3bf7 + tool check
+- [x] AC-1..AC-8 pass locally on executor's branch
+- [x] AC-10 (belt-and-braces zero-count check) passes
+- [x] PR #208 opened with `plan-refresh: no-op`
+- [x] AC-9 (CI green, including new lint step) passes — ubuntu + windows + smoke-gate
+- [x] Stateless review PASS (10/10 ACs green, HEAD 5d5bb87)
+- [x] Merged + released — squash `faea9b1`, tag `v0.30.4`
+- [x] Plan updated to reflect shipped reality (this commit)
 - [ ] q05/Q1 plan retroactively note: "AC-11 contract now promotable to `exits 0` on future PRs"
 
-Last updated: 2026-04-15T00:30:00+08:00 — amended file list from 9 to 10 (added `server/lib/audit.ts`) per blocker thread q05-task34-lint-debt. Amendment rides executor's branch.
+## Shipped reality
+
+- **PR:** https://github.com/ziyilam3999/forge-harness/pull/208
+- **Merge commit:** `faea9b1` (squash)
+- **Release:** v0.30.4 — https://github.com/ziyilam3999/forge-harness/releases/tag/v0.30.4
+- **Commits on the PR (2):** `6c95455` (plan promotion + amendment patches 1–5) → `5d5bb87` (fix: 40 lint errors + CI wiring). Two-commit shape chosen by executor, plan file promoted to master in commit 1.
+- **Final diff:** 12 files, 237 insertions / 123 deletions. 10 baseline files + `.github/workflows/ci.yml` + the plan file.
+- **Fix shapes chosen by executor:**
+  - `no-explicit-any` (32): real imported types from `./ac-lint.js` (`LintablePlan`, `LintExempt`, `LintExemptPlan`); generic `findCallByContent<T>` in `test-utils.ts`; `(result as { isError?: boolean })` casts; structural types for mock `ctx`.
+  - `no-this-alias` (5): deleted the `const self = this` alias entirely in `MockRunContext` constructors — arrow functions already preserved `this`, the alias was dead code.
+  - `no-unused-vars` (2): `audit.ts:74` loop rewritten from `for await (const _entry of dir)` to `while ((await dir.read()) !== null)` — the `_` rename approach didn't work because ESLint config only has `argsIgnorePattern`, not `varsIgnorePattern`, and AC-3 blocked rule-config changes. `coordinate.test.ts:294` `const { configSource: _cs, ...rest } = b` replaced with `const rest = { ...b }; delete rest.configSource`.
+  - `no-unsafe-function-type` (1): `executor.test.ts:36` `(callback as Function)` narrowed to `(callback as (err: Error | null, stdout: string, stderr: string) => void)`.
+- **CI wiring:** `Lint` step added to `.github/workflows/ci.yml` after build, no `continue-on-error`. Now a required check.
+- **Planner-side regression caught mid-flight:** file undercount (9→10, missed `audit.ts`). Root cause: tail-reading lint output on the first pass. Caught by lucky-iris's first-pass re-enumeration within minutes of branch cut. Resolved in ~5 min via 5-patch OLD→NEW amendment on the thread, applied as commit `6c95455` on the executor's branch per hard rule 9. Zero retries burned, same blocker-timing profile as the q05/Q1 unblock.
+- **AC-11 promotion unlocked:** future PRs on forge-harness can hold `npm run lint exits 0` as an absolute AC. CI now enforces it.
+
+## Learnings folded back
+
+Two planner-side regressions across two runs, both caught by executors on first-pass verification (not by reviewers):
+1. **Cairn Gap 4 run:** `cp CLAUDE.md parent-claude.md` wholesale copy clobbered project-specific content.
+2. **This run:** tail-reading `npm run lint` output missed `server/lib/audit.ts` (sorts to the top alphabetically).
+
+Both confirm the CLAUDE.md rule "planners who trust their own measurement are the dangerous ones" — every absolute AC must be re-measured by the executor before implementation starts. The dirty-worktree pre-flight + first-pass baseline re-enumeration in the ack is the mechanism that catches these. The `/delegate` skill's AC-5 (active baseline check) is the correct long-term fix.
+
+Last updated: 2026-04-15T01:00:00+08:00 — shipped v0.30.4, all AC ✓, plan synced to reality by planner post-merge on branch `docs/q05-task34-plan-sync`.

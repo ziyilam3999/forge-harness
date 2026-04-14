@@ -58,10 +58,9 @@ vi.mock("../lib/run-context.js", async () => {
     toolName = "forge_plan";
 
     constructor() {
-      const self = this;
       this.cost.summarize = () => ({
-        inputTokens: self._inputTokens,
-        outputTokens: self._outputTokens,
+        inputTokens: this._inputTokens,
+        outputTokens: this._outputTokens,
         estimatedCostUsd: 0.001,
         breakdown: [],
         isOAuthAuth: false,
@@ -72,8 +71,15 @@ vi.mock("../lib/run-context.js", async () => {
   return {
     RunContext: MockRunContext,
     trackedCallClaude: vi.fn(
-      async (ctx: any, _stage: string, _role: string, options: any) => {
-        const result = await mockedClaude(options);
+      async (
+        ctx: { _inputTokens?: number; _outputTokens?: number } | null,
+        _stage: string,
+        _role: string,
+        options: unknown,
+      ) => {
+        const result = await mockedClaude(
+          options as Parameters<typeof mockedClaude>[0],
+        );
         if (ctx && result.usage) {
           ctx._inputTokens =
             (ctx._inputTokens ?? 0) + result.usage.inputTokens;
@@ -246,7 +252,7 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     });
 
     // Verify master plan was produced
-    expect((masterResult as any).isError).toBeUndefined();
+    expect((masterResult as { isError?: boolean }).isError).toBeUndefined();
     expect(masterResult.content[0].text).toContain("MASTER PLAN");
     expect(masterResult.content[0].text).toContain('"schemaVersion": "1.0.0"');
 
@@ -269,7 +275,7 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     });
 
     // Verify phase plan was produced
-    expect((phaseResult as any).isError).toBeUndefined();
+    expect((phaseResult as { isError?: boolean }).isError).toBeUndefined();
     expect(phaseResult.content[0].text).toContain("PHASE PLAN (PH-01)");
     expect(phaseResult.content[0].text).toContain('"schemaVersion": "3.0.0"');
 
@@ -293,7 +299,7 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     });
 
     // Verify coherence eval succeeded with no gaps
-    expect((evalResult as any).isError).toBeUndefined();
+    expect((evalResult as { isError?: boolean }).isError).toBeUndefined();
     const evalReport = JSON.parse(evalResult.content[0].text);
     expect(evalReport.evaluationMode).toBe("coherence");
     expect(evalReport.status).toBe("complete");
@@ -425,7 +431,7 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     });
 
     // Should degrade gracefully, not crash
-    expect((evalResult as any).isError).toBeUndefined();
+    expect((evalResult as { isError?: boolean }).isError).toBeUndefined();
     const evalReport = JSON.parse(evalResult.content[0].text);
     expect(evalReport.evaluationMode).toBe("coherence");
     expect(evalReport.status).toBe("eval-failed");
@@ -553,7 +559,7 @@ describe("three-tier integration: PRD → master → phase → coherence", () =>
     }
 
     // Verify dependency references are valid
-    const phaseIds = new Set(parsed.phases.map((p: any) => p.id));
+    const phaseIds = new Set(parsed.phases.map((p: { id: string }) => p.id));
     for (const phase of parsed.phases) {
       for (const dep of phase.dependencies) {
         expect(phaseIds.has(dep)).toBe(true);

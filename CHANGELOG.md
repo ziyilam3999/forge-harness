@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.28.0](https://github.com/ziyilam3999/forge-harness/compare/v0.27.0...v0.28.0) (2026-04-14)
+
+### Features
+
+- **q05-c1:** critic eval mode + ac-lint polish + retroactive-critique hook (#183)
+  - `forge_evaluate(evaluationMode: "critic")` — new handler globs `.ai-workspace/plans/*.json` (or explicit `planPaths`), per-plan failure tolerance, aggregates into `CriticEvalReport.results[]`, writes `RunRecord.criticReport?` additive optional field.
+  - `scripts/ac-lint-hook.sh` polish (8/9 items): E1+E5 anchored glob, E2 whitespace strip, E4 script-location root with `CLAUDE_PROJECT_DIR` override, M1 explicit stdin-parse diagnostic, M2 linter-crashed `additionalContext`, M3 deterministic sentinel test, M4 here-string empty-stdin test. E3 (single-file lint passthrough) deferred to a follow-up micro-PR per forge-plan T1135.
+  - Retroactive-critique hook unparked from `.deferred-c1-retroactive/`: `scripts/retroactive-critique-hook.sh` + test + 4 rule fixtures, wired via `.claude/settings.json` PostToolUse chain (now 2 commands), `.github/workflows/retroactive-critique.yml` CI stub deleted.
+  - Closes BUG-C1-CRITIC-MODE, AC-09 Part B (retroactive-critique same-turn timing validated live on `server/lib/prompts/critic.ts`).
+
 ## [0.27.0](https://github.com/ziyilam3999/forge-harness/compare/v0.26.0...v0.27.0) (2026-04-14)
 
 ### Features

@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { CallClaudeResult } from "../lib/anthropic.js";
 
 // Mock the anthropic module
@@ -1100,10 +1103,6 @@ describe("documentTier: update", () => {
 
   // Q0.5/A3-bis — lintRefresh hook on the update branch.
   describe("lintRefresh hook (Q0.5/A3-bis)", () => {
-    const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = require("node:fs");
-    const { join } = require("node:path");
-    const { tmpdir } = require("node:os");
-
     let tempDir: string;
     let planPath: string;
 

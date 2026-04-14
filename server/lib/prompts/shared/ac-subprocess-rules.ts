@@ -155,3 +155,9 @@ export function getAcLintRulesHash(): string {
     .digest("hex");
   return cachedHash;
 }
+
+/** Test-only: reset the module-local hash cache. Prefixed with `__` so it is
+ *  clearly not part of the production API. */
+export function __resetAcLintRulesHashCache(): void {
+  cachedHash = null;
+}

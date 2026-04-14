@@ -26,6 +26,7 @@ export interface LintAuditEntry {
 export type LintRefreshTriggerReason =
   | "rule-change"
   | "14d-elapsed"
+  | "forced"
   | "none";
 
 export interface LintRefreshStaleEntry {
@@ -37,6 +38,8 @@ export interface LintRefreshStaleEntry {
   rationale: string;
   /** Lint findings produced by re-running the rule WITHOUT the exemption. */
   currentFindings: string[];
+  /** True when re-lint produced zero findings — the exemption is now safe to drop. */
+  isObsolete?: boolean;
 }
 
 export interface LintRefreshReport {

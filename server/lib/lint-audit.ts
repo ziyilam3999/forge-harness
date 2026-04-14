@@ -7,12 +7,9 @@
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { dirname, join, parse } from "node:path";
 
-import type {
-  LintAuditEntry,
-  LintRefreshTriggerReason,
-} from "../types/lint-audit.js";
+import type { LintAuditEntry } from "../types/lint-audit.js";
 
 const FOURTEEN_DAYS_MS = 14 * 86_400 * 1_000;
 
@@ -22,9 +19,9 @@ const FOURTEEN_DAYS_MS = 14 * 86_400 * 1_000;
  * `archive/phase-01.md`).
  */
 export function computePlanSlug(planPath: string): string {
-  const parent = basename(dirname(planPath));
-  const base = basename(planPath).replace(/\.(md|json)$/i, "");
-  return `${parent}__${base}`;
+  const parsed = parse(planPath);
+  const parent = parse(parsed.dir).base;
+  return `${parent}__${parsed.name}`;
 }
 
 function auditFilePath(projectPath: string, planPath: string): string {
@@ -80,7 +77,7 @@ export function isStale(
   entry: LintAuditEntry,
   currentHash: string,
   now: Date,
-): Exclude<LintRefreshTriggerReason, "none"> | null {
+): "rule-change" | "14d-elapsed" | null {
   if (entry.ruleHash !== currentHash) return "rule-change";
   const ageMs = now.getTime() - new Date(entry.lastAuditedAt).getTime();
   if (ageMs > FOURTEEN_DAYS_MS) return "14d-elapsed";

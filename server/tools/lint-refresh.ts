@@ -107,20 +107,30 @@ function countExemptions(plan: ExecutionPlan): {
 
 function collectStaleEntries(plan: ExecutionPlan): LintRefreshStaleEntry[] {
   const out: LintRefreshStaleEntry[] = [];
+  const lintCache = new Map<string, ReturnType<typeof lintAcCommand>>();
+  const getLintResult = (ac: { id: string; command: string }) => {
+    const cached = lintCache.get(ac.id);
+    if (cached) return cached;
+    const fresh = lintAcCommand(ac.command);
+    lintCache.set(ac.id, fresh);
+    return fresh;
+  };
 
   // Per-AC exemptions: re-lint without the exemption and capture raw findings.
   for (const { ac } of allAcs(plan)) {
     if (!ac.lintExempt) continue;
-    const result = lintAcCommand(ac.command);
+    const result = getLintResult(ac);
     const exemptArr = Array.isArray(ac.lintExempt) ? ac.lintExempt : [ac.lintExempt];
     for (const exempt of exemptArr) {
+      const currentFindings = result.findings
+        .filter((f) => f.ruleId === exempt.ruleId)
+        .map((f) => `${f.ruleId}: ${f.snippet}`);
       out.push({
         exemptionId: `${ac.id}:${exempt.ruleId}`,
         scope: "per-ac",
         rationale: exempt.rationale ?? "",
-        currentFindings: result.findings
-          .filter((f) => f.ruleId === exempt.ruleId)
-          .map((f) => `${f.ruleId}: ${f.snippet}`),
+        currentFindings,
+        isObsolete: currentFindings.length === 0,
       });
     }
   }
@@ -133,7 +143,7 @@ function collectStaleEntries(plan: ExecutionPlan): LintRefreshStaleEntry[] {
     const findings: string[] = [];
     for (const { ac } of allAcs(plan)) {
       if (!batchSet.has(ac.id)) continue;
-      const result = lintAcCommand(ac.command);
+      const result = getLintResult(ac);
       for (const f of result.findings) {
         if (rulesSet.has(f.ruleId)) {
           findings.push(`${ac.id} · ${f.ruleId}: ${f.snippet}`);
@@ -145,6 +155,7 @@ function collectStaleEntries(plan: ExecutionPlan): LintRefreshStaleEntry[] {
       scope: "plan-level",
       rationale: planExempt.rationale,
       currentFindings: findings,
+      isObsolete: findings.length === 0,
     });
   }
 
@@ -204,7 +215,9 @@ export async function runLintRefresh(
   let reason: LintRefreshTriggerReason;
 
   if (opts.force) {
-    reason = existing ? (isStale(existing, currentHash, now) ?? "rule-change") : "rule-change";
+    // Honest labelling: only tag drift reasons when drift actually exists.
+    // A forced refresh on a fresh audit is labelled "forced", not a fake "rule-change".
+    reason = existing ? (isStale(existing, currentHash, now) ?? "forced") : "rule-change";
   } else if (!existing) {
     // Absent baseline = treat as rule-change drift (AC-bis-06).
     reason = "rule-change";

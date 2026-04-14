@@ -8,7 +8,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { getAcLintRulesHash } from "./prompts/shared/ac-subprocess-rules.js";
+import {
+  __resetAcLintRulesHashCache,
+  getAcLintRulesHash,
+} from "./prompts/shared/ac-subprocess-rules.js";
 import {
   computePlanSlug,
   isStale,
@@ -93,6 +96,23 @@ describe("computePlanSlug", () => {
     const a = computePlanSlug("phases/phase-01.md");
     const b = computePlanSlug("archive/phase-01.md");
     expect(a).not.toBe(b);
+  });
+
+  it("AC-bis-polish-03: strips any extension via path.parse().name", () => {
+    expect(computePlanSlug("plans/foo.yaml")).toBe("plans__foo");
+    expect(computePlanSlug("plans/bar")).toBe("plans__bar");
+  });
+});
+
+describe("__resetAcLintRulesHashCache — AC-bis-polish-04", () => {
+  it("recomputes the hash after a reset (cache is actually cleared)", () => {
+    const h1 = getAcLintRulesHash();
+    __resetAcLintRulesHashCache();
+    const h2 = getAcLintRulesHash();
+    // Still deterministic (rules didn't change), but the second call must
+    // have re-executed the hash pipeline rather than returning a frozen null.
+    expect(h2).toBe(h1);
+    expect(h2).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 

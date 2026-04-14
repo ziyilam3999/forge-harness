@@ -157,10 +157,62 @@ describe("runLintRefresh — AC-bis-05..09", () => {
     expect(perAcEntry).toBeDefined();
     expect(perAcEntry!.currentFindings.length).toBeGreaterThan(0);
     expect(perAcEntry!.currentFindings[0]).toContain("F36-source-tree-grep");
+    // #199: exemption that still matches a rule is NOT obsolete.
+    expect(perAcEntry!.isObsolete).toBe(false);
 
     // Plan-level exemption entry must surface the AC02 finding.
     const planEntry = report.staleEntries.find((e) => e.scope === "plan-level");
     expect(planEntry).toBeDefined();
     expect(planEntry!.currentFindings.some((f) => f.startsWith("AC02"))).toBe(true);
+  });
+
+  it("AC-bis-polish-01 (#198): force:true on a fresh audit labels reason 'forced', not 'rule-change'", async () => {
+    const planPath = await writePlanFile("exempt.json", exemptPlan());
+    // Establish a fresh baseline audit first.
+    await runLintRefresh(planPath, { projectPath: tempDir });
+
+    // Force-refresh immediately — audit is fresh, so isStale returns null,
+    // and the force branch must label the refresh "forced" instead of
+    // reporting a bogus "rule-change".
+    const forced = await runLintRefresh(planPath, {
+      projectPath: tempDir,
+      force: true,
+    });
+    expect(forced.triggered).toBe(true);
+    expect(forced.triggerReason).toBe("forced");
+  });
+
+  it("AC-bis-polish-02 (#199): exemption with zero current findings is flagged isObsolete:true", async () => {
+    // Per-AC exemption that does NOT trip any current rule — safe to drop.
+    const plan = {
+      schemaVersion: "3.0.0",
+      stories: [
+        {
+          id: "US-01",
+          title: "Obsolete exemption",
+          acceptanceCriteria: [
+            {
+              id: "AC01",
+              description: "Harmless command still exempted",
+              command: "echo ok",
+              lintExempt: {
+                ruleId: "F36-source-tree-grep",
+                rationale: "once upon a time this used grep",
+              },
+            },
+          ],
+        },
+      ],
+    } as unknown as ExecutionPlan;
+
+    const planPath = await writePlanFile("obsolete.json", plan);
+    const report = await runLintRefresh(planPath, { projectPath: tempDir });
+
+    const entry = report.staleEntries.find(
+      (e) => e.exemptionId === "AC01:F36-source-tree-grep",
+    );
+    expect(entry).toBeDefined();
+    expect(entry!.currentFindings).toEqual([]);
+    expect(entry!.isObsolete).toBe(true);
   });
 });

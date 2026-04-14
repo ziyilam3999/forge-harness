@@ -18,6 +18,8 @@ import { validateExecutionPlan } from "../validation/execution-plan.js";
 import { lintPlan, type LintPlanReport } from "../validation/ac-lint.js";
 import { validateMasterPlan } from "../validation/master-plan.js";
 import { writeRunRecord, type RunRecord } from "../lib/run-record.js";
+import { runLintRefresh } from "./lint-refresh.js";
+import type { LintRefreshReport } from "../types/lint-audit.js";
 import { RunContext, trackedCallClaude } from "../lib/run-context.js";
 import type { ExecutionPlan } from "../types/execution-plan.js";
 import type { MasterPlan } from "../types/master-plan.js";
@@ -119,6 +121,15 @@ export const planInputSchema = {
     .string()
     .optional()
     .describe("Existing plan JSON string to update. Required for update tier."),
+  planPath: z
+    .string()
+    .optional()
+    .describe(
+      "Absolute path to the execution plan on disk. Optional for update tier — " +
+      "when provided, the A3-bis lintRefresh hook fires at the end of the update " +
+      "and persists audit state under .ai-workspace/lint-audit/. No effect on " +
+      "master/phase/default tiers.",
+    ),
   context: z
     .array(
       z.object({
@@ -900,7 +911,7 @@ async function handlePhasePlan(options: HandlePlanOptions) {
  * Handle update mode: revise an existing plan based on implementation notes.
  */
 async function handleUpdatePlan(options: HandlePlanOptions) {
-  const { currentPlan, implementationNotes, projectPath, tier, context, maxContextChars, strictLint } = options;
+  const { currentPlan, implementationNotes, projectPath, tier, context, maxContextChars, strictLint, planPath } = options;
   if (!currentPlan || !implementationNotes) {
     return {
       content: [{ type: "text" as const, text: "Error: currentPlan and implementationNotes are required for documentTier 'update'." }],
@@ -999,11 +1010,26 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
   // existing external consumers (none known in this repo — grep confirms
   // only server/tools/reconcile.ts depends on the envelope shape) continue
   // to work without modification.
+  // Q0.5/A3-bis — lintRefresh hook. Non-fatal: any error is caught and
+  // surfaced as `lintRefresh: { error }` so the update path is never blocked.
+  // Requires planPath so the audit can persist under .ai-workspace/lint-audit/.
+  let lintRefresh: LintRefreshReport | { error: string } | null = null;
+  if (planPath) {
+    try {
+      lintRefresh = await runLintRefresh(planPath, { plan, projectPath });
+    } catch (err) {
+      lintRefresh = {
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   return {
     content: [{ type: "text" as const, text: sections.join("\n\n") }],
     updatedPlan: plan,
     critiqueRounds: critiqueRounds.length > 0 ? critiqueRounds : null,
     lintReport,
+    lintRefresh,
   };
 }
 
@@ -1122,6 +1148,7 @@ interface HandlePlanOptions {
   phaseId?: string;
   implementationNotes?: string;
   currentPlan?: string;
+  planPath?: string;
   context?: Array<{ label: string; content: string }>;
   maxContextChars?: number;
   strictLint?: boolean;

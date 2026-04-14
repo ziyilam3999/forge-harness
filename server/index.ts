@@ -5,6 +5,7 @@ import { evaluateInputSchema, handleEvaluate } from "./tools/evaluate.js";
 import { generateInputSchema, handleGenerate } from "./tools/generate.js";
 import { coordinateInputSchema, handleCoordinate } from "./tools/coordinate.js";
 import { reconcileInputSchema, handleReconcile } from "./tools/reconcile.js";
+import { lintRefreshInputSchema, handleLintRefresh } from "./tools/lint-refresh.js";
 
 const server = new McpServer({
   name: "forge",
@@ -83,6 +84,21 @@ server.registerTool(
     annotations: { readOnlyHint: false },
   },
   handleReconcile
+);
+
+server.registerTool(
+  "forge_lint_refresh",
+  {
+    title: "Forge Lint Refresh",
+    description:
+      "Q0.5/A3-bis — re-validate every `lintExempt` entry in an execution plan against the current ac-lint rule surface. " +
+      "Two staleness triggers: rule-set hash drift (rules/prompt changed) and 14-day calendar. " +
+      "Returns a LintRefreshReport listing stale exemptions with their original rationale and current findings. " +
+      "Does NOT mutate the plan — reports only. Also auto-fires as a side effect of forge_plan(documentTier:'update').",
+    inputSchema: lintRefreshInputSchema,
+    annotations: { readOnlyHint: false },
+  },
+  handleLintRefresh,
 );
 
 async function main() {

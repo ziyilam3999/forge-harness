@@ -1097,6 +1097,113 @@ describe("documentTier: update", () => {
     expect(Array.isArray(resp.critiqueRounds)).toBe(true);
     expect((resp.critiqueRounds as unknown[]).length).toBeGreaterThan(0);
   });
+
+  // Q0.5/A3-bis — lintRefresh hook on the update branch.
+  describe("lintRefresh hook (Q0.5/A3-bis)", () => {
+    const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = require("node:fs");
+    const { join } = require("node:path");
+    const { tmpdir } = require("node:os");
+
+    let tempDir: string;
+    let planPath: string;
+
+    const exemptPlan = () => ({
+      schemaVersion: "3.0.0",
+      stories: [
+        {
+          id: "US-01",
+          title: "Exempt plan",
+          dependencies: [],
+          acceptanceCriteria: [
+            {
+              id: "AC-01",
+              description: "per-ac exempt",
+              command: "grep -rn 'Redis' src/",
+              lintExempt: {
+                ruleId: "F36-source-tree-grep",
+                rationale: "legacy cache probe",
+              },
+            },
+          ],
+          affectedPaths: ["src/"],
+        },
+      ],
+    });
+
+    beforeEach(() => {
+      tempDir = mkdtempSync(join(tmpdir(), "forge-plan-lintrefresh-"));
+      const plansDir = join(tempDir, ".ai-workspace", "plans");
+      mkdirSync(plansDir, { recursive: true });
+      planPath = join(plansDir, "exempt.json");
+      writeFileSync(planPath, JSON.stringify(exemptPlan()), "utf-8");
+    });
+
+    afterEach(() => {
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("AC-bis-12: fires runLintRefresh once and populates lintRefresh field", async () => {
+      mockedCallClaude.mockResolvedValueOnce(makeCallResult(exemptPlan()));
+
+      const result = await handlePlan({
+        intent: "update plan",
+        documentTier: "update",
+        currentPlan: JSON.stringify(exemptPlan()),
+        implementationNotes: "A3-bis hook wiring test",
+        tier: "quick",
+        planPath,
+        projectPath: tempDir,
+      });
+
+      const resp = result as typeof result & { lintRefresh?: unknown };
+      expect(resp.lintRefresh).toBeDefined();
+      expect(resp.lintRefresh).not.toBeNull();
+      const report = resp.lintRefresh as {
+        triggered: boolean;
+        triggerReason: string;
+        staleEntries: unknown[];
+      };
+      expect(report.triggered).toBe(true);
+      expect(report.triggerReason).toBe("rule-change");
+      expect(Array.isArray(report.staleEntries)).toBe(true);
+      expect(report.staleEntries.length).toBeGreaterThan(0);
+    });
+
+    it("AC-bis-13: thrown error inside the hook is caught; lintRefresh carries { error } and the rest of the response is baseline", async () => {
+      mockedCallClaude.mockResolvedValueOnce(makeCallResult(exemptPlan()));
+
+      // Pre-seed a corrupt audit file at the exact slug location so the
+      // second runLintRefresh call inside the hook hits a JSON parse error.
+      const auditDir = join(tempDir, ".ai-workspace", "lint-audit");
+      mkdirSync(auditDir, { recursive: true });
+      writeFileSync(
+        join(auditDir, "plans__exempt.audit.json"),
+        "{not valid json",
+        "utf-8",
+      );
+
+      const result = await handlePlan({
+        intent: "update plan",
+        documentTier: "update",
+        currentPlan: JSON.stringify(exemptPlan()),
+        implementationNotes: "A3-bis hook error swallow test",
+        tier: "quick",
+        planPath,
+        projectPath: tempDir,
+      });
+
+      const resp = result as typeof result & {
+        lintRefresh?: unknown;
+        updatedPlan?: unknown;
+      };
+      // Hook failed non-fatally: error object in lintRefresh
+      expect(resp.lintRefresh).toBeDefined();
+      expect(resp.lintRefresh).toHaveProperty("error");
+      // Baseline update response still intact: text blob + updatedPlan still present
+      expect(result.content[0].text).toContain("=== UPDATED PLAN ===");
+      expect(resp.updatedPlan).toBeDefined();
+    });
+  });
 });
 
 describe("backward compatibility (no documentTier)", () => {

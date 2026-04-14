@@ -6,9 +6,12 @@
  *   - `server/lib/prompts/critic.ts` — embeds AC_SUBPROCESS_RULES_PROMPT +
  *     cites AC_LINT_RULES by id in findings (Q0.5/A2).
  *   - `server/validation/ac-lint.ts` — mechanical lint at the primitive boundary.
+ *   - `server/lib/lint-audit.ts` — calls `getAcLintRulesHash()` for staleness check (Q0.5/A3-bis).
  *
  * Do NOT duplicate these patterns elsewhere — import from here.
  */
+
+import { createHash } from "node:crypto";
 
 /**
  * Human-readable prompt block embedded into planner/critic system prompts.
@@ -125,3 +128,30 @@ export const AC_LINT_RULES: AcLintRule[] = [
     rightExample: "curl localhost:3000/api/classes | jq '.UserCache'",
   },
 ];
+
+/**
+ * Q0.5/A3-bis — Stable hash over the live rule surface. Used by `lint-audit`
+ * to detect rule-set drift since an exemption was last reviewed. Cached for
+ * the process lifetime: the underlying constants are module-frozen, so the
+ * hash cannot change after the first call.
+ */
+let cachedHash: string | null = null;
+export function getAcLintRulesHash(): string {
+  if (cachedHash !== null) return cachedHash;
+  const serializedRules = JSON.stringify(
+    AC_LINT_RULES.map((r) => ({
+      id: r.id,
+      description: r.description,
+      pattern: r.pattern.source,
+      severity: r.severity,
+      wrongExample: r.wrongExample,
+      rightExample: r.rightExample,
+    })),
+  );
+  cachedHash = createHash("sha256")
+    .update(AC_SUBPROCESS_RULES_PROMPT)
+    .update("\u0000")
+    .update(serializedRules)
+    .digest("hex");
+  return cachedHash;
+}

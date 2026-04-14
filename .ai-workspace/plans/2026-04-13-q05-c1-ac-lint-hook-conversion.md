@@ -225,21 +225,25 @@ This plan file is owned by **forge-plan (planner)**. swift-henry's job is to **i
 - [x] swift-henry: AC-03 — ac-lint-hook.sh + tests (glob `.ai-workspace/plans/*.json`, runs node scripts/run-ac-lint.mjs)
 - [x] swift-henry: AC-04 — both test scripts pass (retroactive: 7/7 PASS, ac-lint: 5/5 PASS, fixtures in tests/fixtures/hook-stdin/)
 - [x] Q0.5/C1-bis PR #176 merged as v0.26.0 — plan-level `lintExempt` schema + bootstrap absorption (244→0 across 8 committed plan files) unblocks AC-07/AC-08
-- [ ] swift-henry: restore `.claude/settings.json` from `.parked-during-c1bis`
-- [ ] swift-henry: AC-05 — retroactive-critique.yml deleted
-- [ ] swift-henry: AC-06 — ac-lint.yml deleted
-- [ ] swift-henry: AC-07 — bootstrap rule sweep complete (UNBLOCKED — baseline clean via C1-bis absorption)
-- [ ] swift-henry: AC-08 — bootstrap lint sweep complete (UNBLOCKED — 0 findings already achieved in C1-bis)
-- [ ] swift-henry: AC-09 — manual integration test documented in PR body (Part A + Part B; Part A already informally observed during C1-bis when parked hook mis-fired)
-- [ ] swift-henry: AC-10 — negative-space verified, no scope creep
-- [ ] swift-henry: MINOR-5a — add reverse type-mirror check in ac-lint.test.ts (one line, from forge-plan round-1 follow-up)
-- [ ] swift-henry: MINOR-5b — polish "9 files" → "9 files on disk (8 committed + 1 gitignored)" in §Strategy/§Governance prose of C1-bis plan doc
-- [ ] swift-henry: PR opened via /ship, mailed forge-plan for round-0 code review
-- [ ] forge-plan: round-0 code review via fresh stateless subagent
-- [ ] swift-henry: address any round-0 findings
-- [ ] PR merged
-- [ ] forge-plan: re-stamp master plan with checked checkboxes for A1c (now superseded by hook) + C1 (now shipped via hook)
-- [ ] Q0.5 closure tally updated
-- [ ] user: review/merge ai-brain PR #244 (F65/F66/F67 KB entries — independent of swift-henry's PR)
+- [x] swift-henry: restore `.claude/settings.json` (ac-lint hook only — retroactive deferred per Option D)
+- [x] swift-henry: AC-05 — retroactive-critique.yml kept in place per Option D (deletion deferred to follow-up; CI stub remains as nominal drift detector)
+- [x] swift-henry: AC-06 — ac-lint.yml deleted
+- [x] swift-henry: AC-07 — bootstrap rule sweep complete (clean baseline via C1-bis absorption)
+- [x] swift-henry: AC-08 — bootstrap lint sweep complete (0 findings)
+- [x] swift-henry: AC-09 Part A — same-turn additionalContext injection mechanism documented (verbatim system-reminder transcript in PR body); Part B deferred (BUG-C1-CRITIC-MODE)
+- [x] swift-henry: AC-10 — negative-space verified, no scope creep (10 in-scope files, zero divergence/generate/coordinate/mcp leakage)
+- [x] swift-henry: MINOR-5a — reverse type-mirror check added in ac-lint.test.ts (+6 lines, structurally correct)
+- [x] swift-henry: MINOR-5b — polish folded into C1-bis plan doc (separate PR)
+- [x] swift-henry: PR #177 opened via /ship, mailed forge-plan for round-0 code review (T1010)
+- [x] forge-plan: round-0 code review via fresh stateless subagent (T1020 — VERDICT PASS, 4 non-blocking MINORs)
+- [x] swift-henry: round-0 findings — no blockers; 4 MINORs queued into follow-up PR
+- [x] PR #177 merged as v0.27.0 — master @ `5e9bcf6c2940986528d18ab4481f37df7aadb369` (T1035 swift-henry mail)
+- [x] /ship Stage 5 self-review surfaced 5 enhancements (#178-#182) — overlap with forge-plan's 4 MINORs; all 9 polish items consolidated into Option B follow-up PR
+- [x] forge-plan: re-stamp this plan checkpoint to DONE for C1-original scope (this edit)
+- [ ] forge-plan: draft `.ai-workspace/plans/2026-04-14-q05-c1-followup-retroactive-critique-hook.md` for Option B + 9 polish items
+- [ ] forge-plan: run /coherent-plan on the follow-up plan
+- [ ] forge-plan: hand follow-up plan to swift-henry
+- [ ] Q0.5 closure tally updated (after follow-up merges)
+- [ ] user: review/merge ai-brain PR #244 (F65/F66/F67 KB entries — independent track)
 
-Last updated: 2026-04-13T23:20:00+08:00 — C1-bis PR #176 merged as v0.26.0. AC-07/AC-08 unblocked: baseline is clean on master (244→0). Remaining work: restore parked settings.json, delete two CI workflows, run AC-09 Part A + Part B manually, scope-check AC-10, ship. Two non-blocking MINOR-5 items fold into this PR's diff.
+Last updated: 2026-04-14T10:40:00+08:00 — PR #177 merged as v0.27.0 (commit 5e9bcf6). C1-original scope DONE: ac-lint hook live, two CI workflows status (ac-lint deleted, retroactive-critique kept per Option D until replacement ships). C1-deferred scope (retroactive-critique hook + BUG-C1-CRITIC-MODE) now tracked in the follow-up plan being drafted next.

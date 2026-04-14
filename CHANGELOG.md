@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.1](https://github.com/ziyilam3999/forge-harness/compare/v0.29.0...v0.29.1) (2026-04-14)
+
+### Miscellaneous
+
+- **docs:** Windows env handoff setup guide for MCP authentication ([#195](https://github.com/ziyilam3999/forge-harness/pull/195))
+  - Document the launch-context mismatch that causes MCP child processes to 401 on every `trackedCallClaude` call when `ANTHROPIC_API_KEY` is only in `~/.bashrc` and Claude Code is launched from a non-Git-Bash context (Start menu, cmd, PowerShell, Task Scheduler).
+  - Includes `setx` one-liner fix that writes the key to `HKCU\Environment` so every Windows launcher inherits it, plus 5 binary verification ACs validated against envy-chan cross-session probes on 2026-04-14.
+  - Non-functional change; no code touched. Mac/Linux not affected.
+
 ## [0.29.0](https://github.com/ziyilam3999/forge-harness/compare/v0.28.0...v0.29.0) (2026-04-14)
 
 ### Features

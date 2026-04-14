@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.1](https://github.com/ziyilam3999/forge-harness/compare/v0.30.0...v0.30.1) (2026-04-14)
+
+### Miscellaneous
+
+- **q05-a3bis polish:** batch-close ship-review enhancements #198–#203 ([#204](https://github.com/ziyilam3999/forge-harness/pull/204))
+  - **#198:** force branch reports `"forced"` instead of a fabricated `"rule-change"`. `LintRefreshTriggerReason` gains `"forced"`.
+  - **#199:** `LintRefreshStaleEntry.isObsolete` flags exemptions whose re-lint produced zero findings (safe to drop).
+  - **#200:** `collectStaleEntries` caches `lintAcCommand(ac.command)` by `ac.id` across per-AC and plan-level loops, eliminating redundant re-lints on overlapping plan-level exempts.
+  - **#201:** `computePlanSlug` uses `path.parse(planPath).name`, handling arbitrary extensions (yaml, json, none).
+  - **#202:** `plan.test.ts` lintRefresh block hoists `node:fs`/`node:path`/`node:os` to top-of-file ESM imports.
+  - **#203:** Exports `__resetAcLintRulesHashCache()` test helper (underscore prefix signals test-only API).
+  - 4 new micro-tests (AC-bis-polish-01..04); full suite 719 passed, 4 skipped.
+- **q05-a3 follow-up filed:** retroactive-critique hook de-dup + in-session fallback tracked as #205 (sibling of #192/#193/#194), per forge-plan's q05-a3bis round-0 verdict ask. Not in this release.
+
 ## [0.30.0](https://github.com/ziyilam3999/forge-harness/compare/v0.29.1...v0.30.0) (2026-04-14)
 
 ### Features

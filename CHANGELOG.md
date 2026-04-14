@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.3](https://github.com/ziyilam3999/forge-harness/compare/v0.30.2...v0.30.3) (2026-04-14)
+
+### Miscellaneous
+
+- **chore(q05-q1):** decouple npm publish scope from `.gitignore`. `package.json` now carries an explicit `files:` whitelist (`dist/`, `server/`, `scripts/`, `schema/`, `README.md`, `CHANGELOG.md`), so `.gitignore` can be relaxed without leaking plans/audits into the npm tarball. `.ai-workspace/plans/` and `.ai-workspace/audits/` are now tracked in git (42 newly-visible files); `dogfood/`, `sessions/`, `reports/`, `lessons/`, `lint-audit/` and loose scratch files stay ignored via `.ai-workspace/*` + `!plans/` + `!audits/` allowlist-by-exception. Ends the `git add -f` friction that task #20 surfaced. AC-11 amended mid-PR to "no new lint errors vs master" after discovering 40 pre-existing `no-explicit-any` errors in `server/**/*.test.ts` have been latent on master because CI never ran `npm run lint`; fix tracked as separate follow-up task #34. ([#207](https://github.com/ziyilam3999/forge-harness/pull/207))
+
 ## [0.30.2](https://github.com/ziyilam3999/forge-harness/compare/v0.30.1...v0.30.2) (2026-04-14)
 
 ### Miscellaneous

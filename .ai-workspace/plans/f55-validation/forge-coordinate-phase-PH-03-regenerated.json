@@ -1,0 +1,209 @@
+{
+  "schemaVersion": "3.0.0",
+  "documentTier": "phase",
+  "phaseId": "PH-03",
+  "stories": [
+    {
+      "id": "US-01",
+      "title": "ReplanningNote collection with v1.1 triggers",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "ReplanningNote type defined with all required fields",
+          "command": "npx tsc --noEmit && node -e \"const t = require('./dist/server/types/coordinate-result.js'); console.log(t.ReplanningNote || 'MISSING'); process.exit(t.ReplanningNote ? 0 : 1)\""
+        },
+        {
+          "id": "AC-02",
+          "description": "collectReplanningNotes maps escalation reasons mechanically",
+          "command": "node -e \"const { collectReplanningNotes } = require('./dist/server/lib/coordinator.js'); const result = { escalationReasons: ['plateau', 'no-op', 'max-iterations', 'inconclusive', 'baseline-failed'] }; const notes = collectReplanningNotes(result); const categories = notes.map(n => n.category); const expected = ['partial-completion', 'gap-found', 'partial-completion', 'gap-found', 'assumption-changed']; process.exit(JSON.stringify(categories) === JSON.stringify(expected) ? 0 : 1)\""
+        },
+        {
+          "id": "AC-03",
+          "description": "collectReplanningNotes routes FAIL verdict to ac-drift category",
+          "command": "node -e \"const { collectReplanningNotes } = require('./dist/server/lib/coordinator.js'); const result = { evalVerdicts: ['FAIL'] }; const notes = collectReplanningNotes(result); const failNote = notes.find(n => n.category === 'ac-drift'); process.exit(failNote ? 0 : 1)\""
+        },
+        {
+          "id": "AC-04",
+          "description": "collectReplanningNotes routes INCONCLUSIVE verdict to gap-found category",
+          "command": "node -e \"const { collectReplanningNotes } = require('./dist/server/lib/coordinator.js'); const result = { evalVerdicts: ['INCONCLUSIVE'] }; const notes = collectReplanningNotes(result); const inconclusiveNote = notes.find(n => n.category === 'gap-found'); process.exit(inconclusiveNote ? 0 : 1)\""
+        },
+        {
+          "id": "AC-05",
+          "description": "retries-exhausted trigger emits one note per terminal-failed story",
+          "command": "node -e \"const { collectReplanningNotes } = require('./dist/server/lib/coordinator.js'); const result = { failedStories: ['US-01', 'US-03'], retryExhausted: true }; const notes = collectReplanningNotes(result); const exhaustedNotes = notes.filter(n => n.description.includes('retry budget exhausted')); process.exit(exhaustedNotes.length === 2 ? 0 : 1)\""
+        },
+        {
+          "id": "AC-06",
+          "description": "dep-failed-chain trigger emits one note per distinct root failed story",
+          "command": "node -e \"const { collectReplanningNotes } = require('./dist/server/lib/coordinator.js'); const result = { depFailedChains: [['US-01', 'US-02'], ['US-05', 'US-06']] }; const notes = collectReplanningNotes(result); const chainNotes = notes.filter(n => n.description.includes('dep-failed-chain')); process.exit(chainNotes.length === 2 ? 0 : 1)\""
+        },
+        {
+          "id": "AC-07",
+          "description": "unknown EscalationReason routes to gap-found with P45 warning",
+          "command": "node -e \"const { collectReplanningNotes } = require('./dist/server/lib/coordinator.js'); let stderr = ''; const origConsoleError = console.error; console.error = (msg) => { stderr += msg; }; const result = { escalationReasons: ['unknown-reason'] }; const notes = collectReplanningNotes(result); console.error = origConsoleError; const gapNote = notes.find(n => n.category === 'gap-found'); const hasWarning = stderr.includes('WARNING: unknown EscalationReason routed to gap-found: unknown-reason'); process.exit(gapNote && hasWarning ? 0 : 1)\""
+        }
+      ],
+      "affectedPaths": [
+        "server/lib/coordinator.ts",
+        "server/types/coordinate-result.ts"
+      ]
+    },
+    {
+      "id": "US-02",
+      "title": "dependency-satisfied note emission via reconcileState",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "dependency-satisfied note emitted when reconcileState detects unblocking",
+          "command": "node -e \"const { reconcileState } = require('./dist/server/lib/coordinator.js'); const mockPlan = { stories: [{ id: 'US-02', dependencies: ['US-01'] }] }; const mockPath = './test-project'; const result = reconcileState(mockPlan, mockPath, { unblockedStories: ['US-02'] }); const depSatNote = result.replanningNotes?.find(n => n.category === 'dependency-satisfied'); process.exit(depSatNote ? 0 : 1)\""
+        },
+        {
+          "id": "AC-02",
+          "description": "dependency-satisfied note has informational severity",
+          "command": "node -e \"const { reconcileState } = require('./dist/server/lib/coordinator.js'); const mockPlan = { stories: [{ id: 'US-02', dependencies: ['US-01'] }] }; const mockPath = './test-project'; const result = reconcileState(mockPlan, mockPath, { unblockedStories: ['US-02'] }); const depSatNote = result.replanningNotes?.find(n => n.category === 'dependency-satisfied'); process.exit(depSatNote?.severity === 'informational' ? 0 : 1)\""
+        },
+        {
+          "id": "AC-03",
+          "description": "dependency-satisfied note includes affected story IDs",
+          "command": "node -e \"const { reconcileState } = require('./dist/server/lib/coordinator.js'); const mockPlan = { stories: [{ id: 'US-02', dependencies: ['US-01'] }] }; const mockPath = './test-project'; const result = reconcileState(mockPlan, mockPath, { unblockedStories: ['US-02'] }); const depSatNote = result.replanningNotes?.find(n => n.category === 'dependency-satisfied'); process.exit(depSatNote?.affectedStories?.includes('US-02') ? 0 : 1)\""
+        }
+      ],
+      "affectedPaths": [
+        "server/lib/coordinator.ts"
+      ]
+    },
+    {
+      "id": "US-03",
+      "title": "Velocity calculation and audit observability via aggregateStatus",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "aggregateStatus returns per-story status and accumulated cost",
+          "command": "node -e \"const { aggregateStatus } = require('./dist/server/lib/coordinator.js'); const result = aggregateStatus('./test-project'); const hasStatus = result.hasOwnProperty('accumulatedCostUsd'); const hasStories = Array.isArray(result.stories); process.exit(hasStatus && hasStories ? 0 : 1)\""
+        },
+        {
+          "id": "AC-02",
+          "description": "velocityStoriesPerHour calculated as completedStoryCount / elapsedHours",
+          "command": "node -e \"const { aggregateStatus } = require('./dist/server/lib/coordinator.js'); const result = aggregateStatus('./test-project', { mockCompletedCount: 5, mockElapsedHours: 2 }); process.exit(result.velocityStoriesPerHour === 2.5 ? 0 : 1)\""
+        },
+        {
+          "id": "AC-03",
+          "description": "velocityStoriesPerHour is 0 when zero stories complete or zero time elapsed",
+          "command": "node -e \"const { aggregateStatus } = require('./dist/server/lib/coordinator.js'); const result1 = aggregateStatus('./test-project', { mockCompletedCount: 0, mockElapsedHours: 1 }); const result2 = aggregateStatus('./test-project', { mockCompletedCount: 5, mockElapsedHours: 0 }); process.exit(result1.velocityStoriesPerHour === 0 && result2.velocityStoriesPerHour === 0 ? 0 : 1)\""
+        },
+        {
+          "id": "AC-04",
+          "description": "includeAudit option adds auditEntries to result",
+          "command": "node -e \"const { aggregateStatus } = require('./dist/server/lib/coordinator.js'); const result = aggregateStatus('./test-project', { includeAudit: true }); process.exit(Array.isArray(result.auditEntries) ? 0 : 1)\""
+        },
+        {
+          "id": "AC-05",
+          "description": "includeAudit defaults to false, no auditEntries when omitted",
+          "command": "node -e \"const { aggregateStatus } = require('./dist/server/lib/coordinator.js'); const result = aggregateStatus('./test-project'); process.exit(!result.hasOwnProperty('auditEntries') ? 0 : 1)\""
+        },
+        {
+          "id": "AC-06",
+          "description": "accumulatedCostUsd excludes null/missing values and sets incompleteData flag",
+          "command": "node -e \"const { aggregateStatus } = require('./dist/server/lib/coordinator.js'); const result = aggregateStatus('./test-project', { mockRecords: [{ estimatedCostUsd: 1.50 }, { estimatedCostUsd: null }, { estimatedCostUsd: 2.25 }] }); process.exit(result.accumulatedCostUsd === 3.75 && result.incompleteData === true ? 0 : 1)\""
+        }
+      ],
+      "affectedPaths": [
+        "server/lib/coordinator.ts",
+        "server/lib/run-reader.ts"
+      ]
+    },
+    {
+      "id": "US-04",
+      "title": "graduateFindings with distinct-storyId dedup and windowing",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "graduateFindings returns wrapper object with findings and windowInflationRisk",
+          "command": "node -e \"const { graduateFindings } = require('./dist/server/lib/coordinator.js'); const result = graduateFindings({}); const hasFindings = Array.isArray(result.findings); const hasRisk = typeof result.windowInflationRisk === 'boolean'; process.exit(hasFindings && hasRisk ? 0 : 1)\""
+        },
+        {
+          "id": "AC-02",
+          "description": "distinct-storyId dedup prevents single retry-exhausted story from self-graduating",
+          "command": "node -e \"const { graduateFindings } = require('./dist/server/lib/coordinator.js'); const mockRecords = [{ storyId: 'US-05', escalationReason: 'plateau' }, { storyId: 'US-05', escalationReason: 'plateau' }, { storyId: 'US-05', escalationReason: 'plateau' }]; const result = graduateFindings({ records: mockRecords }); process.exit(result.findings.length === 0 ? 0 : 1)\""
+        },
+        {
+          "id": "AC-03",
+          "description": "three distinct stories with same escalation reason produces one finding",
+          "command": "node -e \"const { graduateFindings } = require('./dist/server/lib/coordinator.js'); const mockRecords = [{ storyId: 'US-01', escalationReason: 'plateau' }, { storyId: 'US-02', escalationReason: 'plateau' }, { storyId: 'US-03', escalationReason: 'plateau' }]; const result = graduateFindings({ records: mockRecords }); process.exit(result.findings.length === 1 ? 0 : 1)\""
+        },
+        {
+          "id": "AC-04",
+          "description": "currentPlanStartTimeMs clips counting window and sets windowInflationRisk false",
+          "command": "node -e \"const { graduateFindings } = require('./dist/server/lib/coordinator.js'); const now = Date.now(); const result = graduateFindings({}, { currentPlanStartTimeMs: now - 3600000 }); process.exit(result.windowInflationRisk === false ? 0 : 1)\""
+        },
+        {
+          "id": "AC-05",
+          "description": "missing currentPlanStartTimeMs sets windowInflationRisk true",
+          "command": "node -e \"const { graduateFindings } = require('./dist/server/lib/coordinator.js'); const result = graduateFindings({}); process.exit(result.windowInflationRisk === true ? 0 : 1)\""
+        },
+        {
+          "id": "AC-06",
+          "description": "empty findings case returns valid wrapper object",
+          "command": "node -e \"const { graduateFindings } = require('./dist/server/lib/coordinator.js'); const result = graduateFindings({ records: [] }); const isValid = Array.isArray(result.findings) && result.findings.length === 0 && typeof result.windowInflationRisk === 'boolean'; process.exit(isValid ? 0 : 1)\""
+        }
+      ],
+      "affectedPaths": [
+        "server/lib/coordinator.ts"
+      ]
+    },
+    {
+      "id": "US-05",
+      "title": "Plan mutation reconciliation with v1.1 preservation rules",
+      "dependencies": [],
+      "acceptanceCriteria": [
+        {
+          "id": "AC-01",
+          "description": "reconcileState runs as first step before recoverState",
+          "command": "node -e \"const { assessPhase } = require('./dist/server/lib/coordinator.js'); let callOrder = []; const mockReconcile = () => { callOrder.push('reconcile'); return {}; }; const mockRecover = () => { callOrder.push('recover'); return {}; }; assessPhase({}, './test', { mockReconcile, mockRecover }); process.exit(callOrder[0] === 'reconcile' && callOrder[1] === 'recover' ? 0 : 1)\""
+        },
+        {
+          "id": "AC-02",
+          "description": "orphaned records excluded from classification with console.error warning",
+          "command": "node -e \"let stderr = ''; const origConsoleError = console.error; console.error = (msg) => { stderr += msg; }; const { reconcileState } = require('./dist/server/lib/coordinator.js'); const plan = { stories: [{ id: 'US-02' }] }; const mockRecords = [{ storyId: 'US-01' }]; reconcileState(plan, './test', { mockRecords }); console.error = origConsoleError; process.exit(stderr.includes('orphaned') ? 0 : 1)\""
+        },
+        {
+          "id": "AC-03",
+          "description": "new story (zero prior records) marked pending",
+          "command": "node -e \"const { reconcileState } = require('./dist/server/lib/coordinator.js'); const plan = { stories: [{ id: 'US-01', dependencies: [] }] }; const result = reconcileState(plan, './test', { mockRecords: [] }); const story = result.stories?.find(s => s.id === 'US-01'); process.exit(story?.status === 'pending' ? 0 : 1)\""
+        },
+        {
+          "id": "AC-04",
+          "description": "failed story preservation - retryCount re-derived from existing records",
+          "command": "node -e \"const { reconcileState } = require('./dist/server/lib/coordinator.js'); const plan = { stories: [{ id: 'US-01', dependencies: [] }] }; const mockRecords = [{ storyId: 'US-01', evalVerdict: 'FAIL' }, { storyId: 'US-01', evalVerdict: 'FAIL' }, { storyId: 'US-01', evalVerdict: 'FAIL' }]; const result = reconcileState(plan, './test', { mockRecords }); const story = result.stories?.find(s => s.id === 'US-01'); process.exit(story?.status === 'failed' && story?.retryCount === 3 ? 0 : 1)\""
+        },
+        {
+          "id": "AC-05",
+          "description": "renamed failed story becomes orphaned warning + new pending story",
+          "command": "node -e \"let stderr = ''; const origConsoleError = console.error; console.error = (msg) => { stderr += msg; }; const { reconcileState } = require('./dist/server/lib/coordinator.js'); const plan = { stories: [{ id: 'US-01-renamed', dependencies: [] }] }; const mockRecords = [{ storyId: 'US-01', evalVerdict: 'FAIL' }]; const result = reconcileState(plan, './test', { mockRecords }); console.error = origConsoleError; const newStory = result.stories?.find(s => s.id === 'US-01-renamed'); const hasOrphanWarning = stderr.includes('orphaned'); process.exit(newStory?.status === 'pending' && hasOrphanWarning ? 0 : 1)\""
+        },
+        {
+          "id": "AC-06",
+          "description": "dep-failed upstream replanned away allows downstream to become pending",
+          "command": "node -e \"const { reconcileState } = require('./dist/server/lib/coordinator.js'); const plan = { stories: [{ id: 'US-02', dependencies: [] }] }; const mockState = { 'US-02': { status: 'dep-failed', upstreamFailedStory: 'US-01' } }; const result = reconcileState(plan, './test', { mockState }); const story = result.stories?.find(s => s.id === 'US-02'); process.exit(story?.status === 'pending' ? 0 : 1)\""
+        },
+        {
+          "id": "AC-07",
+          "description": "dangling dependency classifies downstream as pending with evidence",
+          "command": "node -e \"let stderr = ''; const origConsoleError = console.error; console.error = (msg) => { stderr += msg; }; const { reconcileState } = require('./dist/server/lib/coordinator.js'); const plan = { stories: [{ id: 'US-02', dependencies: ['US-01'] }] }; const result = reconcileState(plan, './test'); console.error = origConsoleError; const story = result.stories?.find(s => s.id === 'US-02'); const hasP45Warning = stderr.length > 0; process.exit(story?.status === 'pending' && story?.evidence?.includes('dep US-01 missing') && hasP45Warning ? 0 : 1)\""
+        },
+        {
+          "id": "AC-08",
+          "description": "failed story re-evaluated to done preserved via REQ-04 most-recent rule",
+          "command": "node -e \"const { reconcileState } = require('./dist/server/lib/coordinator.js'); const plan = { stories: [{ id: 'US-01', dependencies: [] }] }; const mockRecords = [{ storyId: 'US-01', evalVerdict: 'FAIL', timestamp: 1000 }, { storyId: 'US-01', evalVerdict: 'PASS', timestamp: 2000 }]; const result = reconcileState(plan, './test', { mockRecords }); const story = result.stories?.find(s => s.id === 'US-01'); process.exit(story?.status === 'done' ? 0 : 1)\""
+        }
+      ],
+      "affectedPaths": [
+        "server/lib/coordinator.ts"
+      ]
+    }
+  ]
+}

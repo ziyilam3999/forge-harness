@@ -247,3 +247,20 @@ This plan file is owned by **forge-plan (planner)**. swift-henry's job is to **i
 - [ ] user: review/merge ai-brain PR #244 (F65/F66/F67 KB entries — independent track)
 
 Last updated: 2026-04-14T10:40:00+08:00 — PR #177 merged as v0.27.0 (commit 5e9bcf6). C1-original scope DONE: ac-lint hook live, two CI workflows status (ac-lint deleted, retroactive-critique kept per Option D until replacement ships). C1-deferred scope (retroactive-critique hook + BUG-C1-CRITIC-MODE) now tracked in the follow-up plan being drafted next.
+
+## Q0.5/C1 closure
+
+Q0.5/C1 ships across **two PRs**, closing as of the follow-up merge:
+
+- **PR #177** (C1-original, v0.27.0, merged `5e9bcf6`) — ac-lint hook live; CI workflow parked.
+- **PR #183** (C1 follow-up, feat branch `feat/q05-c1-followup-retroactive-critique`, base `ffabe65`) — critic eval mode, 8/9 ac-lint-hook polish items, retroactive-critique hook unparked & wired, CI stub deleted.
+
+**Resolved by the follow-up PR:**
+- BUG-C1-CRITIC-MODE — `evaluationMode: "critic"` now exists on `forge_evaluate`; AC-01 through AC-05 satisfied by `server/tools/evaluate.ts` `handleCriticEval` + `evaluate-critic.test.ts` (5/5 green).
+- C1-original AC-09 Part B — retroactive-critique hook's same-turn PostToolUse timing validated via AC-13 manual integration test on `server/lib/prompts/critic.ts` (transcript in PR #183 body).
+- C1-original Part B deferral — retroactive-critique.yml CI stub deleted (AC-09), parked hook + tests + 4 rule fixtures unparked from `.deferred-c1-retroactive/`, `.claude/settings.json` PostToolUse chain has 2 commands (AC-08).
+
+**Deferrals rolled forward to a future micro-PR:**
+- **AC-12 E3 (single-file lint passthrough)** — `scripts/run-ac-lint.mjs` has no CLI arg handling; adding `process.argv[2]` support is a ~15 LOC scope expansion that would push PR #183 past review ceiling and freeze a hook↔CLI contract before the shape is earned. Perf is not load-bearing at the current 9-plan corpus (sub-second full-sweep). Inline deferral marker at `scripts/ac-lint-hook.sh` above the `node scripts/run-ac-lint.mjs` invocation. Revisit when the corpus grows past ~50 plans OR when ac-lint gets expensive per-file.
+
+**Q0.5/C1 status:** DONE pending PR #183 merge. No loose ends beyond the one named deferral above.

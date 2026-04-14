@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.0](https://github.com/ziyilam3999/forge-harness/compare/v0.28.0...v0.29.0) (2026-04-14)
+
+### Features
+
+- **q05-a3:** CriterionResult.reliability full split + divergence forward-split ([#191](https://github.com/ziyilam3999/forge-harness/pull/191))
+  - Extend `CriterionResult.reliability` union from `trusted|suspect` to `trusted|suspect|unverified` (closes the slot reserved in A1b's type JSDoc).
+  - **Option 2 detection** (per forge-plan T1545 thread `q05-a3`): an AC is tagged `unverified` iff `lint.findings.some(f => f.exempt === true)` — a per-AC `lintExempt` entry actually suppressed a real finding this run. Vestigial exemptions (declared but nothing matched) stay `trusted`. Plan-level `ExecutionPlan.lintExempt[]` (scope "plan") is OUT OF SCOPE and reports `trusted` by construction; plan-level coverage deferred to Q0.5/A3-bis.
+  - `ForwardDivergence` gains an optional `reliability?` field; `handleDivergenceEval` propagates it per-entry and the `DivergenceReport.summary` string now reports `N trusted / M suspect / K unverified` instead of a single count. Task #13 headline: "Divergence mode splits real vs suspect failures."
+  - `EvalReport.warnings[]` carries an aggregate unverified-count entry when any criterion is unverified. When `ac.flaky === true` AND the exemption fired, a dedicated per-AC warning is pushed (greppable via `/flaky.*lintExempt|lintExempt.*flaky/i`) so analytics can find degraded-confidence ACs without a rolled-up count hiding the signal.
+  - `computeVerdict` unchanged: `unverified` is a soft signal, never downgrades verdict. `lintExempt` is an intentional author escape hatch; downgrading would neuter it. Surfacing as a warning is the middle ground.
+  - Tests: 6 new cases (AC-A3-02 firing, AC-A3-02b vestigial, AC-A3-03 firing+FAIL, AC-A3-04 no-exempt, dual-flag collision, AC-A3-06/-07 divergence split + summary string). Suite: 699 pass (up from 693).
+  - Round-0 self-review found 0 bugs, 3 enhancements filed as [#192](https://github.com/ziyilam3999/forge-harness/issues/192)/[#193](https://github.com/ziyilam3999/forge-harness/issues/193)/[#194](https://github.com/ziyilam3999/forge-harness/issues/194).
+
 ## [0.28.0](https://github.com/ziyilam3999/forge-harness/compare/v0.27.0...v0.28.0) (2026-04-14)
 
 ### Features

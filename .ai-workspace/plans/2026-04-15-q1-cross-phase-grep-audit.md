@@ -103,13 +103,46 @@ Reviewer reads the `## Measurement` section and confirms it actually justifies t
 - [x] Brief delivered to lucky-iris via `/delegate` — first real run, mailbox commit `38ccd83`, thread `q1-cross-phase-grep-audit`
 - [x] Executor ack received 2026-04-15T08:36 — pre-flight clean, 9 files exempt-tagged confirmed, jq missing (node fallback), HEAD `2d2b78d`
 - [x] **Planner-side regression caught mid-flight 2026-04-15T08:43**: PH-01 phase JSONs undercounted as 0 grep-q ACs (actual: 35 + 30 = 65). Same failure mode as task #34 audit.ts and Cairn Gap 4 cp clobber. Resolved via 4-patch amendment (Option A — narrow PH-01 carve-out to AC-rewrite only; rationale refresh in-scope across all 9 files). Patches sent on thread, mailbox commit `cdff1f7`. Discovered new orphaned ~59 PH-01 ACs → tracked as task #40 (#22-followup).
-- [ ] Executor applies 4 amendment patches as `docs(plan):` commit on her branch `fix/q22-c1-bootstrap-exemption-decision` (over commit 1 `4fd693d`)
-- [ ] Executor ack with dirty-worktree pre-flight + HEAD SHA + tool check
-- [ ] AC-1..AC-9 pass locally on executor's branch
-- [ ] PR opened with `plan-refresh: no-op` trailer
-- [ ] AC-10 (CI green) passes
-- [ ] Stateless review PASS
-- [ ] Merged + released
-- [ ] Plan updated to shipped reality
+- [x] Executor applied 4 amendment patches as commit `908181f` on branch `fix/q22-c1-bootstrap-exemption-decision`
+- [x] Executor self-amended AC-9 in commit `cf87e7b` to widen allowlist with `scripts/q1-cross-phase-acceptance.sh` (per hard-rule 8 precedent from PR #208's `scripts/q05-task34-acceptance.sh`)
+- [x] Executor ack received 08:36 (pre-flight clean, HEAD `2d2b78d`, `jq` missing → node fallback)
+- [x] AC-1..AC-9 pass locally via `scripts/q1-cross-phase-acceptance.sh` wrapper (11/11 PASS; AC-4 skipped N/A under AFFIRM)
+- [x] PR #210 opened: https://github.com/ziyilam3999/forge-harness/pull/210
+- [x] AC-10 (CI green) passes — 3/3 SUCCESS (ubuntu-latest, windows-latest, smoke-gate)
+- [x] Stateless review PASS (fresh Agent subagent, 10/10 evaluated, AC-4 N/A under AFFIRM)
+- [x] Merged + released — squash `05ea273`, tag `v0.30.5` (docs-only release)
+- [x] Plan updated to shipped reality (this commit)
 
-Last updated: 2026-04-15T08:50:00+08:00 — planner-side undercount caught by lucky-iris on first-pass re-enumeration; 4-patch amendment sent on the executor's thread, applies on her branch. Local plan file deliberately NOT edited (per CLAUDE.md "plan amendments ride the executor's branch, never parallel planner commit"); will resync from master after PR merge. Note: lines 10-13 + 38 + 45 + 57-65 of THIS local copy still reflect the pre-amendment state — authoritative copy lives on `fix/q22-c1-bootstrap-exemption-decision` after lucky-iris applies the patches.
+## Shipped reality
+
+- **PR:** https://github.com/ziyilam3999/forge-harness/pull/210
+- **Merge commit:** `05ea273` (squash)
+- **Release:** v0.30.5 — https://github.com/ziyilam3999/forge-harness/releases/tag/v0.30.5 (docs-only release, `### Documentation` CHANGELOG section)
+- **Commits on the PR (4):**
+  1. `4fd693d` — `docs(plan): promote q1-cross-phase-grep-audit plan` (planner's plan file as-delivered)
+  2. `908181f` — `docs(plan): apply task #22 amendment patches 1-4 — PH-01 inclusion + Context refresh` (planner unblock patches, applied on executor's branch)
+  3. `ba40854` — `docs(plans): refresh c1-bootstrap exemption rationale across all 9 phase JSONs (AFFIRM)` (the decision + the 9 rationale edits + audit memo)
+  4. `cf87e7b` — `chore(q22): add acceptance wrapper + AC-9 self-amend for scripts/ allowlist` (hard-rule-8 wrapper + self-amendment)
+- **Final diff:** 12 files, 394 insertions / 9 deletions. Zero `server/**` changes.
+- **Decision: AFFIRM** (as planner's hunch predicted). Measurement: 7 runtime-consumer probes, all returned zero hits for automated consumption of the 9 phase JSONs. The critic-mode loader in `server/tools/evaluate.ts` `readFile`s plan paths and passes them as opaque string content to the LLM — never `exec`s AC commands. AFFIRM cost 9 rationale edits; UNWIND cost would have been 177 AC rewrites for files nobody runs at runtime.
+- **Planner-side regression caught mid-PR (third instance of the same failure mode):** original brief undercounted PH-01 phase JSONs as 0 grep-q ACs when they actually carry 65 total (PH-01 coord=35, PH-01 gen=30). Caught by lucky-iris on first-pass re-enumeration at 08:43 via literal `grep -c` per file (instead of assuming the 3 non-PH-{02,03,04} leftover files had no content). Resolved via 4-patch amendment on the executor's branch (Option A: narrow PH-01 carve-out to AC-command rewrite only, rationale refresh uniformly in-scope). Root cause same as task #34's `audit.ts` undercount and Cairn Gap 4's `cp` clobber: planner truncated/substituted measurement output without full enumeration.
+- **Orphaned PH-01 ACs:** 65 total − 6 owned by task #21 (PH01-US-06) = ~59 ACs orphaned, tracked as task #40 (#22-followup).
+- **Executor self-amendments (both authorized and load-bearing):**
+  - AC-9 widened to include `scripts/q1-cross-phase-acceptance.sh` (hard-rule-8 precedent from PR #208's `scripts/q05-task34-acceptance.sh`). The original planner allowlist omitted `scripts/` — template gap.
+  - Wrapper uses `MSYS_NO_PATHCONV=1` for `git show <rev>:<path>` on Windows. Without it, `:` and `/` get path-mangled. Template gap #2.
+- **Stateless review verdict (fresh Agent subagent, zero prior context):** 9/10 PASS + 1 SKIPPED (AC-4 N/A under AFFIRM — AC-3 XOR AC-4 ordering). Reviewer independently verified PH-01 edits are rationale-field-only via his own diff inspection, not from any commit message claim.
+- **First real run of `/delegate`:** v0.15.0 / PR #277 (ai-brain). Handoff tool ran cleanly end-to-end: brief render → mailbox delivery (commit `38ccd83`) → ack within 8 min → blocker within 15 min → unblock within 7 min → implementation → PR → review → merge → release. Total round-trip 08:28 → 09:45 ≈ 77 min for a small docs/JSON task with one real amendment cycle.
+
+## Learnings folded back
+
+Three learnings to fold into the global workflow once this PR settles:
+
+1. **CLAUDE.md hard rule 9 corollary: "Measure don't memorize" needs "and don't truncate measurement output either."** Three instances in three runs (Cairn Gap 4 `cp` clobber, task #34 `audit.ts` undercount, task #22 PH-01 phase JSON undercount). The planner-side fix is mechanical: never write "N additional X" without `grep -c`-ing each one. The skill-side fix is in `/delegate`'s active-baseline check: the skill should surface every file matching the broad enumeration and require a per-file measurement before brief render.
+2. **`/delegate` brief template needs two additions** for v1.1 (both surfaced on this run's first pass):
+   - Always include `MSYS_NO_PATHCONV=1` in any reviewer command that uses `<rev>:<path>` syntax (`git show`, `git cat-file blob`). Silent path-mangling on Windows MSYS bash.
+   - AC-9 (or equivalent "no drive-by edits" AC) allowlist must auto-include `scripts/<task>-acceptance.sh` whenever hard-rule 8 applies. Task #22 and task #34 both had to self-amend for the same reason.
+3. **Brief wording polish (from executor feedback):** "promote to master in your PR's commit 1" reads like "push to master." Replace with "commit it as commit 1 on your branch" in v1.1 brief template.
+
+All three feed into `/skill-evolve improve delegate` after the 5+ real runs threshold.
+
+Last updated: 2026-04-15T09:45:00+08:00 — shipped v0.30.5, all AC ✓, plan synced to reality by planner post-merge on branch `docs/q22-plan-sync`.

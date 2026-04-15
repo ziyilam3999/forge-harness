@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.5](https://github.com/ziyilam3999/forge-harness/compare/v0.30.4...v0.30.5) (2026-04-15)
+
+### Documentation
+
+- **docs(q22):** AFFIRM the C1-bootstrap `lintExempt` exemption (F36/F56 rule family) across 9 phase JSONs under `.ai-workspace/plans/` with a refreshed rationale citing post-v0.20.0 / post-PR#208 state. Decision was driven by 7 independent runtime-consumer probes (`grep -rn` against `server/**`, workflow file inspection, critic-mode loader read-path audit) that all returned zero hits for automated consumption of the phase JSONs — the ACs are treated as opaque string content by `evaluate.ts`'s critic-mode loader and are never shell-executed. AFFIRM cost = 9 rationale edits; UNWIND cost would have been 177 AC command rewrites for files nobody runs. Decision and full measurement memo recorded at `.ai-workspace/audits/2026-04-15-c1-bootstrap-exemption-decision.md`. Acceptance wrapper `scripts/q1-cross-phase-acceptance.sh` added per hard-rule 8 precedent from PR #208. Planner-side regression caught mid-PR: original brief undercounted PH-01 phase JSONs as 0 `grep -q` ACs when they actually carry 65 (same failure mode as PR #208's `audit.ts` undercount and Cairn Gap 4's `cp` clobber — third instance in three runs); resolved via 4-patch amendment on the executor branch narrowing PH-01 carve-out to AC-command rewrite only, with rationale refresh uniformly in-scope across all 9 files. PH-01's ~59 orphaned non-US-06 ACs tracked as follow-up task #22-followup. First real run of the freshly shipped `/delegate` skill (ai-brain v0.15.0 / PR #277). ([#210](https://github.com/ziyilam3999/forge-harness/pull/210))
+
 ## [0.30.4](https://github.com/ziyilam3999/forge-harness/compare/v0.30.3...v0.30.4) (2026-04-15)
 
 ### Bug Fixes

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.7](https://github.com/ziyilam3999/forge-harness/compare/v0.30.6...v0.30.7) (2026-04-16)
+
+### Miscellaneous
+
+* **ac-lint:** rename `F56-passed-grep` to `F55-passed-grep` — corrects a rule mis-labeling; the rule detects the F55 class (TTY-dependent runner-output grep), not F56 (pipe-chain stdin bug). Pure label swap; no matcher or finding behavior changes. Sibling rule `F56-multigrep-pipe` remains unchanged. ([#213](https://github.com/ziyilam3999/forge-harness/pull/213))
+
 ## [0.30.6](https://github.com/ziyilam3999/forge-harness/compare/v0.30.5...v0.30.6) (2026-04-16)
 
 ### Bug Fixes

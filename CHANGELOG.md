@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.6](https://github.com/ziyilam3999/forge-harness/compare/v0.30.5...v0.30.6) (2026-04-16)
+
+### Bug Fixes
+
+* **q1/task-21:** rewrite 5 hazardous PH01-US-06 ACs to F-rule-safe patterns ([#212](https://github.com/ziyilam3999/forge-harness/pull/212))
+
+### Miscellaneous
+
+* **plan:** sync task #22 plan to shipped reality (v0.30.5) ([#211](https://github.com/ziyilam3999/forge-harness/pull/211))
+
 ## [0.30.5](https://github.com/ziyilam3999/forge-harness/compare/v0.30.4...v0.30.5) (2026-04-15)
 
 ### Documentation

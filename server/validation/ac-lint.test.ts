@@ -60,7 +60,7 @@ describe("lintAcCommand — WRONG patterns (must flag)", () => {
     const cmd = "npx vitest run -t 'foo' 2>&1 | grep -q 'passed'";
     const r = lintAcCommand(cmd);
     expect(r.suspect).toBe(true);
-    expect(r.findings.some((f) => f.ruleId === "F56-passed-grep")).toBe(true);
+    expect(r.findings.some((f) => f.ruleId === "F55-passed-grep")).toBe(true);
   });
 
   it("F56: lone `grep -q 'failed'` on runner output", () => {
@@ -145,16 +145,16 @@ describe("lintAcCommand — Q0.5/A2 MAJOR-2/MINOR-3/4/5 additions", () => {
   });
 
   // MINOR-5: regex-alt and unquoted passed/failed.
-  it("MINOR-5: `grep -qE 'passed|failed'` flags F56-passed-grep", () => {
+  it("MINOR-5: `grep -qE 'passed|failed'` flags F55-passed-grep", () => {
     const cmd = "npx vitest run | grep -qE 'passed|failed'";
     const r = lintAcCommand(cmd);
-    expect(r.findings.some((f) => f.ruleId === "F56-passed-grep")).toBe(true);
+    expect(r.findings.some((f) => f.ruleId === "F55-passed-grep")).toBe(true);
   });
 
-  it("MINOR-5: `grep -q passed` (unquoted) flags F56-passed-grep", () => {
+  it("MINOR-5: `grep -q passed` (unquoted) flags F55-passed-grep", () => {
     const cmd = "npx vitest run | grep -q passed";
     const r = lintAcCommand(cmd);
-    expect(r.findings.some((f) => f.ruleId === "F56-passed-grep")).toBe(true);
+    expect(r.findings.some((f) => f.ruleId === "F55-passed-grep")).toBe(true);
   });
 });
 
@@ -171,9 +171,9 @@ describe("AC_LINT_RULES structure (Q0.5/A2 typed-export contract)", () => {
     expect(ids).toEqual([
       "F36-raw-rg",
       "F36-source-tree-grep",
+      "F55-passed-grep",
       "F55-vitest-count-grep",
       "F56-multigrep-pipe",
-      "F56-passed-grep",
     ]);
   });
 });
@@ -204,11 +204,11 @@ describe("lintAcCommand — RIGHT patterns (must NOT flag)", () => {
   });
 
   it("echo 'passed' benign string is not flagged", () => {
-    // No preceding pipe-into-grep, so F56-passed-grep should not match.
+    // No preceding pipe-into-grep, so F55-passed-grep should not match.
     expect(lintAcCommand("echo 'passed'").suspect).toBe(false);
   });
 
-  it("jq '.passed' does not false-positive F56-passed-grep", () => {
+  it("jq '.passed' does not false-positive F55-passed-grep", () => {
     expect(lintAcCommand("curl -s localhost | jq '.passed'").suspect).toBe(false);
   });
 
@@ -222,19 +222,19 @@ describe("lintAcCommand — lintExempt precedence", () => {
   it("exempt AC with matching pattern → finding is exempt, suspect=false", () => {
     const cmd = "npx vitest run | grep -q 'passed'";
     const r = lintAcCommand(cmd, {
-      lintExempt: { ruleId: "F56-passed-grep", rationale: "legacy: reviewed" },
+      lintExempt: { ruleId: "F55-passed-grep", rationale: "legacy: reviewed" },
     });
     expect(r.suspect).toBe(false);
-    const finding = r.findings.find((f) => f.ruleId === "F56-passed-grep");
+    const finding = r.findings.find((f) => f.ruleId === "F55-passed-grep");
     expect(finding?.exempt).toBe(true);
     expect(finding?.exemptRationale).toBe("legacy: reviewed");
   });
 
   it("exempt rule X + match rule Y → still suspect on Y", () => {
-    // Matches F55 (count-grep) but exempt only covers F56-passed-grep.
+    // Matches F55 (count-grep) but exempt only covers F55-passed-grep.
     const cmd = "npx vitest run | grep -qE 'Tests[[:space:]]+[5-9]'";
     const r = lintAcCommand(cmd, {
-      lintExempt: { ruleId: "F56-passed-grep", rationale: "n/a" },
+      lintExempt: { ruleId: "F55-passed-grep", rationale: "n/a" },
     });
     expect(r.suspect).toBe(true);
     expect(r.findings.some((f) => f.ruleId === "F55-vitest-count-grep" && !f.exempt)).toBe(
@@ -246,7 +246,7 @@ describe("lintAcCommand — lintExempt precedence", () => {
     const cmd = "npx vitest run | grep -q 'passed' && ! grep -q 'failed'";
     const r = lintAcCommand(cmd, {
       lintExempt: [
-        { ruleId: "F56-passed-grep", rationale: "a" },
+        { ruleId: "F55-passed-grep", rationale: "a" },
         { ruleId: "F56-multigrep-pipe", rationale: "b" },
       ],
     });
@@ -282,17 +282,17 @@ describe("lintPlan — governance cap and plan-level aggregation", () => {
       {
         id: "AC-01",
         command: "cmd | grep -q 'passed'",
-        lintExempt: { ruleId: "F56-passed-grep", rationale: "ok" },
+        lintExempt: { ruleId: "F55-passed-grep", rationale: "ok" },
       },
       {
         id: "AC-02",
         command: "cmd | grep -q 'passed'",
-        lintExempt: { ruleId: "F56-passed-grep", rationale: "ok" },
+        lintExempt: { ruleId: "F55-passed-grep", rationale: "ok" },
       },
       {
         id: "AC-03",
         command: "cmd | grep -q 'passed'",
-        lintExempt: { ruleId: "F56-passed-grep", rationale: "ok" },
+        lintExempt: { ruleId: "F55-passed-grep", rationale: "ok" },
       },
     ]);
     const report = lintPlan(plan);
@@ -383,7 +383,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
     );
     const report = lintPlan(plan);
     expect(report.findings.every((f) => f.ruleId !== "F36-source-tree-grep")).toBe(true);
-    expect(report.findings.some((f) => f.ruleId === "F56-passed-grep")).toBe(true);
+    expect(report.findings.some((f) => f.ruleId === "F55-passed-grep")).toBe(true);
     expect(report.suspectAcIds).toEqual(["AC-02"]);
     expect(report.lintExemptPlanEntriesCount).toBe(1);
   });
@@ -407,19 +407,19 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
               id: "AC-01",
               description: "a",
               command: "cmd | grep -q 'passed'",
-              lintExempt: { ruleId: "F56-passed-grep", rationale: "ok" },
+              lintExempt: { ruleId: "F55-passed-grep", rationale: "ok" },
             },
             {
               id: "AC-02",
               description: "a",
               command: "cmd | grep -q 'passed'",
-              lintExempt: { ruleId: "F56-passed-grep", rationale: "ok" },
+              lintExempt: { ruleId: "F55-passed-grep", rationale: "ok" },
             },
             {
               id: "AC-03",
               description: "a",
               command: "cmd | grep -q 'passed'",
-              lintExempt: { ruleId: "F56-passed-grep", rationale: "ok" },
+              lintExempt: { ruleId: "F55-passed-grep", rationale: "ok" },
             },
           ],
         },
@@ -483,7 +483,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
         },
         {
           scope: "plan",
-          rules: ["F56-passed-grep"],
+          rules: ["F55-passed-grep"],
           batch: "batch-b",
           rationale: "r",
         },
@@ -513,7 +513,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
     const plan = mkPlanWithExempt(
       [
         { scope: "plan", rules: ["F36-source-tree-grep"], batch: "batch-1", rationale: "r1" },
-        { scope: "plan", rules: ["F56-passed-grep"], batch: "batch-2", rationale: "r2" },
+        { scope: "plan", rules: ["F55-passed-grep"], batch: "batch-2", rationale: "r2" },
         { scope: "plan", rules: ["F56-multigrep-pipe"], batch: "batch-3", rationale: "r3" },
         { scope: "plan", rules: ["F36-raw-rg"], batch: "batch-4", rationale: "r4" },
       ],

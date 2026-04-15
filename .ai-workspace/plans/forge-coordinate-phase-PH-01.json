@@ -443,7 +443,7 @@
         {
           "id": "PH01-US-06-AC01b",
           "description": "topo-sort.test.ts has at least 5 tests (regression guard)",
-          "command": "npx vitest run server/lib/topo-sort.test.ts --reporter=json 2>/dev/null | node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const r=JSON.parse(d);const n=r.numTotalTests||0;process.exit(n>=5?0:1)}catch(e){process.exit(1)}});'"
+          "command": "rm -f .vitest-topo.json && npx vitest run server/lib/topo-sort.test.ts --reporter=json --outputFile=.vitest-topo.json && node -e 'const fs=require(\"fs\");const r=JSON.parse(fs.readFileSync(\".vitest-topo.json\",\"utf8\"));process.exit((r.numTotalTests||0)>=5?0:1)' && rm -f .vitest-topo.json"
         },
         {
           "id": "PH01-US-06-AC02",
@@ -453,7 +453,7 @@
         {
           "id": "PH01-US-06-AC02b",
           "description": "run-reader.test.ts has at least 5 tests (regression guard)",
-          "command": "npx vitest run server/lib/run-reader.test.ts --reporter=json 2>/dev/null | node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const r=JSON.parse(d);const n=r.numTotalTests||0;process.exit(n>=5?0:1)}catch(e){process.exit(1)}});'"
+          "command": "rm -f .vitest-runreader.json && npx vitest run server/lib/run-reader.test.ts --reporter=json --outputFile=.vitest-runreader.json && node -e 'const fs=require(\"fs\");const r=JSON.parse(fs.readFileSync(\".vitest-runreader.json\",\"utf8\"));process.exit((r.numTotalTests||0)>=5?0:1)' && rm -f .vitest-runreader.json"
         },
         {
           "id": "PH01-US-06-AC03",
@@ -463,17 +463,17 @@
         {
           "id": "PH01-US-06-AC03b",
           "description": "coordinator.test.ts has at least 8 tests covering assessPhase + brief assembly (regression guard)",
-          "command": "npx vitest run server/lib/coordinator.test.ts --reporter=json 2>/dev/null | node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const r=JSON.parse(d);const n=r.numTotalTests||0;process.exit(n>=8?0:1)}catch(e){process.exit(1)}});'"
+          "command": "rm -f .vitest-coordinator.json && npx vitest run server/lib/coordinator.test.ts --reporter=json --outputFile=.vitest-coordinator.json && node -e 'const fs=require(\"fs\");const r=JSON.parse(fs.readFileSync(\".vitest-coordinator.json\",\"utf8\"));process.exit((r.numTotalTests||0)>=8?0:1)' && rm -f .vitest-coordinator.json"
         },
         {
           "id": "PH01-US-06-AC04",
           "description": "NFR-C01 advisory mode $0: grep finds zero callClaude/trackedCallClaude references in the PH-01 file set",
-          "command": "test -z \"$(grep -n 'callClaude\\|trackedCallClaude' server/lib/coordinator.ts server/lib/topo-sort.ts server/lib/run-reader.ts server/lib/run-record.ts server/validation/execution-plan.ts server/types/coordinate-result.ts server/tools/coordinate.ts 2>/dev/null)\" && echo EMPTY-OK | grep -q EMPTY-OK"
+          "command": "node -e 'const fs=require(\"fs\");const files=[\"server/lib/coordinator.ts\",\"server/lib/topo-sort.ts\",\"server/lib/run-reader.ts\",\"server/lib/run-record.ts\",\"server/validation/execution-plan.ts\",\"server/types/coordinate-result.ts\",\"server/tools/coordinate.ts\"];let bad=0;for(const f of files){const c=fs.readFileSync(f,\"utf8\");if(c.includes(\"callClaude\")||c.includes(\"trackedCallClaude\")){console.error(\"FOUND in\",f);bad++}}process.exit(bad===0?0:1)'"
         },
         {
           "id": "PH01-US-06-AC05",
           "description": "NFR-C02 deterministic dispatch: calling assessPhase twice on identical inputs returns structurally equal results (excluding timestamp fields)",
-          "command": "npx vitest run server/lib/coordinator.test.ts -t 'NFR-C02|deterministic.*dispatch|determinism' 2>&1 | grep -q 'passed'"
+          "command": "npx vitest run server/lib/coordinator.test.ts -t 'NFR-C02|deterministic.*dispatch|determinism'"
         },
         {
           "id": "PH01-US-06-AC06",

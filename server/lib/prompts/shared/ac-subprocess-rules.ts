@@ -80,7 +80,7 @@ export const AC_LINT_RULES: AcLintRule[] = [
   },
 
   {
-    id: "F56-passed-grep",
+    id: "F55-passed-grep",
     description:
       "lone `grep -q 'passed'/'failed'` on runner output (TTY-dependent summary line; includes unquoted + regex-alt forms)",
     // Q0.5/A2 MINOR-5 fix: also match `grep -qE 'passed|failed'`, unquoted

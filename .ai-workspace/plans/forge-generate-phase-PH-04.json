@@ -7,7 +7,7 @@
       "scope": "plan",
       "rules": [
         "F36-source-tree-grep",
-        "F56-passed-grep",
+        "F55-passed-grep",
         "F56-multigrep-pipe"
       ],
       "batch": "2026-04-13-c1-bootstrap",

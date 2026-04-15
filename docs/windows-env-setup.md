@@ -25,6 +25,8 @@ The 401 message says "OAuth authentication is currently not supported" because t
 
 Open **any** terminal (does not need to be Git Bash — the whole point is to make it launcher-agnostic). Run **one** of these commands, substituting the value from your existing `.bashrc`:
 
+Both commands below write to the same `HKCU\Environment` registry location — pick whichever matches your shell.
+
 **PowerShell:**
 ```powershell
 [System.Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', 'sk-ant-...YOUR_FULL_KEY...', 'User')
@@ -39,6 +41,8 @@ setx ANTHROPIC_API_KEY "sk-ant-...YOUR_FULL_KEY..."
 ```bash
 setx ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
 ```
+
+> **Note:** `setx` truncates values >1024 chars. Current Anthropic API keys are ~108 chars so this is not a concern, but be aware if you reuse this pattern for longer secrets.
 
 All three write to the Windows user registry hive at `HKCU\Environment`. Effect: every program launched afterward, from any launcher and by any mechanism, inherits `ANTHROPIC_API_KEY` in its `process.env`.
 
@@ -77,7 +81,7 @@ Open a **new** `cmd.exe` window (Start menu → `cmd` → Enter). Run:
 ```cmd
 echo %ANTHROPIC_API_KEY%
 ```
-✅ **Pass:** prints the full key, 108 characters, starting with `sk-ant-a`.
+✅ **Pass:** prints a non-empty value starting with `sk-ant-` (>= 100 characters).
 ❌ **Fail:** prints `%ANTHROPIC_API_KEY%` literally, or blank. Re-run Step 1 and verify you opened a NEW cmd window (not the one you ran `setx` in).
 
 ### AC-win-02 — PowerShell sees the key
@@ -85,7 +89,7 @@ Open a **new** PowerShell window. Run:
 ```powershell
 $env:ANTHROPIC_API_KEY.Length
 ```
-✅ **Pass:** prints `108`.
+✅ **Pass:** prints a number >= 100.
 ❌ **Fail:** prints nothing or errors. Re-run Step 1 with the PowerShell syntax.
 
 ### AC-win-03 — Claude Code launches cleanly from a Windows shortcut
@@ -102,9 +106,11 @@ In the Claude Code session from AC-win-03, ask Claude to run:
 ```
 mcp__forge__forge_evaluate({
   evaluationMode: "critic",
-  projectPath: "C:\\Users\\ziyil\\coding_projects\\forge-harness"
+  projectPath: "C:\\Users\\<your-username>\\<path-to>\\forge-harness"
 })
 ```
+
+> **Note:** Replace `<your-username>` and `<path-to>` with the actual path to your local forge-harness clone (e.g. `C:\Users\jsmith\coding_projects\forge-harness`).
 
 Expect 12 results (one per plan file under `.ai-workspace/plans/*.json`). Look at the `error` field of each result.
 
@@ -116,7 +122,7 @@ Open a Git Bash window. Run:
 ```bash
 echo ${#ANTHROPIC_API_KEY}
 ```
-✅ **Pass:** prints `108`. Confirms `.bashrc` still loads the key into Git Bash's env, so Git-Bash-launched Claude Code sessions are unaffected by the Windows-env-var change.
+✅ **Pass:** prints a number >= 100. Confirms `.bashrc` still loads the key into Git Bash's env, so Git-Bash-launched Claude Code sessions are unaffected by the Windows-env-var change.
 ❌ **Fail:** prints `0`. Your `.bashrc` export is missing or broken — unrelated to this fix, but worth fixing.
 
 ---
@@ -131,7 +137,7 @@ Update **both** places atomically:
 
 1. Run `setx ANTHROPIC_API_KEY "sk-ant-new-value..."` (or PowerShell equivalent)
 2. Edit `~/.bashrc` and replace the old value in the `export` line
-3. Restart all open Claude Code sessions (the MCP child cached the old key at spawn time)
+3. Restart all open Claude Code sessions (see AC-win-03 step 1 for the full kill-tree procedure — the MCP child cached the old key at spawn time)
 
 Run AC-win-01 and AC-win-05 after rotation to confirm both places took effect.
 

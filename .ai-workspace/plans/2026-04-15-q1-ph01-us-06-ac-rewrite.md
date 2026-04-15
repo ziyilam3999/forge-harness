@@ -33,20 +33,20 @@ When this plan is done, **all 5 hazardous ACs in PH01-US-06 use F-rule-safe patt
   ```bash
   export MSYS_NO_PATHCONV=1
   for id in PH01-US-06-AC01b PH01-US-06-AC02b PH01-US-06-AC03b PH01-US-06-AC04 PH01-US-06-AC05; do
-    diff <(git show origin/master:.ai-workspace/plans/forge-coordinate-phase-PH-01.json | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);const s=j.userStories.find(u=>u.id==="PH01-US-06");const a=s.acceptanceCriteria.find(x=>x.id===process.argv[1]);console.log(a.command)})' "$id") \
-         <(node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);const s=j.userStories.find(u=>u.id==="PH01-US-06");const a=s.acceptanceCriteria.find(x=>x.id===process.argv[1]);console.log(a.command)})' "$id" < .ai-workspace/plans/forge-coordinate-phase-PH-01.json) \
+    diff <(git show origin/master:.ai-workspace/plans/forge-coordinate-phase-PH-01.json | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);const s=j.stories.find(u=>u.id==="PH01-US-06");const a=s.acceptanceCriteria.find(x=>x.id===process.argv[1]);console.log(a.command)})' "$id") \
+         <(node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);const s=j.stories.find(u=>u.id==="PH01-US-06");const a=s.acceptanceCriteria.find(x=>x.id===process.argv[1]);console.log(a.command)})' "$id" < .ai-workspace/plans/forge-coordinate-phase-PH-01.json) \
          > /dev/null && echo "UNCHANGED $id"
   done
   ```
   Prints zero `UNCHANGED` lines.
 - [ ] **AC-2 — Zero F-55 hazards remain in the 5 rewritten commands.** None of the 5 rewritten commands contains the literal substrings `2>/dev/null |`, `2>&1 | grep`, or `| grep -q 'passed'`. Reviewer command:
   ```bash
-  node -e 'const j=require("./.ai-workspace/plans/forge-coordinate-phase-PH-01.json");const s=j.userStories.find(u=>u.id==="PH01-US-06");const ids=["PH01-US-06-AC01b","PH01-US-06-AC02b","PH01-US-06-AC03b","PH01-US-06-AC04","PH01-US-06-AC05"];let bad=0;for(const id of ids){const c=s.acceptanceCriteria.find(x=>x.id===id).command;if(c.includes("2>/dev/null |")||c.includes("2>&1 | grep")||c.includes("| grep -q '\''passed'\''")){console.log("HAZARD",id,c);bad++}}process.exit(bad===0?0:1)'
+  node -e 'const j=require("./.ai-workspace/plans/forge-coordinate-phase-PH-01.json");const s=j.stories.find(u=>u.id==="PH01-US-06");const ids=["PH01-US-06-AC01b","PH01-US-06-AC02b","PH01-US-06-AC03b","PH01-US-06-AC04","PH01-US-06-AC05"];let bad=0;for(const id of ids){const c=s.acceptanceCriteria.find(x=>x.id===id).command;if(c.includes("2>/dev/null |")||c.includes("2>&1 | grep")||c.includes("| grep -q '\''passed'\''")){console.log("HAZARD",id,c);bad++}}process.exit(bad===0?0:1)'
   ```
   Exits 0.
 - [ ] **AC-3 — Zero F-36 source-tree-grep hazards remain in AC04.** `PH01-US-06-AC04`'s rewritten command does not contain `grep -n 'callClaude` or `grep -rn callClaude` against `server/**` paths, AND does not contain the `echo EMPTY-OK | grep -q EMPTY-OK` verification-theatre tail. Reviewer command:
   ```bash
-  node -e 'const j=require("./.ai-workspace/plans/forge-coordinate-phase-PH-01.json");const s=j.userStories.find(u=>u.id==="PH01-US-06");const c=s.acceptanceCriteria.find(x=>x.id==="PH01-US-06-AC04").command;if(c.includes("grep -n \x27callClaude")||c.includes("grep -rn callClaude")||c.includes("echo EMPTY-OK | grep -q EMPTY-OK")){console.log("HAZARD",c);process.exit(1)}'
+  node -e 'const j=require("./.ai-workspace/plans/forge-coordinate-phase-PH-01.json");const s=j.stories.find(u=>u.id==="PH01-US-06");const c=s.acceptanceCriteria.find(x=>x.id==="PH01-US-06-AC04").command;if(c.includes("grep -n \x27callClaude")||c.includes("grep -rn callClaude")||c.includes("echo EMPTY-OK | grep -q EMPTY-OK")){console.log("HAZARD",c);process.exit(1)}'
   ```
   Exits 0.
 - [ ] **AC-4 — Rewrite is semantics-preserving against the PR branch, with a documented baseline.** The executor must:
@@ -84,7 +84,7 @@ AC-1 and AC-4 must hold **simultaneously on the same commit** — a rewrite that
 
 ## Critical files
 
-- `.ai-workspace/plans/forge-coordinate-phase-PH-01.json` — the only JSON file that changes. 5 AC `command` fields under `userStories[id=PH01-US-06].acceptanceCriteria`.
+- `.ai-workspace/plans/forge-coordinate-phase-PH-01.json` — the only JSON file that changes. 5 AC `command` fields under `stories[id=PH01-US-06].acceptanceCriteria` (JSON schema uses `stories`, not `userStories` — planner's original draft had this wrong; fixed via amendment commit on the executor's branch, 2026-04-15).
 - `server/validation/ac-lint.test.ts` — **read-only**. The executor's AC-5 check runs it; do not edit.
 - `server/lib/coordinator.ts`, `server/lib/topo-sort.ts`, `server/lib/run-reader.ts` — **read-only**. AC04's rewrite still needs to verify *something* about these files; whatever check the executor picks must run against the file tree without grepping inside source lines in the F-36 hazard way. One safe option: use `node -e` with `fs.readFileSync().includes("callClaude")` against an explicit file list.
 - `scripts/q1-task21-acceptance.sh` — new file, wraps AC-1..AC-9 in a single executable script per hard-rule 8 (task #34 + task #22 precedent).

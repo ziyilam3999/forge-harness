@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.8](https://github.com/ziyilam3999/forge-harness/compare/v0.30.7...v0.30.8) (2026-04-16)
+
+### Bug Fixes
+
+* **ac-lint (F56→F55 rename):** rename F56 test names and comments to F55 ([#215](https://github.com/ziyilam3999/forge-harness/pull/215)). Follow-up to [#213](https://github.com/ziyilam3999/forge-harness/pull/213) which renamed the rule itself — this PR catches the stray test/comment references that still said "F56" and makes them consistent with the new label. Pure rename, no matcher/finding changes.
+
+### Documentation
+
+* **compaction plan (audit artifact):** add `parent-claude.md` compaction plan + verification ACs ([#216](https://github.com/ziyilam3999/forge-harness/pull/216)). Pure documentation — adds a 298-line planning document at `.ai-workspace/plans/2026-04-16-claude-md-compaction-slate-b.md` capturing the full deletion plan with paired deletion+survival citations for the ai-brain `parent-claude.md` compaction that shipped as `ai-brain` v0.16.2. Serves as a template for future compaction passes: every deletion cites the downstream line that still carries the rule, and a `/coherent-plan` pass scoped to "verify each survival citation mechanically, one site at a time" catches silent rule loss before execution. No runtime behavior change.
+
 ## [0.30.7](https://github.com/ziyilam3999/forge-harness/compare/v0.30.6...v0.30.7) (2026-04-16)
 
 ### Miscellaneous

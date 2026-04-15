@@ -9,7 +9,7 @@
         "F56-multigrep-pipe"
       ],
       "batch": "2026-04-13-c1-bootstrap",
-      "rationale": "Bootstrap absorption of pre-C1-bis grep-based verification smells (F36 source-tree grep, F56 passed-grep and multi-grep-pipe variants). New drift must use F-rule-specified patterns. Unwind via grep -l 2026-04-13-c1-bootstrap .ai-workspace/plans/*.json."
+      "rationale": "Re-affirmed 2026-04-15 (task #22 audit, post-v0.20.0 / post-PR #208). These phase JSONs are shipped historical execution records of PH-01 through PH-04 work; no automated runtime consumer exists (verified: zero grep hits in `server/**`, zero references in `.github/workflows/ci.yml`, zero usage in test suites, ac-lint is a pure function library that only runs on caller-supplied plans). The only voluntary consumer is `forge_lint_refresh planPath=<this-file>`, which is an audit-time operation against a specific path and would only re-surface pre-existing F-55/F-56 violations describing already-shipped work. Live drift in newly authored plans is prevented by `npm run lint` (CI-enforced via PR #208) and per-call ac-lint, not by retroactive cleanup of historical records. Original C1-bootstrap \"we'll unwind later\" framing superseded — exemption retained as the correct end-state for shipped artifacts. Unwind via `grep -l 2026-04-13-c1-bootstrap .ai-workspace/plans/*.json` only if a future runtime consumer is added that would load these files automatically."
     }
   ],
   "stories": [

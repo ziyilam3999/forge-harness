@@ -454,6 +454,43 @@ describe("evaluateStory", () => {
         ),
       ).toBe(true);
     });
+
+    // Q0.5/A3 — dual-flag both-FAIL: flaky+exempt but BOTH runs FAIL → "unverified", no dual-flag warning.
+    // Flake is a property of the PASS path; when both runs fail, the tag stays
+    // "unverified" (exemption fired) and no dual-flag warning is emitted.
+    it("dual-flag: flaky + fired exemption + both-FAIL → reliability=unverified, no dual-flag warning", async () => {
+      mockedExecute
+        .mockResolvedValueOnce(mockResult({ status: "FAIL", evidence: "first fail" }))
+        .mockResolvedValueOnce(mockResult({ status: "FAIL", evidence: "second fail" }));
+      const plan: ExecutionPlan = {
+        schemaVersion: "3.0.0",
+        stories: [
+          {
+            id: "US-01",
+            title: "Dual flag both FAIL",
+            acceptanceCriteria: [
+              {
+                id: "AC-01",
+                description: "flaky AND exempted, both runs fail",
+                command: "npx vitest run | grep -q 'passed'",
+                flaky: true,
+                lintExempt: { ruleId: "F55-passed-grep", rationale: "reviewed" },
+              },
+            ],
+          },
+        ],
+      };
+      const report = await evaluateStory(plan, "US-01", { flakyRetryGapMs: 1 });
+      expect(report.verdict).toBe("FAIL");
+      expect(report.criteria[0].status).toBe("FAIL");
+      // Exemption fired → unverified (not suspect); dual-flag warning must NOT appear.
+      expect(report.criteria[0].reliability).toBe("unverified");
+      expect(
+        (report.warnings ?? []).some((w) =>
+          /flaky.*lintExempt|lintExempt.*flaky/i.test(w),
+        ),
+      ).toBe(false);
+    });
   });
 
   // Q0.5/C2 — flaky field retry semantics.

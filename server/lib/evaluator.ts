@@ -93,17 +93,6 @@ export async function evaluateStory(
     // (deferred to Q0.5/A3-bis).
     const exemptionFired = lint.findings.some((f) => f.exempt === true);
 
-    // Q0.5/A3 — dual-flag warning (T1510 blessed + T1545 clarified). A flaky
-    // AC whose exemption fired is reported as "suspect" (runtime signal
-    // outranks authoring override) — but the collision itself is a soft
-    // smell that deserves an explicit, per-AC warning so analytics can
-    // grep for it. Rolled warnings hide the signal.
-    if (ac.flaky === true && exemptionFired) {
-      dualFlagWarnings.push(
-        `AC '${ac.id}' has flaky: true AND a lintExempt entry whose exemption fired during this run — reporting as suspect (flake takes precedence). Override review recommended.`,
-      );
-    }
-
     const firstRun = await executeCommand(ac.command, execOptions);
 
     // Q0.5/C2 — flaky retry gate. Only fires when (a) the AC author opted in
@@ -128,6 +117,18 @@ export async function evaluateStory(
         // so the AC doesn't block the verdict, but surface the soft signal
         // via reliability="suspect" and an evidence prefix so callers can
         // audit the flake rate downstream.
+        // Q0.5/A3 — dual-flag warning (T1510 blessed + T1545 clarified). A flaky
+        // AC whose exemption fired is reported as "suspect" (runtime signal
+        // outranks authoring override) — but the collision itself is a soft
+        // smell that deserves an explicit, per-AC warning so analytics can
+        // grep for it. Scoped to the retry-PASS branch only: flake is a
+        // property of the PASS path; both-FAIL stays tagged "unverified"
+        // without a dual-flag warning (tag-vs-warning mismatch fixed).
+        if (exemptionFired) {
+          dualFlagWarnings.push(
+            `AC '${ac.id}' has flaky: true AND a lintExempt entry whose exemption fired during this run — reporting as suspect (flake takes precedence). Override review recommended.`,
+          );
+        }
         criteria.push({
           id: ac.id,
           status: "PASS",

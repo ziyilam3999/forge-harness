@@ -46,7 +46,7 @@ Not both. Not partial. Choose one branch based on the measured answer to "does a
 - [ ] AC-6 — **Build still passes.** `npm run build` exits `0`.
 - [ ] AC-7 — **Lint still passes.** `npm run lint` exits `0` (newly enforced by PR #208).
 - [ ] AC-8 — **Tests still pass.** `npm test` exits `0`.
-- [ ] AC-9 — **No drive-by edits.** `git diff origin/master...HEAD --stat` shows changes confined to `.ai-workspace/plans/forge-{coordinate,generate}-phase-PH-0{1,2,3,4}.json` (PH-01 entries permitted ONLY for rationale-field refresh under AFFIRM; AC-command rewrites in PH-01 are AC-9 violations), `.ai-workspace/plans/2026-04-02-phase2-forge-plan-output.json` (rationale refresh only — file has zero AC content), `.ai-workspace/audits/2026-04-15-*.md`, and the plan file itself. No `server/**` source changes. No CI workflow changes.
+- [ ] AC-9 — **No drive-by edits.** `git diff origin/master...HEAD --stat` shows changes confined to `.ai-workspace/plans/forge-{coordinate,generate}-phase-PH-0{1,2,3,4}.json` (PH-01 entries permitted ONLY for rationale-field refresh under AFFIRM; AC-command rewrites in PH-01 are AC-9 violations), `.ai-workspace/plans/2026-04-02-phase2-forge-plan-output.json` (rationale refresh only — file has zero AC content), `.ai-workspace/audits/2026-04-15-*.md`, the plan file itself, and `scripts/q1-cross-phase-acceptance.sh` (the hard-rule-8 acceptance wrapper deliverable, per task #34 precedent which shipped `scripts/q05-task34-acceptance.sh` in PR #208). No `server/**` source changes. No CI workflow changes.
 - [ ] AC-10 — **CI green on the PR**, including the new lint step.
 
 ## Out of scope

@@ -56,14 +56,14 @@ describe("lintAcCommand — WRONG patterns (must flag)", () => {
     expect(r.findings.some((f) => f.ruleId === "F56-multigrep-pipe")).toBe(true);
   });
 
-  it("F56: lone `grep -q 'passed'` on runner output", () => {
+  it("F55: lone `grep -q 'passed'` on runner output", () => {
     const cmd = "npx vitest run -t 'foo' 2>&1 | grep -q 'passed'";
     const r = lintAcCommand(cmd);
     expect(r.suspect).toBe(true);
     expect(r.findings.some((f) => f.ruleId === "F55-passed-grep")).toBe(true);
   });
 
-  it("F56: lone `grep -q 'failed'` on runner output", () => {
+  it("F55: lone `grep -q 'failed'` on runner output", () => {
     const cmd = "npx vitest run | grep -q 'failed'";
     expect(lintAcCommand(cmd).suspect).toBe(true);
   });
@@ -378,7 +378,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
       ],
       [
         { id: "AC-01", command: "grep -rn 'Redis' src/" }, // F36 → dropped
-        { id: "AC-02", command: "npx vitest run | grep -q 'passed'" }, // F56 → still surfaces
+        { id: "AC-02", command: "npx vitest run | grep -q 'passed'" }, // F55 → still surfaces
       ],
     );
     const report = lintPlan(plan);
@@ -490,7 +490,7 @@ describe("lintPlan — Q0.5/C1-bis plan-level lintExempt", () => {
       ],
       [
         { id: "AC-01", command: "grep -rn 'x' src/" }, // F36
-        { id: "AC-02", command: "cmd | grep -q 'passed'" }, // F56
+        { id: "AC-02", command: "cmd | grep -q 'passed'" }, // F55
       ],
     );
     const report = lintPlan(plan);

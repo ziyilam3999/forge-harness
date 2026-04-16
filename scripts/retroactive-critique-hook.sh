@@ -11,6 +11,13 @@ set -euo pipefail
 # 401 fallback: if MCP auth fails, the directive tells Claude to produce
 # {findings: [...]} in-session rather than fail-closed. The contract is the
 # JSON output schema, not the MCP call site.
+#
+# JSON emission is delegated to emit_additional_context from
+# scripts/lib/hook-helpers.sh (issue #186) so future edits to the directive
+# text can safely interpolate paths / rule names without producing malformed
+# JSON.
+# shellcheck source=lib/hook-helpers.sh
+source "$(dirname "$0")/lib/hook-helpers.sh"
 
 input="$(cat)"
 
@@ -81,12 +88,7 @@ if [[ -f "$hash_file" ]] && [[ "$(cat "$hash_file")" == "$content_hash" ]]; then
 fi
 printf '%s' "$content_hash" > "$hash_file"
 
-cat <<'JSON'
-{
-  "hookSpecificOutput": {
-    "hookEventName": "PostToolUse",
-    "additionalContext": "A prompt-rule source file was just edited. Before producing your next response, you MUST invoke mcp__forge__forge_evaluate in critic mode against every .ai-workspace/plans/*.json file in this repo to detect drift between the updated rule set and existing plans. Surface all findings inline. Do not defer this to a later turn.\n\nIMPORTANT — 401/auth fallback: if the mcp__forge__forge_evaluate call fails with HTTP 401, OAuth error, or any authentication failure, DO NOT retry or abort. Instead, perform the critique in-session: read each .ai-workspace/plans/*.json file, apply the updated prompt-rule set manually, and produce a well-formed JSON object matching the MCP output schema: {\"findings\": [{\"acId\": \"...\", \"severity\": \"error|warning|info\", \"message\": \"...\", \"file\": \"...\", \"line\": null}]}. The contract is the output schema, not the call site."
-  }
-}
-JSON
+printf '%s' 'A prompt-rule source file was just edited. Before producing your next response, you MUST invoke mcp__forge__forge_evaluate in critic mode against every .ai-workspace/plans/*.json file in this repo to detect drift between the updated rule set and existing plans. Surface all findings inline. Do not defer this to a later turn.
+
+IMPORTANT — 401/auth fallback: if the mcp__forge__forge_evaluate call fails with HTTP 401, OAuth error, or any authentication failure, DO NOT retry or abort. Instead, perform the critique in-session: read each .ai-workspace/plans/*.json file, apply the updated prompt-rule set manually, and produce a well-formed JSON object matching the MCP output schema: {"findings": [{"acId": "...", "severity": "error|warning|info", "message": "...", "file": "...", "line": null}]}. The contract is the output schema, not the call site.' | emit_additional_context
 exit 0

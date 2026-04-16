@@ -10,24 +10,12 @@ set -euo pipefail
 # M1 (explicit parse-failure diagnostic), M2 (linter-crashed additionalContext).
 # E3 (single-file lint passthrough) is deferred pending scripts/run-ac-lint.mjs
 # single-file support — see follow-up PR.
-
-emit_additional_context() {
-  # Emit a Claude Code PostToolUse additionalContext JSON to stdout.
-  # Reads the context body from stdin so bodies with special chars are
-  # JSON-escaped safely via node.
-  node -e '
-    let s = "";
-    process.stdin.on("data", d => s += d);
-    process.stdin.on("end", () => {
-      process.stdout.write(JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          additionalContext: s,
-        }
-      }));
-    });
-  '
-}
+#
+# emit_additional_context is now sourced from scripts/lib/hook-helpers.sh
+# (issue #186) so the JSON-safe emission path is shared with
+# retroactive-critique-hook.sh.
+# shellcheck source=lib/hook-helpers.sh
+source "$(dirname "$0")/lib/hook-helpers.sh"
 
 input="$(cat)"
 

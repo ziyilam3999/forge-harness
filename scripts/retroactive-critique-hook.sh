@@ -68,6 +68,10 @@ for f in "${allowlist[@]}"; do
 done
 content_hash="$(printf '%s' "$content_hash" | md5sum | cut -d' ' -f1)"
 
+# NOTE: when neither CLAUDE_SESSION_ID nor MAILBOX_SESSION_ID is set, session_id
+# falls back to "default" and multiple unsessioned sessions share the same
+# /tmp/forge-critique-default-last-hash, which can cause one session to suppress
+# another's fires. Tracked in #237.
 session_id="${CLAUDE_SESSION_ID:-${MAILBOX_SESSION_ID:-default}}"
 hash_file="/tmp/forge-critique-${session_id}-last-hash"
 

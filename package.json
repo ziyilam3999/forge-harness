@@ -1,6 +1,6 @@
 {
   "name": "forge-harness",
-  "version": "0.30.18",
+  "version": "0.30.19",
   "type": "module",
   "description": "Composable AI primitives — plan, evaluate, generate, coordinate — as a local MCP server",
   "scripts": {

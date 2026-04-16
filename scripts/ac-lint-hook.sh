@@ -68,7 +68,7 @@ esac
 # honored as an intentional override so tests can redirect to a sandbox, but
 # the fallback no longer trusts $(pwd) — which could point at the wrong repo
 # when the hook is invoked from a nested directory.
-project_dir="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+project_dir="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 # M2: capture lint exit status explicitly. On non-zero exit, surface a
 # "linter crashed" additionalContext so the session author sees the failure

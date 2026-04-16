@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.11](https://github.com/ziyilam3999/forge-harness/compare/v0.30.10...v0.30.11) (2026-04-16)
+
+### Miscellaneous
+- **ac-rewrite:** rewrite 6 F55-passed ACs in PH01-US-02 (task #40 s03) (#229)
+
 ## [0.30.10](https://github.com/ziyilam3999/forge-harness/compare/v0.30.9...v0.30.10) (2026-04-16)
 
 ### Miscellaneous

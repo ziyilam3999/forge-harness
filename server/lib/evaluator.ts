@@ -166,12 +166,14 @@ export async function evaluateStory(
   }
 
   // Q0.5/A3 — aggregate unverified-count warning (per T1545 text).
-  const unverifiedCount = criteria.filter(
+  const unverifiedCriteria = criteria.filter(
     (c) => c.reliability === "unverified",
-  ).length;
+  );
+  const unverifiedCount = unverifiedCriteria.length;
   if (unverifiedCount > 0) {
+    const unverifiedIds = unverifiedCriteria.map((c) => c.id);
     warnings.push(
-      `${unverifiedCount} AC(s) ran with a fired lintExempt override — reliability is unverified`,
+      `${unverifiedCount} AC(s) ran with a fired lintExempt override — reliability is unverified (${unverifiedIds.join(", ")})`,
     );
   }
   // Q0.5/A3 — dual-flag per-AC warnings (flaky + fired exemption collision).

@@ -157,27 +157,27 @@
         {
           "id": "PH01-US04-AC01",
           "description": "buildBrief returns GenerationBrief with story object from plan matching storyId",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*story' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*story' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US04-AC02",
           "description": "buildBrief returns codebaseContext string from scanCodebase",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*codebaseContext' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*codebaseContext' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US04-AC03",
           "description": "buildBrief returns gitBranch as feat/{storyId} (e.g. feat/US-01 for storyId US-01)",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*gitBranch' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*gitBranch' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US04-AC04",
           "description": "buildBrief returns baselineCheck from plan or defaults to 'npm run build && npm test'",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*baselineCheck' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*baselineCheck' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US04-AC05",
           "description": "buildBrief throws or returns error for non-existent storyId",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'buildBrief.*not found\\|buildBrief.*invalid' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*not found\\|buildBrief.*invalid' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [

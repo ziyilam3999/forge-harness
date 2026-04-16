@@ -236,42 +236,42 @@
         {
           "id": "PH01-US06-AC01",
           "description": "Plateau detection: previousScores [0.5, 0.5, 0.5] triggers escalation with reason 'plateau'",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'plateau' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'plateau' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC02",
           "description": "No-op detection: matching fileHashes triggers escalation with reason 'no-op'",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'no-op' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'no-op' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC03",
           "description": "Max iterations: iteration >= maxIterations triggers escalation with reason 'max-iterations'",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'max-iterations' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'max-iterations' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC04",
           "description": "INCONCLUSIVE: verdict INCONCLUSIVE triggers immediate escalation regardless of other conditions",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'inconclusive' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'inconclusive' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC05",
           "description": "Baseline-failed: escalation includes diagnostics with exitCode, stderr (truncated to 2000 chars), and failingTests",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'baseline-failed\\|baseline.*diagnostics' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'baseline-failed\\|baseline.*diagnostics' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC06",
           "description": "Continue when improving: previousScores [0.3, 0.5] does NOT trigger any stopping condition",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'continue when improving\\|continue.*improving' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'continue when improving\\|continue.*improving' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC07",
           "description": "INCONCLUSIVE takes precedence over all other stopping conditions",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'INCONCLUSIVE.*precedence\\|precedence.*INCONCLUSIVE' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'INCONCLUSIVE.*precedence\\|precedence.*INCONCLUSIVE' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC08",
           "description": "Plateau boundary case: previousScores [0.3, 0.5, 0.5] triggers plateau (improving then stuck)",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'plateau.*boundary\\|improving.*plateau\\|0.3.*0.5.*0.5' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'plateau.*boundary\\|improving.*plateau\\|0.3.*0.5.*0.5' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [

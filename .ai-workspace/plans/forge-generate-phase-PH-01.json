@@ -33,17 +33,17 @@
         {
           "id": "PH01-US01-AC03",
           "description": "Validation accepts plans with baselineCheck field without errors",
-          "command": "npx vitest run server/validation/execution-plan.test.ts -t 'baselineCheck' 2>&1 | grep -qE '(passed|Tests.*[1-9])'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/validation/execution-plan.test.ts -t 'baselineCheck' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US01-AC04",
           "description": "Validation accepts stories with lineage field without errors",
-          "command": "npx vitest run server/validation/execution-plan.test.ts -t 'lineage' 2>&1 | grep -qE '(passed|Tests.*[1-9])'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/validation/execution-plan.test.ts -t 'lineage' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US01-AC05",
           "description": "Existing validation tests still pass (backward compatibility)",
-          "command": "npx vitest run server/validation/execution-plan.test.ts 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/validation/execution-plan.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US01-AC06",

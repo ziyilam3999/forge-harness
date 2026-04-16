@@ -23,7 +23,6 @@ if npx vitest run server/smoke/ac-lint.test.ts >/dev/null 2>&1; then pass; else 
 
 # AC-3: each rewritten command is executable (all 8 use valid syntax)
 step 3 "all $F55_COUNT rewritten commands parse as valid JSON+bash"
-CMD_PASS=0
 # Extract the 8 rewritten commands from the phase JSON and check each is syntactically valid bash
 COMMANDS=$(node -e "
 const fs = require('fs');

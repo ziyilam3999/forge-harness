@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.9](https://github.com/ziyilam3999/forge-harness/compare/v0.30.8...v0.30.9) (2026-04-16)
+
+### Bug Fixes
+- recursive walk for nested plan dirs in handleCriticEval (#224)
+- handleCriticEval guard parsed !== null && typeof parsed === 'object' (#221)
+- aggregate unverified warning should include the offending AC ids (#222)
+- apply 5 clarity/future polish items to windows-env-setup.md (#217)
+- pin backward-compat for undefined reliability (#218)
+- scope dual-flag warning to retry-PASS branch only (#219)
+
+### Miscellaneous
+- **ac-rewrite:** rewrite 3 F55 ACs in PH01-US-00a (task #40 s01) (#223)
+
 ## [0.30.8](https://github.com/ziyilam3999/forge-harness/compare/v0.30.7...v0.30.8) (2026-04-16)
 
 ### Bug Fixes

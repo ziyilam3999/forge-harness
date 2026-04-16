@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.14](https://github.com/ziyilam3999/forge-harness/compare/v0.30.13...v0.30.14) (2026-04-16)
+
+### Bug Fixes
+
+- **hooks:** add de-dup + 401 fallback to retroactive-critique hook ([#234](https://github.com/ziyilam3999/forge-harness/pull/234))
+
 ## [0.30.13](https://github.com/ziyilam3999/forge-harness/compare/v0.30.12...v0.30.13) (2026-04-16)
 
 ### Miscellaneous

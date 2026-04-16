@@ -267,37 +267,37 @@
         {
           "id": "PH01-US-03-AC03",
           "description": "Results are sorted by timestamp ascending (test fixture inserts records out of order, asserts sorted output)",
-          "command": "npx vitest run server/lib/run-reader.test.ts -t 'sort.*timestamp|timestamp.*sort' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/run-reader.test.ts -t 'sort.*timestamp|timestamp.*sort' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-03-AC04",
           "description": "Corrupt JSON in .forge/runs/*.json is skipped with console.error and valid entries are still returned",
-          "command": "npx vitest run server/lib/run-reader.test.ts -t 'corrupt.*JSON|corrupt.*json' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/run-reader.test.ts -t 'corrupt.*JSON|corrupt.*json' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-03-AC05",
           "description": "Truncated JSONL line in .forge/runs/data.jsonl is skipped",
-          "command": "npx vitest run server/lib/run-reader.test.ts -t 'truncated.*JSONL|truncated.*jsonl' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/run-reader.test.ts -t 'truncated.*JSONL|truncated.*jsonl' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-03-AC06",
           "description": "Schema mismatch (e.g. missing required field) is skipped",
-          "command": "npx vitest run server/lib/run-reader.test.ts -t 'schema.*mismatch' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/run-reader.test.ts -t 'schema.*mismatch' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-03-AC07",
           "description": "Empty .forge/runs directory returns []",
-          "command": "npx vitest run server/lib/run-reader.test.ts -t 'empty.*dir' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/run-reader.test.ts -t 'empty.*dir' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-03-AC08",
           "description": "Permission-denied (simulated) is logged and skipped, valid entries returned",
-          "command": "npx vitest run server/lib/run-reader.test.ts -t 'permission' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/run-reader.test.ts -t 'permission' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-03-AC09",
           "description": "Happy path: writes 2 primary + 2 generator records, asserts dual-source tagged output preserves both",
-          "command": "npx vitest run server/lib/run-reader.test.ts -t 'dual-source|dual.source' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/run-reader.test.ts -t 'dual-source|dual.source' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [

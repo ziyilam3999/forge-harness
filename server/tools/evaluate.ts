@@ -678,9 +678,12 @@ async function handleCriticEval(input: EvaluateInput): Promise<McpResponse> {
         jsonMode: true,
       });
 
-      const parsed = result.parsed as Record<string, unknown>;
-      const findings = Array.isArray(parsed.findings)
-        ? (parsed.findings as unknown[])
+      const parsed = result.parsed;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("critic response was not a JSON object");
+      }
+      const findings = Array.isArray((parsed as Record<string, unknown>).findings)
+        ? ((parsed as Record<string, unknown>).findings as unknown[])
         : [];
       results.push({ planPath, findings });
     } catch (err) {

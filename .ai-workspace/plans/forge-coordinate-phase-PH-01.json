@@ -211,32 +211,32 @@
         {
           "id": "PH01-US-02-AC04",
           "description": "topoSort([]) returns [] without throwing (empty-input guard)",
-          "command": "npx vitest run server/lib/topo-sort.test.ts -t 'empty' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/topo-sort.test.ts -t 'empty' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-02-AC05",
           "description": "Given chained dependencies US-01 → US-02 → US-03, topoSort returns them in [US-01, US-02, US-03] order",
-          "command": "npx vitest run server/lib/topo-sort.test.ts -t 'chain' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/topo-sort.test.ts -t 'chain' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-02-AC06",
           "description": "Given input order [US-03, US-01, US-02] with US-02 depending on US-01 and US-03 on US-02, topoSort returns [US-01, US-02, US-03]",
-          "command": "npx vitest run server/lib/topo-sort.test.ts -t 'reverse.*input|input.*order' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/topo-sort.test.ts -t 'reverse.*input|input.*order' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-02-AC07",
           "description": "Stable lex tie-break: given two zero-in-degree stories US-Z and US-A with no dependencies, topoSort returns US-A before US-Z",
-          "command": "npx vitest run server/lib/topo-sort.test.ts -t 'lex|tie-break' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/topo-sort.test.ts -t 'lex|tie-break' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-02-AC08",
           "description": "topoSort throws when given a plan containing a cycle",
-          "command": "npx vitest run server/lib/topo-sort.test.ts -t 'cycle' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/topo-sort.test.ts -t 'cycle' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-02-AC09",
           "description": "Existing execution-plan validation tests still pass after detectCycles signature change",
-          "command": "npx vitest run server/validation/execution-plan.test.ts 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/validation/execution-plan.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [

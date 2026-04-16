@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Task #40 slice 2 — PH01-US-00b AC rewrite acceptance wrapper.
-# Runs AC-1, AC-2, AC-4, AC-6 from the task #40 plan.
+# Runs AC-1 through AC-6 from the task #40 plan.
 # Exits 0 iff all pass.
 #
 # MSYS_NO_PATHCONV=1 prevents Windows MSYS bash from silently mangling

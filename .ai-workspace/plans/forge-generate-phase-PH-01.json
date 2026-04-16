@@ -288,17 +288,17 @@
         {
           "id": "PH01-US07-AC01",
           "description": "Every escalation contains reason, description, hypothesis, lastEvalVerdict, and scoreHistory",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'escalation.*report\\|structured.*escalation' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'escalation.*report\\|structured.*escalation' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US07-AC02",
           "description": "Escalation description is specific to the failure reason (not generic)",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'escalation.*description\\|description.*specific' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'escalation.*description\\|description.*specific' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US07-AC03",
           "description": "Baseline-failed escalation has diagnostics; other reasons do not",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'diagnostics.*only.*baseline\\|baseline.*only.*diagnostics' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'diagnostics.*only.*baseline\\|baseline.*only.*diagnostics' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [

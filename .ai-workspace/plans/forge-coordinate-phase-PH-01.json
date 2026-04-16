@@ -56,12 +56,12 @@
         {
           "id": "PH01-US-00a-AC07",
           "description": "Unit test asserts that handleStoryEval writes a RunRecord whose evalReport.criteria is defined and matches the input EvalReport",
-          "command": "npx vitest run server/tools/evaluate.test.ts -t 'handleStoryEval.*evalReport' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/tools/evaluate.test.ts -t 'handleStoryEval.*evalReport' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-00a-AC08",
           "description": "Deterministic serialization: writing the same EvalReport via handleStoryEval twice produces byte-identical JSON output",
-          "command": "npx vitest run server/tools/evaluate.test.ts -t 'deterministic.*serialization|evalReport.*byte-identical' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/tools/evaluate.test.ts -t 'deterministic.*serialization|evalReport.*byte-identical' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-00a-AC09",
@@ -71,7 +71,7 @@
         {
           "id": "PH01-US-00a-AC10",
           "description": "Existing run-record tests still pass (additive change, backward compatible)",
-          "command": "npx vitest run server/lib/run-record.test.ts 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/lib/run-record.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [

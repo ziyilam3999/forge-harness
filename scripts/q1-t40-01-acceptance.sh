@@ -12,6 +12,14 @@ FAIL=0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# ---------------- dist/ build prerequisite guard ----------------
+# Wrapper runs compiled JS from dist/. If dist/ is missing or older than
+# server/ (TS sources), tests run against stale output. Issue #226.
+if [ ! -d "dist" ] || [ -n "$(find server -type f -newer dist 2>/dev/null | head -n 1)" ]; then
+  echo "ERROR: dist/ missing or stale. Run 'npm run build' first." >&2
+  exit 1
+fi
+
 PHASE_JSON=".ai-workspace/plans/forge-coordinate-phase-PH-01.json"
 STORY="PH01-US-00a"
 

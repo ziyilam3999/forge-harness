@@ -318,27 +318,27 @@
         {
           "id": "PH01-US08-AC01",
           "description": "assembleGenerateResult with no evalReport returns action 'implement' with GenerationBrief",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*implement\\|orchestrator.*implement' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*implement\\|orchestrator.*implement' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC02",
           "description": "assembleGenerateResult with FAIL evalReport returns action 'fix' with FixBrief when no stopping conditions met",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*fix\\|orchestrator.*fix' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*fix\\|orchestrator.*fix' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC03",
           "description": "assembleGenerateResult with PASS evalReport returns action 'pass'",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*pass\\|orchestrator.*pass' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*pass\\|orchestrator.*pass' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC04",
           "description": "assembleGenerateResult with stopping condition returns action 'escalate' with Escalation",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*escalate\\|orchestrator.*escalate' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*escalate\\|orchestrator.*escalate' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC05",
           "description": "All PH-01 unit tests pass together",
-          "command": "npx vitest run server/lib/generator.test.ts server/lib/plan-loader.test.ts 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC06",

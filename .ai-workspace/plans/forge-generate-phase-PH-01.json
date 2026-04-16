@@ -128,12 +128,12 @@
         {
           "id": "PH01-US03-AC03",
           "description": "loadPlan handles planJson precedence over planPath",
-          "command": "npx vitest run server/lib/plan-loader.test.ts -t 'precedence' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/plan-loader.test.ts -t 'precedence' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US03-AC04",
           "description": "Existing evaluate tests still pass after extraction",
-          "command": "npx vitest run server/tools/evaluate.test.ts 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/tools/evaluate.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US03-AC05",

@@ -194,32 +194,32 @@
         {
           "id": "PH01-US05-AC01",
           "description": "buildFixBrief extracts only FAIL criteria from eval report (skips PASS and SKIPPED)",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*failedCriteria' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*failedCriteria' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC02",
           "description": "computeScore returns PASS/non-SKIPPED ratio (e.g. 2 PASS, 1 FAIL, 1 SKIPPED = 0.667)",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'computeScore' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'computeScore' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC03",
           "description": "fixBrief.evalHint.failFastIds lists AC IDs ordered by priority (functionality first)",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'evalHint\\|failFast' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'evalHint\\|failFast' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC04",
           "description": "buildDiffManifest computes changed/unchanged/new arrays from current vs previous fileHashes",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'diffManifest\\|DiffManifest' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'diffManifest\\|DiffManifest' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC05",
           "description": "diffManifest is omitted when iteration is 0 (init call)",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'diffManifest.*init\\|init.*diffManifest\\|omitted.*iteration.0' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'diffManifest.*init\\|init.*diffManifest\\|omitted.*iteration.0' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC06",
           "description": "Each failed criterion includes id, description, and evidence fields",
-          "command": "npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*evidence\\|failed.*evidence' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*evidence\\|failed.*evidence' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [

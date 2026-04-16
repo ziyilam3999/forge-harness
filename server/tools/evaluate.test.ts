@@ -757,6 +757,31 @@ describe("handleEvaluate — divergence mode", () => {
     expect(report.summary).toContain("1 unverified");
   });
 
+  it("AC-A3-07b: undefined reliability is counted as trusted (backward-compat)", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(
+      makeEvalReport({
+        storyId: "US-01",
+        verdict: "INCONCLUSIVE",
+        criteria: [
+          {
+            id: "AC-01",
+            status: "INCONCLUSIVE",
+            evidence: "infra broke",
+            // reliability intentionally omitted → must count as trusted
+          },
+        ],
+      }),
+    );
+
+    const result = await handleEvaluate({
+      evaluationMode: "divergence",
+      planJson: makeValidPlanJson(),
+    });
+
+    const report = JSON.parse(result.content[0].text);
+    expect(report.summary).toContain("1 trusted / 0 suspect / 0 unverified");
+  });
+
   it("detects reverse divergence (unplanned capabilities) via LLM", async () => {
     mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport());
 

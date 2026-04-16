@@ -644,7 +644,7 @@ async function handleCriticEval(input: EvaluateInput): Promise<McpResponse> {
     const root = input.projectPath ?? process.cwd();
     const plansDir = join(root, ".ai-workspace", "plans");
     try {
-      resolvedPaths = readdirSync(plansDir)
+      resolvedPaths = (readdirSync(plansDir, { recursive: true }) as string[])
         .filter((f) => f.endsWith(".json"))
         .map((f) => join(plansDir, f))
         .sort();

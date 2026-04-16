@@ -112,12 +112,12 @@
         {
           "id": "PH01-US-00b-AC05",
           "description": "Unit test asserts a freshly-written primary RunRecord from handleCoherenceEval contains a numeric or null estimatedCostUsd (never absent)",
-          "command": "npx vitest run server/tools/evaluate.test.ts -t 'estimatedCostUsd' 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/tools/evaluate.test.ts -t 'estimatedCostUsd' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-00b-AC06",
           "description": "Existing evaluate and plan test suites still pass after the cross-site modifications",
-          "command": "npx vitest run server/tools/evaluate.test.ts server/tools/plan.test.ts 2>&1 | grep -q 'passed'"
+          "command": "export TMP=$(mktemp) && npx vitest run server/tools/evaluate.test.ts server/tools/plan.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [

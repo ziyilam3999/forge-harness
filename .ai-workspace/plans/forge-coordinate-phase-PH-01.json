@@ -381,42 +381,42 @@
         {
           "id": "PH01-US-05-AC02",
           "description": "Happy path: 5 stories with 2 done + 3 ready → brief.status 'in-progress', completedCount 2, totalCount 5, readyStories.length 3, failedStories.length 0",
-          "command": "npx vitest run server/lib/coordinator.test.ts -t 'happy.*path|happy-path' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/lib/coordinator.test.ts -t 'happy.*path|happy-path' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-05-AC03",
           "description": "All-failed: 5 retry-exhausted stories → brief.status 'needs-replan', replanningNotes contains a blocking entry, recommendation identifies a failed story by ID",
-          "command": "npx vitest run server/lib/coordinator.test.ts -t 'all.failed|all-failed' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/lib/coordinator.test.ts -t 'all.failed|all-failed' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-05-AC04",
           "description": "Mixed failed + ready: 1 failed + 4 ready → brief.status 'needs-replan' (NOT 'in-progress' — rule 3 dominates over forward-progress branches per REQ-05 v1.1)",
-          "command": "npx vitest run server/lib/coordinator.test.ts -t 'mixed.*failed|mixed-failed' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/lib/coordinator.test.ts -t 'mixed.*failed|mixed-failed' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-05-AC05",
           "description": "ready-for-retry inclusion: story with FAIL record + retryCount 1 → StoryStatusEntry has status 'ready-for-retry', retryCount 1, retriesRemaining 2, priorEvalReport populated (not null)",
-          "command": "npx vitest run server/lib/coordinator.test.ts -t 'ready-for-retry.*inclusion|ready.for.retry' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/lib/coordinator.test.ts -t 'ready-for-retry.*inclusion|ready.for.retry' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-05-AC06",
           "description": "LAST RETRY recommendation: when any entry has retriesRemaining === 1, brief.recommendation matches /LAST RETRY: /",
-          "command": "npx vitest run server/lib/coordinator.test.ts -t 'LAST RETRY|last-retry' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/lib/coordinator.test.ts -t 'LAST RETRY|last-retry' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-05-AC07",
           "description": "depFailedStories field is populated from dep-failed entries (NOT blockedStories — v1.1 rename)",
-          "command": "npx vitest run server/lib/coordinator.test.ts -t 'depFailedStories' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/lib/coordinator.test.ts -t 'depFailedStories' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-05-AC08",
           "description": "priorEvalReport provenance: two FAIL records with distinguishable criteria → priorEvalReport.criteria matches the newer record",
-          "command": "npx vitest run server/lib/coordinator.test.ts -t 'priorEvalReport.*provenance|priorEvalReport.*newest' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/lib/coordinator.test.ts -t 'priorEvalReport.*provenance|priorEvalReport.*newest' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US-05-AC09",
           "description": "NFR-C08: Object.keys() of every StoryStatusEntry returns identical sorted key set across all 6 status values (no absent keys)",
-          "command": "npx vitest run server/lib/coordinator.test.ts -t 'NFR-C08|no absent keys|Object.keys' 2>&1 | grep -q 'passed'"
+          "command": "TMP=$(mktemp) && npx vitest run server/lib/coordinator.test.ts -t 'NFR-C08|no absent keys|Object.keys' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=require('$TMP'); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [

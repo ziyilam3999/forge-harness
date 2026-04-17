@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.23](https://github.com/ziyilam3999/forge-harness/compare/v0.30.22...v0.30.23) (2026-04-17)
+
+### Bug Fixes
+- **scripts:** scope q1-t40-06..09 numstat diffs to origin/master...HEAD so post-commit measurements compare feature-branch to master (issue #240 partial re-fix) (#261)
+- **plans:** add EXIT trap cleanup to 32 mktemp commands in forge-generate-phase-PH-01.json, reaching parity with coord-phase JSON (issue #239 partial re-fix) (#261)
+
 ## [0.30.22](https://github.com/ziyilam3999/forge-harness/compare/v0.30.21...v0.30.22) (2026-04-16)
 
 ### Miscellaneous

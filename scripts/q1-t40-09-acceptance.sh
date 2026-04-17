@@ -17,12 +17,12 @@ GREPQ=$(node -e "const j=JSON.parse(require('fs').readFileSync('.ai-workspace/pl
 check "zero-grep-q" "[ '$GREPQ' = '0' ]"
 
 echo "=== AC-4: diff is 5+/5- ==="
-ADDED=$(git diff --numstat .ai-workspace/plans/forge-generate-phase-PH-01.json | awk '{print $1}')
-REMOVED=$(git diff --numstat .ai-workspace/plans/forge-generate-phase-PH-01.json | awk '{print $2}')
+ADDED=$(git diff --numstat origin/master...HEAD -- .ai-workspace/plans/forge-generate-phase-PH-01.json | awk '{print $1}')
+REMOVED=$(git diff --numstat origin/master...HEAD -- .ai-workspace/plans/forge-generate-phase-PH-01.json | awk '{print $2}')
 check "diff-lines" "[ '$ADDED' = '5' ] && [ '$REMOVED' = '5' ]"
 
 echo "=== AC-5: diff confined to generate phase JSON ==="
-FILES=$(git diff --name-only)
+FILES=$(git diff --name-only origin/master...HEAD)
 check "diff-scope" "[ '$FILES' = '.ai-workspace/plans/forge-generate-phase-PH-01.json' ]"
 
 echo ""

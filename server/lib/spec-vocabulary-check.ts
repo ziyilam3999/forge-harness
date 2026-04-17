@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -55,20 +56,19 @@ export async function parseTypeDefinitions(sourceDirs: ReadonlyArray<string>): P
 
 async function collectTsFiles(dir: string): Promise<string[]> {
   const results: string[] = [];
-  let entries: string[];
+  let entries: Dirent[];
   try {
-    entries = await readdir(dir);
+    entries = await readdir(dir, { withFileTypes: true });
   } catch {
     return results;
   }
 
-  for (const name of entries) {
-    const fullPath = join(dir, name);
-    if (name.endsWith(".ts") && !name.endsWith(".test.ts")) {
-      results.push(fullPath);
-    } else if (!name.includes(".")) {
-      // Likely a directory — recurse (readdir will fail gracefully if not)
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
       results.push(...(await collectTsFiles(fullPath)));
+    } else if (entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
+      results.push(fullPath);
     }
   }
 

@@ -18,8 +18,8 @@ function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
   try {
     const credPath = join(homedir(), ".claude", ".credentials.json");
     const creds = JSON.parse(readFileSync(credPath, "utf-8"));
-    const oauth = creds.claudeAiOauth as { accessToken?: string; expiresAt?: number } | undefined;
-    if (!oauth?.accessToken || !oauth?.expiresAt) return null;
+    const oauth = creds.claudeAiOauth as { accessToken?: unknown; expiresAt?: unknown } | undefined;
+    if (typeof oauth?.accessToken !== "string" || typeof oauth?.expiresAt !== "number") return null;
 
     // Check expiry — reject if less than 5 minutes remaining
     const remainingMs = oauth.expiresAt - Date.now();

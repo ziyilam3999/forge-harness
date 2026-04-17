@@ -149,13 +149,13 @@ const observabilitySchema = z.object({
   logLevel: z.enum(["debug", "info", "warn", "error"]).optional(),
   writeAuditLog: z.boolean().optional(),
   writeRunRecord: z.boolean().optional(),
-}).optional();
+});
 
 const coordinateConfigSchema = z.object({
   storyOrdering: z.enum(["topological", "depth-first", "small-first"]).optional(),
   phaseBoundaryBehavior: z.enum(["auto-advance", "halt-and-notify", "halt-hard"]).optional(),
   briefVerbosity: z.enum(["concise", "detailed"]).optional(),
-  observability: observabilitySchema,
+  observability: observabilitySchema.optional(),
 }).strict();
 
 export type CoordinateConfig = z.infer<typeof coordinateConfigSchema>;

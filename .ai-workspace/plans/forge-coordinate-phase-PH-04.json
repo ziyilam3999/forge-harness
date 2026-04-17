@@ -214,7 +214,7 @@
         {
           "id": "PH04-US-03-AC08",
           "description": "Full test suite green",
-          "command": "OUT=$(npx vitest run 2>&1); echo \"$OUT\" | grep -q 'passed' && ! echo \"$OUT\" | grep -qE '[0-9]+ failed'"
+          "command": "OUT=$(npx vitest run 2>&1); echo \"$OUT\" | grep -q 'passed' && ! echo \"$OUT\" | grep -qE ' [0-9]+ failed'"
         }
       ],
       "affectedPaths": [

@@ -300,9 +300,10 @@ async function handleCoherenceEval(
         ];
         const driftResults = await verifySpecVocabularyFromContent(input.prdContent, sourceDirs);
         const unknownFields = driftResults.filter((r) => r.kind === "unknown-field");
+        let vocabIdx = 1;
         for (const drift of unknownFields) {
           gaps.push({
-            id: `VOCAB-${gaps.length + 1}`,
+            id: `VOCAB-${vocabIdx++}`,
             severity: "MAJOR",
             sourceDocument: "prd",
             targetDocument: "phasePlan",

@@ -48,13 +48,13 @@ run "AC-3 all 8 use reporter=json" bash -c '
   "
 '
 
-# AC-4 and AC-5 note: these checks rely on `git diff` (unstaged changes) and
-# assume a pre-commit self-check workflow — run them before staging/committing
-# the phase JSON, otherwise the diff will be empty and they will report FAIL.
+# AC-4 and AC-5 measure branch divergence from master using `origin/master...HEAD`,
+# so they work post-commit (comparing feature branch to master) rather than
+# measuring working-tree-vs-index (which is empty post-commit).
 
 # AC-4: git diff --stat shows exactly 16 line changes (8 ins + 8 del) in the JSON
 run "AC-4 diff is 8+8=16" bash -c '
-  STAT=$(git diff --numstat .ai-workspace/plans/forge-coordinate-phase-PH-01.json)
+  STAT=$(git diff --numstat origin/master...HEAD -- .ai-workspace/plans/forge-coordinate-phase-PH-01.json)
   ADDED=$(echo "$STAT" | awk "{print \$1}")
   REMOVED=$(echo "$STAT" | awk "{print \$2}")
   if [ "$ADDED" = "8" ] && [ "$REMOVED" = "8" ]; then
@@ -67,7 +67,7 @@ run "AC-4 diff is 8+8=16" bash -c '
 
 # AC-5: diff confined to the phase JSON only
 run "AC-5 diff confined to phase JSON" bash -c '
-  FILES=$(git diff --name-only)
+  FILES=$(git diff --name-only origin/master...HEAD)
   if [ "$FILES" = ".ai-workspace/plans/forge-coordinate-phase-PH-01.json" ]; then
     echo "OK: only phase JSON changed"
   else

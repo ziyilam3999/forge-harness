@@ -33,17 +33,17 @@
         {
           "id": "PH01-US01-AC03",
           "description": "Validation accepts plans with baselineCheck field without errors",
-          "command": "export TMP=$(mktemp) && npx vitest run server/validation/execution-plan.test.ts -t 'baselineCheck' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/validation/execution-plan.test.ts -t 'baselineCheck' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US01-AC04",
           "description": "Validation accepts stories with lineage field without errors",
-          "command": "export TMP=$(mktemp) && npx vitest run server/validation/execution-plan.test.ts -t 'lineage' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/validation/execution-plan.test.ts -t 'lineage' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US01-AC05",
           "description": "Existing validation tests still pass (backward compatibility)",
-          "command": "export TMP=$(mktemp) && npx vitest run server/validation/execution-plan.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/validation/execution-plan.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US01-AC06",
@@ -128,12 +128,12 @@
         {
           "id": "PH01-US03-AC03",
           "description": "loadPlan handles planJson precedence over planPath",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/plan-loader.test.ts -t 'precedence' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/plan-loader.test.ts -t 'precedence' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US03-AC04",
           "description": "Existing evaluate tests still pass after extraction",
-          "command": "export TMP=$(mktemp) && npx vitest run server/tools/evaluate.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/tools/evaluate.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US03-AC05",
@@ -157,27 +157,27 @@
         {
           "id": "PH01-US04-AC01",
           "description": "buildBrief returns GenerationBrief with story object from plan matching storyId",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*story' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*story' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US04-AC02",
           "description": "buildBrief returns codebaseContext string from scanCodebase",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*codebaseContext' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*codebaseContext' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US04-AC03",
           "description": "buildBrief returns gitBranch as feat/{storyId} (e.g. feat/US-01 for storyId US-01)",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*gitBranch' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*gitBranch' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US04-AC04",
           "description": "buildBrief returns baselineCheck from plan or defaults to 'npm run build && npm test'",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*baselineCheck' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*baselineCheck' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US04-AC05",
           "description": "buildBrief throws or returns error for non-existent storyId",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*not found\\|buildBrief.*invalid' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'buildBrief.*not found\\|buildBrief.*invalid' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [
@@ -194,32 +194,32 @@
         {
           "id": "PH01-US05-AC01",
           "description": "buildFixBrief extracts only FAIL criteria from eval report (skips PASS and SKIPPED)",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*failedCriteria' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*failedCriteria' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC02",
           "description": "computeScore returns PASS/non-SKIPPED ratio (e.g. 2 PASS, 1 FAIL, 1 SKIPPED = 0.667)",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'computeScore' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'computeScore' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC03",
           "description": "fixBrief.evalHint.failFastIds lists AC IDs ordered by priority (functionality first)",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'evalHint\\|failFast' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'evalHint\\|failFast' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC04",
           "description": "buildDiffManifest computes changed/unchanged/new arrays from current vs previous fileHashes",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'diffManifest\\|DiffManifest' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'diffManifest\\|DiffManifest' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC05",
           "description": "diffManifest is omitted when iteration is 0 (init call)",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'diffManifest.*init\\|init.*diffManifest\\|omitted.*iteration.0' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'diffManifest.*init\\|init.*diffManifest\\|omitted.*iteration.0' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US05-AC06",
           "description": "Each failed criterion includes id, description, and evidence fields",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*evidence\\|failed.*evidence' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'buildFixBrief.*evidence\\|failed.*evidence' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [
@@ -236,42 +236,42 @@
         {
           "id": "PH01-US06-AC01",
           "description": "Plateau detection: previousScores [0.5, 0.5, 0.5] triggers escalation with reason 'plateau'",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'plateau' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'plateau' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC02",
           "description": "No-op detection: matching fileHashes triggers escalation with reason 'no-op'",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'no-op' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'no-op' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC03",
           "description": "Max iterations: iteration >= maxIterations triggers escalation with reason 'max-iterations'",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'max-iterations' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'max-iterations' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC04",
           "description": "INCONCLUSIVE: verdict INCONCLUSIVE triggers immediate escalation regardless of other conditions",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'inconclusive' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'inconclusive' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC05",
           "description": "Baseline-failed: escalation includes diagnostics with exitCode, stderr (truncated to 2000 chars), and failingTests",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'baseline-failed\\|baseline.*diagnostics' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'baseline-failed\\|baseline.*diagnostics' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC06",
           "description": "Continue when improving: previousScores [0.3, 0.5] does NOT trigger any stopping condition",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'continue when improving\\|continue.*improving' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'continue when improving\\|continue.*improving' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC07",
           "description": "INCONCLUSIVE takes precedence over all other stopping conditions",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'INCONCLUSIVE.*precedence\\|precedence.*INCONCLUSIVE' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'INCONCLUSIVE.*precedence\\|precedence.*INCONCLUSIVE' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US06-AC08",
           "description": "Plateau boundary case: previousScores [0.3, 0.5, 0.5] triggers plateau (improving then stuck)",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'plateau.*boundary\\|improving.*plateau\\|0.3.*0.5.*0.5' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'plateau.*boundary\\|improving.*plateau\\|0.3.*0.5.*0.5' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [
@@ -288,17 +288,17 @@
         {
           "id": "PH01-US07-AC01",
           "description": "Every escalation contains reason, description, hypothesis, lastEvalVerdict, and scoreHistory",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'escalation.*report\\|structured.*escalation' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'escalation.*report\\|structured.*escalation' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US07-AC02",
           "description": "Escalation description is specific to the failure reason (not generic)",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'escalation.*description\\|description.*specific' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'escalation.*description\\|description.*specific' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US07-AC03",
           "description": "Baseline-failed escalation has diagnostics; other reasons do not",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'diagnostics.*only.*baseline\\|baseline.*only.*diagnostics' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'diagnostics.*only.*baseline\\|baseline.*only.*diagnostics' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         }
       ],
       "affectedPaths": [
@@ -318,27 +318,27 @@
         {
           "id": "PH01-US08-AC01",
           "description": "assembleGenerateResult with no evalReport returns action 'implement' with GenerationBrief",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*implement\\|orchestrator.*implement' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*implement\\|orchestrator.*implement' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC02",
           "description": "assembleGenerateResult with FAIL evalReport returns action 'fix' with FixBrief when no stopping conditions met",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*fix\\|orchestrator.*fix' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*fix\\|orchestrator.*fix' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC03",
           "description": "assembleGenerateResult with PASS evalReport returns action 'pass'",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*pass\\|orchestrator.*pass' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*pass\\|orchestrator.*pass' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC04",
           "description": "assembleGenerateResult with stopping condition returns action 'escalate' with Escalation",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*escalate\\|orchestrator.*escalate' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts -t 'assembleGenerateResult.*escalate\\|orchestrator.*escalate' --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC05",
           "description": "All PH-01 unit tests pass together",
-          "command": "export TMP=$(mktemp) && npx vitest run server/lib/generator.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
+          "command": "export TMP=$(mktemp) && trap 'rm -f \"$TMP\"' EXIT && npx vitest run server/lib/generator.test.ts --reporter=json --outputFile=\"$TMP\" >/dev/null 2>&1; node -e \"const r=JSON.parse(require('fs').readFileSync(process.env.TMP,'utf8')); process.exit(r.success && r.numFailedTests===0 ? 0 : 1)\""
         },
         {
           "id": "PH01-US08-AC06",

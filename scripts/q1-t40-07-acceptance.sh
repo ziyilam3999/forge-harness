@@ -32,8 +32,8 @@ done
 
 echo ""
 echo "=== AC3: git diff shows exactly 3 added, 3 removed ==="
-ADDED=$(git diff --numstat -- "$JSON" | awk '{print $1}')
-REMOVED=$(git diff --numstat -- "$JSON" | awk '{print $2}')
+ADDED=$(git diff --numstat origin/master...HEAD -- "$JSON" | awk '{print $1}')
+REMOVED=$(git diff --numstat origin/master...HEAD -- "$JSON" | awk '{print $2}')
 if [[ "$ADDED" == "3" && "$REMOVED" == "3" ]]; then
   echo "PASS: 3 added, 3 removed"
 else
@@ -43,7 +43,7 @@ fi
 
 echo ""
 echo "=== AC4: diff confined to generate phase JSON only ==="
-CHANGED=$(git diff --name-only)
+CHANGED=$(git diff --name-only origin/master...HEAD)
 if [[ "$CHANGED" == "$JSON" ]]; then
   echo "PASS: only $JSON changed"
 else

@@ -281,8 +281,20 @@ function renderBoard(brief: PhaseTransitionBrief | null, activity: Activity | nu
     const emptyState = count === 0
       ? `<div class="empty-state"><div class="empty-hex"></div></div>`
       : "";
-    return `<div class="kanban-column" id="${id}">
-  <div class="column-header ${accent}"><span class="col-title">${escapeHtml(title)}</span><span class="col-count">${count}</span></div>
+    // Emit the accent as a class on the wrapper so the CSS does not have
+    // to reference column ids via `[id="col-x"]` attribute selectors. Keeps
+    // the grep `id="col-..."` count at exactly 1 per column.
+    const accentClass = accent === "neutral"
+      ? "accent-neutral"
+      : accent === "amber"
+        ? "accent-amber"
+        : accent === "green"
+          ? "accent-green"
+          : accent === "red"
+            ? "accent-red"
+            : "accent-grey";
+    return `<div class="kanban-column ${accentClass}" id="${id}">
+  <div class="column-header"><span class="col-title">${escapeHtml(title)}</span><span class="col-count">${count}</span></div>
   <div class="column-body">${extra}${cards}${emptyState}</div>
 </div>`;
   };
@@ -366,11 +378,10 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .kanban-board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
 .kanban-column { background: var(--white); border: 1px solid var(--border-light); border-radius: 10px; padding: 12px; box-shadow: var(--shadow-sm); min-height: 160px; position: relative; }
 .kanban-column::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 10px 10px 0 0; background: var(--grey); }
-.kanban-column[id="col-ready"]::before { background: var(--border); }
-.kanban-column[id="col-in-progress"]::before { background: var(--amber); }
-.kanban-column[id="col-retry"]::before { background: var(--amber); }
-.kanban-column[id="col-done"]::before { background: var(--green); }
-.kanban-column[id="col-blocked"]::before { background: var(--red); }
+.kanban-column.accent-neutral::before { background: var(--border); }
+.kanban-column.accent-amber::before { background: var(--amber); }
+.kanban-column.accent-green::before { background: var(--green); }
+.kanban-column.accent-red::before { background: var(--red); }
 .column-header { display: flex; justify-content: space-between; align-items: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 700; padding-bottom: 8px; border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
 .column-body { display: flex; flex-direction: column; gap: 8px; }
 .story-card { background: var(--off-white); border: 1px solid var(--border-light); border-radius: 8px; padding: 10px; font-size: 12px; }

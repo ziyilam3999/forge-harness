@@ -96,10 +96,17 @@ function baseInput(
  * `.kanban-column[id="col-retry"]` inside the <style> block are ignored.
  */
 function extractColumnContent(html: string, columnId: string): string {
-  const marker = `<div class="kanban-column" id="${columnId}">`;
-  const tagStart = html.indexOf(marker);
-  if (tagStart === -1) throw new Error(`<div for ${columnId} not found`);
-  const tagOpenEnd = html.indexOf(">", tagStart);
+  // Anchor to the `kanban-column` class so CSS attribute selectors like
+  // `[id="col-retry"]::before` inside the <style> block are not mistaken
+  // for the column wrapper. Accepts any additional classes on the same
+  // <div> (e.g. `accent-amber`).
+  const re = new RegExp(
+    `<div class="kanban-column[^"]*" id="${columnId}">`,
+  );
+  const match = re.exec(html);
+  if (!match) throw new Error(`<div for ${columnId} not found`);
+  const tagStart = match.index;
+  const tagOpenEnd = tagStart + match[0].length - 1;
   let depth = 1;
   let i = tagOpenEnd + 1;
   const openRe = /<div\b/g;

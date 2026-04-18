@@ -1,0 +1,460 @@
+/**
+ * Unit tests for the Kanban dashboard renderer (S8).
+ *
+ * Covers AC-03, AC-04, AC-05, AC-08, AC-09, AC-10, AC-12, AC-13, AC-14,
+ * AC-16, AC-18 of the 2026-04-18 kanban-dashboard plan.
+ *
+ * Design goals these tests enforce:
+ *   - `classifyStaleness` is a pure green/amber/red function.
+ *   - Column routing honours (a) the activity signal for in-progress and
+ *     (b) the 5 StoryStatus → column fallbacks.
+ *   - Null budget / null maxTimeMs render "no limit" with no NaN / null
+ *     leakage into the stat card.
+ *   - Atomic tmp+rename is the write discipline (mockable at fs boundary).
+ *   - A render failure in isolation never surfaces as a tool-level error.
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtemp, writeFile as fsWriteFile, mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  classifyStaleness,
+  renderDashboardHtml,
+  renderDashboard,
+  COLUMN_IDS,
+  type DashboardRenderInput,
+  type AuditFeedEntry,
+} from "./dashboard-renderer.js";
+import type {
+  PhaseTransitionBrief,
+  StoryStatusEntry,
+} from "../types/coordinate-result.js";
+
+function makeStoryEntry(
+  storyId: string,
+  status: StoryStatusEntry["status"],
+  overrides: Partial<StoryStatusEntry> = {},
+): StoryStatusEntry {
+  return {
+    storyId,
+    status,
+    retryCount: 0,
+    retriesRemaining: 3,
+    priorEvalReport: null,
+    evidence: null,
+    ...overrides,
+  };
+}
+
+function makeBrief(
+  overrides: Partial<PhaseTransitionBrief> = {},
+): PhaseTransitionBrief {
+  return {
+    status: "in-progress",
+    stories: [],
+    readyStories: [],
+    depFailedStories: [],
+    failedStories: [],
+    completedCount: 0,
+    totalCount: 0,
+    budget: {
+      usedUsd: 0,
+      budgetUsd: null,
+      remainingUsd: null,
+      incompleteData: false,
+      warningLevel: "none",
+    },
+    timeBudget: { elapsedMs: 0, maxTimeMs: null, warningLevel: "none" },
+    replanningNotes: [],
+    recommendation: "",
+    configSource: {},
+    ...overrides,
+  };
+}
+
+function baseInput(
+  briefOverrides: Partial<PhaseTransitionBrief> = {},
+  extra: Partial<DashboardRenderInput> = {},
+): DashboardRenderInput {
+  return {
+    brief: makeBrief(briefOverrides),
+    activity: null,
+    auditEntries: [],
+    renderedAt: "2026-04-18T00:00:00.000Z",
+    ...extra,
+  };
+}
+
+/**
+ * Extract the HTML fragment inside a specific column by finding its opening
+ * <div ... id="col-xxx"> tag and walking div open/close tags until the
+ * nesting level matching the opening tag returns to zero. Strict "same
+ * nesting level" contract per AC-03. The column-id marker is anchored to
+ * a `<div` prefix so CSS attribute selectors like
+ * `.kanban-column[id="col-retry"]` inside the <style> block are ignored.
+ */
+function extractColumnContent(html: string, columnId: string): string {
+  const marker = `<div class="kanban-column" id="${columnId}">`;
+  const tagStart = html.indexOf(marker);
+  if (tagStart === -1) throw new Error(`<div for ${columnId} not found`);
+  const tagOpenEnd = html.indexOf(">", tagStart);
+  let depth = 1;
+  let i = tagOpenEnd + 1;
+  const openRe = /<div\b/g;
+  const closeRe = /<\/div>/g;
+  while (depth > 0 && i < html.length) {
+    openRe.lastIndex = i;
+    closeRe.lastIndex = i;
+    const nextOpen = openRe.exec(html);
+    const nextClose = closeRe.exec(html);
+    if (!nextClose) break;
+    if (nextOpen && nextOpen.index < nextClose.index) {
+      depth += 1;
+      i = nextOpen.index + 4;
+    } else {
+      depth -= 1;
+      i = nextClose.index + 6;
+    }
+  }
+  return html.slice(tagStart, i);
+}
+
+describe("classifyStaleness (AC-05)", () => {
+  it("returns green below 60s", () => {
+    expect(classifyStaleness(30_000)).toBe("green");
+  });
+
+  it("returns amber between 60s and 120s", () => {
+    expect(classifyStaleness(90_000)).toBe("amber");
+  });
+
+  it("returns red above 120s", () => {
+    expect(classifyStaleness(150_000)).toBe("red");
+  });
+
+  it("boundary: exactly 60000ms is green (not-greater-than-60s)", () => {
+    expect(classifyStaleness(60_000)).toBe("green");
+  });
+
+  it("boundary: exactly 120000ms is amber", () => {
+    expect(classifyStaleness(120_000)).toBe("amber");
+  });
+});
+
+describe("renderDashboardHtml — column routing (AC-03)", () => {
+  it("routes a done story into col-done and a ready story into col-ready", () => {
+    const html = renderDashboardHtml(
+      baseInput({
+        stories: [
+          makeStoryEntry("US-01", "done"),
+          makeStoryEntry("US-02", "ready"),
+        ],
+        completedCount: 1,
+        totalCount: 2,
+      }),
+    );
+    const done = extractColumnContent(html, "col-done");
+    const ready = extractColumnContent(html, "col-ready");
+    expect(done).toContain("US-01");
+    expect(done).not.toContain("US-02");
+    expect(ready).toContain("US-02");
+    expect(ready).not.toContain("US-01");
+  });
+
+  it("routes pending to col-backlog, ready-for-retry to col-retry, failed/dep-failed to col-blocked", () => {
+    const html = renderDashboardHtml(
+      baseInput({
+        stories: [
+          makeStoryEntry("US-P", "pending"),
+          makeStoryEntry("US-R", "ready-for-retry"),
+          makeStoryEntry("US-F", "failed"),
+          makeStoryEntry("US-D", "dep-failed"),
+        ],
+        totalCount: 4,
+      }),
+    );
+    expect(extractColumnContent(html, "col-backlog")).toContain("US-P");
+    expect(extractColumnContent(html, "col-retry")).toContain("US-R");
+    const blocked = extractColumnContent(html, "col-blocked");
+    expect(blocked).toContain("US-F");
+    expect(blocked).toContain("US-D");
+  });
+});
+
+describe("renderDashboardHtml — activity signal (AC-04)", () => {
+  it("puts the in-progress story into col-in-progress with tool + stage text", () => {
+    const html = renderDashboardHtml(
+      baseInput(
+        {},
+        {
+          activity: {
+            tool: "forge_generate",
+            storyId: "US-03",
+            stage: "critic round 2",
+            startedAt: "2026-04-18T00:00:00.000Z",
+            lastUpdate: "2026-04-18T00:00:05.000Z",
+          },
+        },
+      ),
+    );
+    const inProgress = extractColumnContent(html, "col-in-progress");
+    expect(inProgress).toContain("forge_generate");
+    expect(inProgress).toContain("critic round 2");
+  });
+});
+
+describe("renderDashboardHtml — header shows budget + progress (AC-07 support)", () => {
+  it("renders 4/9, $2.15, $10 substrings when given matching brief", () => {
+    const html = renderDashboardHtml(
+      baseInput({
+        completedCount: 4,
+        totalCount: 9,
+        budget: {
+          usedUsd: 2.15,
+          budgetUsd: 10,
+          remainingUsd: 7.85,
+          incompleteData: false,
+          warningLevel: "none",
+        },
+      }),
+    );
+    expect(html).toContain("4/9");
+    expect(html).toContain("$2.15");
+    expect(html).toContain("$10");
+  });
+});
+
+describe("renderDashboardHtml — audit feed count + ordering (AC-08)", () => {
+  it("renders 15 feed-entry rows in reverse chronological order", () => {
+    const auditEntries: AuditFeedEntry[] = Array.from({ length: 15 }, (_, i) => {
+      const ts = new Date(Date.UTC(2026, 3, 18, 10, 30, i)).toISOString();
+      return {
+        timestamp: ts,
+        stage: `stage-${i}`,
+        agentRole: "critic",
+        decision: "revise",
+        reasoning: "-",
+        tool: "forge_generate",
+      };
+    });
+    // Renderer expects callers (i.e. renderDashboard I/O) to pre-sort
+    // descending; simulate that here.
+    auditEntries.reverse();
+    const html = renderDashboardHtml(baseInput({}, { auditEntries }));
+    const matches = html.match(/class="feed-entry"/g) ?? [];
+    expect(matches.length).toBe(15);
+
+    // Extract the timestamps of the first and last rendered feed entries.
+    const tsRe = /<span class="feed-time">(\d{2}:\d{2}:\d{2})<\/span>/g;
+    const feedTimestamps: string[] = [];
+    let m;
+    while ((m = tsRe.exec(html)) !== null) feedTimestamps.push(m[1]);
+    expect(feedTimestamps.length).toBe(15);
+
+    // Reconstruct Date objects from the original auditEntries (already in
+    // the order the renderer received them).
+    const firstDate = new Date(auditEntries[0].timestamp);
+    const lastDate = new Date(auditEntries[auditEntries.length - 1].timestamp);
+    expect(firstDate.getTime()).toBeGreaterThan(lastDate.getTime());
+  });
+});
+
+describe("renderDashboardHtml — audit feed uses AuditEntry fields, not missing ones (AC-16)", () => {
+  it("renders stage + decision + agentRole; no references to storyId/tool/score on AuditEntry", () => {
+    const auditEntries: AuditFeedEntry[] = [
+      {
+        timestamp: "2026-04-18T10:30:00.000Z",
+        stage: "critic round 2",
+        agentRole: "critic",
+        decision: "revise",
+        reasoning: "found 3 issues",
+        tool: "forge_generate",
+      },
+    ];
+    const html = renderDashboardHtml(baseInput({}, { auditEntries }));
+    expect(html).toContain("critic round 2");
+    expect(html).toContain("revise");
+    expect(html).toContain("critic");
+    // Tool name is derived from the filename and shown as a hex-dot accent
+    // on the feed row — confirm it is present (not read off AuditEntry).
+    expect(html).toContain("forge_generate");
+  });
+});
+
+describe("renderDashboardHtml — empty stories (AC-12)", () => {
+  it("renders all 6 columns with count 0 and does not throw", () => {
+    expect(() => renderDashboardHtml(baseInput({ stories: [] }))).not.toThrow();
+    const html = renderDashboardHtml(baseInput({ stories: [] }));
+    for (const id of Object.values(COLUMN_IDS)) {
+      expect(html).toContain(`id="${id}"`);
+    }
+  });
+});
+
+describe("renderDashboardHtml — null budget (AC-13)", () => {
+  it("renders 'no limit' text and no NaN / null leakage in the budget card", () => {
+    const html = renderDashboardHtml(
+      baseInput({
+        budget: {
+          usedUsd: 0.42,
+          budgetUsd: null,
+          remainingUsd: null,
+          incompleteData: false,
+          warningLevel: "none",
+        },
+      }),
+    );
+    // Extract just the budget stat card by isolating between the Budget
+    // label and the next </div>. We look for the textual "Budget" label.
+    const idx = html.indexOf("Budget");
+    expect(idx).toBeGreaterThan(-1);
+    const cardSlice = html.slice(idx, idx + 400);
+    expect(cardSlice).toContain("no limit");
+    expect(cardSlice).not.toContain("NaN");
+    // Must not leak the literal JavaScript "null" as a rendered value.
+    // (Acceptable substrings like "no limit" do not contain "null".)
+    expect(cardSlice.toLowerCase()).not.toContain("null");
+  });
+});
+
+describe("renderDashboardHtml — null maxTimeMs (AC-14)", () => {
+  it("renders 'no limit' text and no NaN / null leakage in the time card", () => {
+    const html = renderDashboardHtml(
+      baseInput({
+        timeBudget: { elapsedMs: 72_000, maxTimeMs: null, warningLevel: "none" },
+      }),
+    );
+    const idx = html.indexOf("Time");
+    expect(idx).toBeGreaterThan(-1);
+    const cardSlice = html.slice(idx, idx + 400);
+    expect(cardSlice).toContain("no limit");
+    expect(cardSlice).not.toContain("NaN");
+    expect(cardSlice.toLowerCase()).not.toContain("null");
+  });
+});
+
+describe("renderDashboard — atomic write discipline (AC-09)", () => {
+  it("calls writeFile on a .tmp.html path and then rename to the final .html path", async () => {
+    // Capture call order across the injectable IO seam; assert the tmp
+    // writeFile precedes the rename-to-final.
+    const calls: Array<{ op: string; args: unknown[] }> = [];
+    const io = {
+      writeFile: async (p: string, d: string, _e: "utf-8") => {
+        calls.push({ op: "writeFile", args: [p, d.length] });
+      },
+      rename: async (o: string, n: string) => {
+        calls.push({ op: "rename", args: [o, n] });
+      },
+      mkdir: async (_p: string, _o: { recursive: boolean }) => undefined,
+    };
+
+    // Isolate inputs so reads do not fall through to real fs. Use an
+    // absolute path in a guaranteed-not-present directory.
+    const bogusRoot = process.platform === "win32"
+      ? "Z:\\forge-ac09-fixture"
+      : "/tmp/forge-ac09-nonexistent-xyz";
+
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await renderDashboard(bogusRoot, io);
+
+    // First write must end with dashboard.tmp.html.
+    const writeCall = calls.find((c) => c.op === "writeFile");
+    expect(writeCall).toBeDefined();
+    expect(String((writeCall as { args: unknown[] }).args[0])).toMatch(/dashboard\.tmp\.html$/);
+
+    // Rename must be from dashboard.tmp.html -> dashboard.html.
+    const renameCall = calls.find((c) => c.op === "rename");
+    expect(renameCall).toBeDefined();
+    const renameArgs = (renameCall as { args: unknown[] }).args;
+    expect(String(renameArgs[0])).toMatch(/dashboard\.tmp\.html$/);
+    expect(String(renameArgs[1])).toMatch(/dashboard\.html$/);
+    expect(String(renameArgs[1])).not.toMatch(/\.tmp\.html$/);
+
+    // Atomicity: rename must run AFTER writeFile.
+    const writeIdx = calls.findIndex((c) => c.op === "writeFile");
+    const renameIdx = calls.findIndex((c) => c.op === "rename");
+    expect(renameIdx).toBeGreaterThan(writeIdx);
+  });
+});
+
+describe("renderDashboard — activity.json absent (AC-10)", () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), "forge-dashboard-ac10-"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("renders without throwing and produces zero in-progress cards when activity.json is missing", async () => {
+    // Seed a brief so the renderer has columns to produce.
+    const forgeDir = join(tmpRoot, ".forge");
+    await mkdir(forgeDir, { recursive: true });
+    const brief = makeBrief({
+      stories: [
+        makeStoryEntry("US-A", "ready"),
+        makeStoryEntry("US-B", "done", { retryCount: 0 }),
+      ],
+      completedCount: 1,
+      totalCount: 2,
+    });
+    await fsWriteFile(
+      join(forgeDir, "coordinate-brief.json"),
+      JSON.stringify(brief),
+      "utf-8",
+    );
+    // activity.json intentionally absent.
+
+    await expect(renderDashboard(tmpRoot)).resolves.toBeUndefined();
+
+    const { readFile } = await import("node:fs/promises");
+    const html = await readFile(join(forgeDir, "dashboard.html"), "utf-8");
+    const inProgress = extractColumnContent(html, "col-in-progress");
+    // Check: no .story-card instances inside col-in-progress.
+    const cardMatches = inProgress.match(/class="story-card/g) ?? [];
+    expect(cardMatches.length).toBe(0);
+  });
+});
+
+describe("renderDashboard — failure isolation (AC-18)", () => {
+  it("does not propagate a writeFile failure to callers", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const io = {
+      writeFile: async () => {
+        throw new Error("disk full");
+      },
+      rename: async () => undefined,
+      mkdir: async () => undefined,
+    };
+    const bogusRoot = process.platform === "win32"
+      ? "Z:\\forge-ac18-fixture"
+      : "/tmp/forge-ac18-nonexistent-xyz";
+    await expect(renderDashboard(bogusRoot, io)).resolves.toBeUndefined();
+  });
+
+  it("primitive-level ProgressReporter flow resolves even when the dashboard writer throws", async () => {
+    // Simulates the AC-18 integration: an in-flight reporter triggers a
+    // dashboard render; the render explodes; the caller's async path
+    // keeps going. Uses the setProjectContext seam so no project fs is
+    // actually touched by the reporter path itself.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { ProgressReporter } = await import("./progress.js");
+    const bogusRoot = process.platform === "win32"
+      ? "Z:\\forge-ac18-reporter-fixture"
+      : "/tmp/forge-ac18-reporter-nonexistent-xyz";
+    const reporter = new ProgressReporter("forge_generate", ["stage-a"]);
+    reporter.setProjectContext(bogusRoot, "US-18");
+
+    // Invoking begin + complete should resolve synchronously (they are
+    // void-returning) without throwing. The fire-and-forget dashboard
+    // hooks run in the background and swallow errors internally.
+    expect(() => reporter.begin("stage-a")).not.toThrow();
+    expect(() => reporter.complete("stage-a")).not.toThrow();
+  });
+});

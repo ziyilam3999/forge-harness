@@ -553,16 +553,38 @@ async function readAuditFeed(projectPath: string): Promise<AuditFeedEntry[]> {
 }
 
 /**
- * Atomic tmp+rename writer. Exposed so tests can mock `fs.writeFile` +
- * `fs.rename` at the module boundary and assert both were invoked.
+ * Injectable I/O seam — lets unit tests mock `writeFile` and `rename`
+ * without relying on ESM module-spy capability (which vitest limits on
+ * re-exported native modules). Defaults to `node:fs/promises`. Production
+ * callers never supply an override.
  */
-export async function writeDashboardHtml(projectPath: string, html: string): Promise<void> {
+export interface DashboardIo {
+  writeFile: (path: string, data: string, encoding: "utf-8") => Promise<void>;
+  rename: (oldPath: string, newPath: string) => Promise<void>;
+  mkdir: (path: string, options: { recursive: boolean }) => Promise<string | undefined>;
+}
+
+const DEFAULT_IO: DashboardIo = {
+  writeFile: (p, d, e) => writeFile(p, d, e),
+  rename: (o, n) => rename(o, n),
+  mkdir: (p, o) => mkdir(p, o).then(() => undefined),
+};
+
+/**
+ * Atomic tmp+rename writer. Exposed so tests can verify AC-09 by supplying
+ * a `DashboardIo` with mocked `writeFile` and `rename`.
+ */
+export async function writeDashboardHtml(
+  projectPath: string,
+  html: string,
+  io: DashboardIo = DEFAULT_IO,
+): Promise<void> {
   const forgeDir = join(projectPath, ".forge");
   const tmpPath = join(forgeDir, "dashboard.tmp.html");
   const finalPath = join(forgeDir, "dashboard.html");
-  await mkdir(forgeDir, { recursive: true });
-  await writeFile(tmpPath, html, "utf-8");
-  await rename(tmpPath, finalPath);
+  await io.mkdir(forgeDir, { recursive: true });
+  await io.writeFile(tmpPath, html, "utf-8");
+  await io.rename(tmpPath, finalPath);
 }
 
 /**
@@ -571,8 +593,13 @@ export async function writeDashboardHtml(projectPath: string, html: string): Pro
  * Error policy: all I/O wrapped in a single try/catch. Any failure is
  * logged to stderr and swallowed — the parent tool's invocation is never
  * affected by a dashboard problem.
+ *
+ * The `io` parameter is a test seam only; production callers omit it.
  */
-export async function renderDashboard(projectPath: string): Promise<void> {
+export async function renderDashboard(
+  projectPath: string,
+  io: DashboardIo = DEFAULT_IO,
+): Promise<void> {
   try {
     const [brief, activity, auditEntries] = await Promise.all([
       readCoordinateBrief(projectPath),
@@ -585,7 +612,7 @@ export async function renderDashboard(projectPath: string): Promise<void> {
       auditEntries,
       renderedAt: new Date().toISOString(),
     });
-    await writeDashboardHtml(projectPath, html);
+    await writeDashboardHtml(projectPath, html, io);
   } catch (err) {
     console.error(
       "forge: failed to render dashboard (continuing):",

@@ -56,7 +56,7 @@ describe("writeActivity", () => {
     // writer should log + swallow.
     const bogus = process.platform === "win32"
       ? "Z:\\nonexistent\\forge-root"
-      : "/proc/self/root-nonexistent-xyz";
+      : "/nonexistent/forge-root";
     await expect(writeActivity(bogus, { tool: "x", stage: "y", startedAt: "a", lastUpdate: "b" })).resolves.toBeUndefined();
   });
 });

@@ -85,7 +85,7 @@ describe("writeCoordinateBrief (AC-15)", () => {
   it("does not throw when the project path is bogus (failure is logged + swallowed)", async () => {
     const bogus = process.platform === "win32"
       ? "Z:\\nonexistent\\forge-root"
-      : "/proc/self/root-nonexistent-xyz";
+      : "/nonexistent/forge-root";
     await expect(writeCoordinateBrief(bogus, fixtureBrief())).resolves.toBeUndefined();
   });
 });

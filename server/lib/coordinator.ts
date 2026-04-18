@@ -385,11 +385,42 @@ export async function assessPhase(
     haltClearedByHuman: options.haltClearedByHuman,
   });
 
+  // ── S8 dashboard integration ──────────────────────────────
+  // Persist the assembled brief to `.forge/coordinate-brief.json` so the
+  // dashboard renderer (which is stateless and called from ProgressReporter
+  // / writeRunRecord hooks without coordinator types in scope) can read it
+  // back. Non-fatal per the established error policy (writeRunRecord,
+  // AuditLog). See AC-15.
+  await writeCoordinateBrief(projectPath, brief);
+
   return {
     mode: "advisory",
     phaseId: options.phaseId ?? "default",
     brief,
   };
+}
+
+/**
+ * Persist a `PhaseTransitionBrief` snapshot to
+ * `.forge/coordinate-brief.json`. Closes the Critic-2 Finding-1 gap —
+ * the dashboard renderer reads this file on every render. Failure is
+ * logged and swallowed to match the existing non-fatal I/O policy.
+ */
+export async function writeCoordinateBrief(
+  projectPath: string,
+  brief: PhaseTransitionBrief,
+): Promise<void> {
+  try {
+    const forgeDir = join(projectPath, ".forge");
+    await mkdir(forgeDir, { recursive: true });
+    const briefPath = join(forgeDir, "coordinate-brief.json");
+    await writeFile(briefPath, JSON.stringify(brief, null, 2), "utf-8");
+  } catch (err) {
+    console.error(
+      "forge: failed to write coordinate-brief.json (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 /**

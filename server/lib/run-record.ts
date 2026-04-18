@@ -2,6 +2,8 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { EvalReport, CriterionResult } from "../types/eval-report.js";
+import { writeActivity } from "./activity.js";
+import { renderDashboard } from "./dashboard-renderer.js";
 
 /**
  * Q0.5/C1 critic-eval report — per-plan critic findings aggregated across
@@ -120,6 +122,21 @@ export async function writeRunRecord(
   } catch (err) {
     console.error(
       "forge: failed to write run record (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // Dashboard hooks (S8, additive, non-fatal): after a primitive finishes,
+  // clear the in-flight activity signal and re-render the dashboard so the
+  // operator sees the story move out of the "In Progress" column. Both
+  // callees swallow their own errors, but we also wrap the whole block
+  // so that any hook failure never crashes this function.
+  try {
+    await writeActivity(projectPath, null);
+    await renderDashboard(projectPath);
+  } catch (err) {
+    console.error(
+      "forge: failed to update dashboard post-run-record (continuing):",
       err instanceof Error ? err.message : String(err),
     );
   }

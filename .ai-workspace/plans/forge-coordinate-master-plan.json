@@ -3,7 +3,7 @@
   "documentTier": "master",
   "title": "forge_coordinate Implementation",
   "prdPath": "docs/forge-coordinate-prd.md",
-  "summary": "Implements forge_coordinate as the fourth and final forge-harness MCP primitive — a dependency-aware dispatch and brief assembler that composes forge_plan, forge_generate, and forge_evaluate into a complete pipeline. Decomposes into 4 phases: types, topological sort, state readers, and the core 6-state dispatch loop (PH-01); safety, budget, and crash recovery (PH-02); ReplanningNote collection, plan-mutation reconciliation, and observability (PH-03); MCP handler, config loader, checkpoint gates, integration tests, and dogfood (PH-04). Advisory mode is $0 — every story is read-only brief assembly with no LLM calls. State is reconstructed from .forge/runs/*.json (primary RunRecords) and .forge/runs/data.jsonl (generator iteration records) on every call.",
+  "summary": "Implements forge_coordinate as the fourth and final forge-harness MCP primitive — a dependency-aware dispatch and brief assembler that composes forge_plan, forge_generate, and forge_evaluate into a complete pipeline. Decomposes into 4 primitive-buildout phases: types, topological sort, state readers, and the core 6-state dispatch loop (PH-01); safety, budget, and crash recovery (PH-02); ReplanningNote collection, plan-mutation reconciliation, and observability (PH-03); MCP handler, config loader, checkpoint gates, integration tests, and dogfood (PH-04). PH-05 adds the display-layer Kanban dashboard as adjacent post-primitive work — zero cost, zero LLM calls, self-contained HTML over existing .forge/* state. Advisory mode is $0 — every story is read-only brief assembly with no LLM calls. State is reconstructed from .forge/runs/*.json (primary RunRecords) and .forge/runs/data.jsonl (generator iteration records) on every call.",
   "phases": [
     {
       "id": "PH-01",
@@ -97,6 +97,38 @@
         "server/lib/spec-vocabulary-check.test.ts (drift positive/negative/unknown-type unit tests + real-PRD regression check)"
       ],
       "estimatedStories": 6
+    },
+    {
+      "id": "PH-05",
+      "title": "Kanban Dashboard (display layer over forge_coordinate output)",
+      "description": "Adds a display-only HTML Kanban dashboard at .forge/dashboard.html, rendered atomically by forge_coordinate (after assessPhase) and by every primitive's ProgressReporter transitions (begin/complete) and writeRunRecord (post-completion clear). The renderer is stateless — every call re-derives from disk (.forge/coordinate-brief.json + .forge/activity.json + .forge/audit/*.jsonl). Browser auto-refreshes every 5 seconds via meta http-equiv. No server, no WebSocket, no npm dependency, no external CDN — single self-contained HTML over file://. Six columns reflect the StoryStatus values (backlog/ready/in-progress/retry/done/blocked). Dashboard render failures are non-fatal: logged to stderr and swallowed, matching the existing writeRunRecord and AuditLog failure policy (NFR-C06). The single story US-S8 captures the dashboard end-to-end: one renderer module with exported classifyStaleness pure function, one activity-signal writer, one ProgressReporter context extension (opt-in via setProjectContext; existing 2-arg constructor call sites untouched), one coordinate-brief.json writer inside assessPhase, and ~18 unit tests covering column routing, activity rendering, null budget/time, atomic write, failure isolation, feed rendering, and AuditEntry schema fidelity. The full plan lives at .ai-workspace/plans/2026-04-18-kanban-dashboard.md (5 Goal invariants, 18 binary AC, companion design appendix at 2026-04-11-kanban-dashboard.md with two rounds of /double-critique).",
+      "dependencies": ["PH-04"],
+      "inputs": [
+        "server/lib/coordinator.ts (assessPhase from PH-01..PH-04 — gains coordinate-brief.json write after PhaseTransitionBrief construction)",
+        "server/lib/progress.ts (ProgressReporter from PH-01 — gains optional setProjectContext(projectPath, storyId) method + dashboard render hook in begin/complete)",
+        "server/lib/run-record.ts (writeRunRecord from PH-01 — clears activity.json and triggers one final render on completion)",
+        "server/lib/audit.ts (AuditEntry from PH-01 — read-only consumer via feed reader)",
+        "server/lib/run-reader.ts (readAuditEntries from PH-01/PH-03 — referenced for graceful-degradation contract; dashboard uses a local readAuditFeed helper that preserves source filenames for tool-name accent rendering)",
+        "server/types/coordinate-result.ts (PhaseTransitionBrief, BudgetInfo.budgetUsd:null, TimeBudgetInfo.maxTimeMs:null, StoryStatus 6-value union, ReplanningSeverity from PH-01..PH-04)",
+        ".ai-workspace/plans/dashboard-reference.html (visual reference mockup; unchanged)",
+        ".ai-workspace/plans/2026-04-18-kanban-dashboard.md (outcome-shaped plan; 5 Goal invariants, 18 binary AC)",
+        ".ai-workspace/plans/2026-04-11-kanban-dashboard.md (design appendix — two /double-critique rounds, 17 applied findings)"
+      ],
+      "outputs": [
+        ".forge/dashboard.html (self-contained HTML with inline CSS + JS, meta refresh=5s, no external deps; atomic write via .tmp.html + rename)",
+        ".forge/activity.json (ephemeral in-flight signal: tool, storyId, stage, startedAt, lastUpdate; cleared on writeRunRecord)",
+        ".forge/coordinate-brief.json (persisted PhaseTransitionBrief snapshot written by coordinator after each assessPhase call)",
+        "server/lib/dashboard-renderer.ts (stateless renderer; exports classifyStaleness as a named pure function for unit testability)",
+        "server/lib/activity.ts (atomic writer for .forge/activity.json; directory bootstrap)",
+        "server/lib/coordinator.ts (post-assessPhase write of coordinate-brief.json wrapped in try/catch, non-fatal per NFR-C06)",
+        "server/lib/progress.ts (opt-in setProjectContext method; begin/complete also update activity.json + trigger render when projectPath is set; existing 2-arg constructor unchanged so all existing call sites compile without edits)",
+        "server/lib/run-record.ts (writeRunRecord clears activity.json + triggers one final render after RunRecord write; all new I/O wrapped in try/catch, non-fatal)",
+        "server/lib/dashboard-renderer.test.ts (18 unit tests covering classifyStaleness, column routing, activity rendering, null budget/time, atomic write mock, failure isolation, feed rendering, AuditEntry schema fidelity)",
+        "server/lib/activity.test.ts (atomic-write unit tests)",
+        "server/lib/coordinator-brief-write.test.ts (asserts coordinate-brief.json is written after assessPhase with the 4 required fields: status, stories, completedCount, totalCount)",
+        "scripts/s8-kanban-dashboard-acceptance.sh (acceptance wrapper: 15 grouped checks, exits 0 iff all 18 AC pass)"
+      ],
+      "estimatedStories": 1
     }
   ],
   "crossCuttingConcerns": [

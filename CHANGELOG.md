@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.31.0](https://github.com/ziyilam3999/forge-harness/compare/v0.30.23...v0.31.0) (2026-04-18)
+
+### Features
+- **dashboard:** S8 Kanban dashboard for forge_coordinate — display-only HTML at `.forge/dashboard.html`, 6-column Kanban (backlog/ready/in-progress/retry/done/blocked), 5s meta-refresh, no server/WebSocket/npm deps. Reads `.forge/coordinate-brief.json` + `.forge/activity.json` + `.forge/audit/*.jsonl`. New `server/lib/dashboard-renderer.ts`, `server/lib/activity.ts`, coordinator-brief-write in `assessPhase()`, and opt-in `ProgressReporter.setProjectContext()` hook. 18 binary AC, 744 tests pass, closes forge_coordinate roadmap. (#269)
+
+### Bug Fixes
+- **dashboard-tests:** use `/nonexistent/forge-root` for Linux bogus-path fast-fail in activity and coordinator-brief-write tests; `/proc/self/root-nonexistent-xyz` hung past 5000ms timeout on Ubuntu CI (#269)
+
+### Miscellaneous
+- **plans:** add PH-05 Kanban Dashboard to forge_coordinate master plan as adjacent post-primitive phase (#269)
+
 ## [0.30.23](https://github.com/ziyilam3999/forge-harness/compare/v0.30.22...v0.30.23) (2026-04-17)
 
 ### Bug Fixes

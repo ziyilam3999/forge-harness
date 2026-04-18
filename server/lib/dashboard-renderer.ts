@@ -351,7 +351,7 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .logo-divider { color: var(--border); margin: 0 2px; font-weight: 300; }
 .logo-sub { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
 .phase-tag { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--green); background: var(--green-bg); padding: 3px 10px; border-radius: 6px; }
-.phase-status-pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: var(--grey-light); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.phase-status-pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: var(--border-light); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
 .phase-status-pill.complete { background: var(--green-bg); color: var(--green); }
 .phase-status-pill.needs-replan, .phase-status-pill.halted { background: var(--red-bg); color: var(--red); }
 .phase-status-pill.in-progress { background: var(--amber-bg); color: var(--amber); }

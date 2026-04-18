@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.31.1](https://github.com/ziyilam3999/forge-harness/compare/v0.31.0...v0.31.1) (2026-04-19)
+
+### Miscellaneous
+- **cleanup:** remove memory-cli `$HOME`-leak pollution dirs + add task #74 acceptance wrapper. Forge-harness contribution to the cross-repo memory-cli `$HOME` non-expansion fix (companions: ai-brain v0.19.2, agent-working-memory v0.1.2). Adds `.ai-workspace/plans/2026-04-19-memory-cli-home-leak-fix.md` and `scripts/memory-cli-home-leak-fix-acceptance.sh`. (#278)
+
 ## [0.31.0](https://github.com/ziyilam3999/forge-harness/compare/v0.30.23...v0.31.0) (2026-04-18)
 
 ### Features

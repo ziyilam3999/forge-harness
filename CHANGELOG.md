@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.6](https://github.com/ziyilam3999/forge-harness/compare/v0.32.5...v0.32.6) (2026-04-19)
+
+### Bug Fixes
+- **forge_plan:** corrector stage no longer silently swallows max_tokens truncation. Three concentric fixes: (1) corrector call sites now pass `CORRECTOR_MAX_TOKENS = 32000` (~105KB JSON output, vs. the 8192-token default that truncated at ~27KB — matches monday's crash at position 26918); (2) `callClaude` inspects `response.stop_reason` and throws a typed `LLMOutputTruncatedError` when the response was cut off — any future silent truncation across any LLM call site becomes a loud failure; (3) `runCorrector` / `runMasterCorrector` return a `correctorFailed` boolean, `RunRecord["outcome"]` widens to include `"corrector-failed"`, and all four handlers (default/master/phase/update) plumb an `anyCorrectorFailed` flag through to `writeRunRecordIfNeeded`. A run that previously reported `outcome: "success"` with `findingsApplied: 0, findingsRejected: 45` now reports `outcome: "corrector-failed"` and the caller knows the critique was not applied. 8 new tests (4 anthropic truncation-detection + 4 corrector-failed outcome including regression-positive + any-round-failed sticky). Reported by monday during monday-bot bootstrap (mailbox thread `forge-harness-monday-bot-support`, 2026-04-19T15:27Z). (closes #312) (#313)
+
 ## [0.32.5](https://github.com/ziyilam3999/forge-harness/compare/v0.32.4...v0.32.5) (2026-04-19)
 
 ### Bug Fixes

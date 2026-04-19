@@ -600,6 +600,36 @@ export async function writeDashboardHtml(
 }
 
 /**
+ * Injectable I/O seam for the auto-open path — separate from `DashboardIo`
+ * so tests that mock the atomic-write contract don't have to stub the
+ * auto-open-only fields. Production callers use `DEFAULT_AUTO_OPEN_IO`.
+ */
+export interface AutoOpenIo {
+  stat: (path: string) => Promise<void>;
+  openExternal: (target: string) => Promise<void>;
+  writeFile: (path: string, data: string, encoding: "utf-8") => Promise<void>;
+}
+
+const DEFAULT_AUTO_OPEN_IO: AutoOpenIo = {
+  stat: (p) => stat(p).then(() => undefined),
+  openExternal: (target) =>
+    new Promise<void>((resolve, reject) => {
+      const child =
+        process.platform === "win32"
+          ? spawn("cmd", ["/c", "start", "", target], { detached: true, stdio: "ignore" })
+          : process.platform === "darwin"
+            ? spawn("open", [target], { detached: true, stdio: "ignore" })
+            : spawn("xdg-open", [target], { detached: true, stdio: "ignore" });
+      child.once("spawn", () => {
+        child.unref();
+        resolve();
+      });
+      child.once("error", (err) => reject(err));
+    }),
+  writeFile: (p, d, e) => writeFile(p, d, e),
+};
+
+/**
  * Open the dashboard in the user's default browser — env-gated, one-shot.
  *
  * Gates (both must hold):
@@ -610,36 +640,50 @@ export async function writeDashboardHtml(
  *      open writes the marker; subsequent renders are no-ops. Delete the
  *      marker to re-open the tab (e.g. after closing it accidentally).
  *
+ * The marker is only written AFTER the child process emits its `"spawn"`
+ * event — if the spawn fails (e.g. `xdg-open` missing on a headless box),
+ * no marker lands and the next render re-attempts. Issue #281.
+ *
+ * The `stat` catch narrows to ENOENT only; other errors (EPERM, EIO, etc)
+ * are re-thrown to the outer catch so they are logged rather than silently
+ * treated as "marker absent" (which would re-open a tab on every render).
+ * Issue #283.
+ *
+ * Exported + accepts an injectable `AutoOpenIo` so the env-gated behavior
+ * can be unit-tested without real filesystem side effects. Issue #282.
+ *
  * Uses spawn with an argv array (no shell interpolation) to avoid any
- * command-injection surface on user-controlled projectPath values. The
- * child is detached + unreffed so the MCP process exits independently.
+ * command-injection surface on user-controlled paths. The child is
+ * detached + unreffed so the MCP process exits independently.
  *
  * Failure-swallowed per the parent renderer's error policy.
  */
-async function maybeAutoOpenBrowser(projectPath: string): Promise<void> {
+export async function maybeAutoOpenBrowser(
+  projectPath: string,
+  io: AutoOpenIo = DEFAULT_AUTO_OPEN_IO,
+): Promise<void> {
   if (process.env.FORGE_DASHBOARD_AUTO_OPEN !== "1") return;
 
   const markerPath = join(projectPath, ".forge", ".dashboard-opened");
   try {
-    await stat(markerPath);
+    await io.stat(markerPath);
     return;
-  } catch {
-    /* marker absent — proceed to open */
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code && code !== "ENOENT") {
+      console.error(
+        "forge: dashboard auto-open stat failed (continuing):",
+        err instanceof Error ? err.message : String(err),
+      );
+      return;
+    }
+    /* ENOENT or unknown — marker absent, proceed to open */
   }
 
   try {
     const dashboardPath = join(projectPath, ".forge", "dashboard.html");
-    const child =
-      process.platform === "win32"
-        ? spawn("cmd", ["/c", "start", "", dashboardPath], { detached: true, stdio: "ignore" })
-        : process.platform === "darwin"
-          ? spawn("open", [dashboardPath], { detached: true, stdio: "ignore" })
-          : spawn("xdg-open", [dashboardPath], { detached: true, stdio: "ignore" });
-    child.on("error", (err) => {
-      console.error("forge: dashboard auto-open spawn failed (continuing):", err.message);
-    });
-    child.unref();
-    await writeFile(markerPath, new Date().toISOString(), "utf-8");
+    await io.openExternal(dashboardPath);
+    await io.writeFile(markerPath, new Date().toISOString(), "utf-8");
   } catch (err) {
     console.error(
       "forge: dashboard auto-open failed (continuing):",

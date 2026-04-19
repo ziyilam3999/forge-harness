@@ -23,7 +23,9 @@ import {
   classifyStaleness,
   renderDashboardHtml,
   renderDashboard,
+  maybeAutoOpenBrowser,
   COLUMN_IDS,
+  type AutoOpenIo,
   type DashboardRenderInput,
   type AuditFeedEntry,
 } from "./dashboard-renderer.js";
@@ -463,5 +465,108 @@ describe("renderDashboard — failure isolation (AC-18)", () => {
     // hooks run in the background and swallow errors internally.
     expect(() => reporter.begin("stage-a")).not.toThrow();
     expect(() => reporter.complete("stage-a")).not.toThrow();
+  });
+});
+
+describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
+  const PROJECT_ROOT = process.platform === "win32"
+    ? "Z:\\forge-auto-open-fixture"
+    : "/tmp/forge-auto-open-nonexistent-xyz";
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    process.env.FORGE_DASHBOARD_AUTO_OPEN = "1";
+  });
+
+  afterEach(() => {
+    delete process.env.FORGE_DASHBOARD_AUTO_OPEN;
+    vi.restoreAllMocks();
+  });
+
+  it("does NOT write the marker when openExternal rejects (spawn failure)", async () => {
+    const calls: Array<{ op: string; args: unknown[] }> = [];
+    const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    const io: AutoOpenIo = {
+      stat: async (p) => {
+        calls.push({ op: "stat", args: [p] });
+        throw enoent; // marker absent → proceed
+      },
+      openExternal: async (target) => {
+        calls.push({ op: "openExternal", args: [target] });
+        throw new Error("xdg-open missing");
+      },
+      writeFile: async (p, d, e) => {
+        calls.push({ op: "writeFile", args: [p, d, e] });
+      },
+    };
+
+    await maybeAutoOpenBrowser(PROJECT_ROOT, io);
+
+    // openExternal was attempted but writeFile must NEVER have been called.
+    expect(calls.some((c) => c.op === "openExternal")).toBe(true);
+    expect(calls.some((c) => c.op === "writeFile")).toBe(false);
+  });
+
+  it("writes the marker exactly once when openExternal resolves", async () => {
+    const calls: Array<{ op: string; args: unknown[] }> = [];
+    const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    const io: AutoOpenIo = {
+      stat: async () => { throw enoent; },
+      openExternal: async (target) => { calls.push({ op: "openExternal", args: [target] }); },
+      writeFile: async (p, d, e) => { calls.push({ op: "writeFile", args: [p, d, e] }); },
+    };
+
+    await maybeAutoOpenBrowser(PROJECT_ROOT, io);
+
+    const opOrder = calls.map((c) => c.op);
+    expect(opOrder).toEqual(["openExternal", "writeFile"]);
+    const writeArgs = calls.find((c) => c.op === "writeFile")!.args;
+    expect(String(writeArgs[0])).toMatch(/\.dashboard-opened$/);
+  });
+});
+
+describe("maybeAutoOpenBrowser — stat catch narrowing (#283)", () => {
+  const PROJECT_ROOT = process.platform === "win32"
+    ? "Z:\\forge-auto-open-stat-fixture"
+    : "/tmp/forge-auto-open-stat-nonexistent-xyz";
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    process.env.FORGE_DASHBOARD_AUTO_OPEN = "1";
+  });
+
+  afterEach(() => {
+    delete process.env.FORGE_DASHBOARD_AUTO_OPEN;
+    vi.restoreAllMocks();
+  });
+
+  it("non-ENOENT stat error skips open and does NOT call openExternal or writeFile", async () => {
+    const calls: Array<{ op: string }> = [];
+    const eperm = Object.assign(new Error("EPERM"), { code: "EPERM" });
+    const io: AutoOpenIo = {
+      stat: async () => { throw eperm; },
+      openExternal: async () => { calls.push({ op: "openExternal" }); },
+      writeFile: async () => { calls.push({ op: "writeFile" }); },
+    };
+
+    await maybeAutoOpenBrowser(PROJECT_ROOT, io);
+
+    // Non-ENOENT must neither re-open nor re-write the marker —
+    // otherwise every render would re-spawn a browser tab.
+    expect(calls.length).toBe(0);
+  });
+
+  it("env var unset → no io calls at all", async () => {
+    delete process.env.FORGE_DASHBOARD_AUTO_OPEN;
+    const calls: Array<{ op: string }> = [];
+    const io: AutoOpenIo = {
+      stat: async () => { calls.push({ op: "stat" }); },
+      openExternal: async () => { calls.push({ op: "openExternal" }); },
+      writeFile: async () => { calls.push({ op: "writeFile" }); },
+    };
+
+    await maybeAutoOpenBrowser(PROJECT_ROOT, io);
+
+    expect(calls.length).toBe(0);
   });
 });

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.3](https://github.com/ziyilam3999/forge-harness/compare/v0.32.2...v0.32.3) (2026-04-19)
+
+### Miscellaneous
+- **ci:** S8 Kanban dashboard workflow polish. Adds `workflow_dispatch` (closes #286) for manual reruns, friendly `name:` label (closes #287), inline `--ignore-scripts` rationale comment matching ci.yml (closes #288), and a `concurrency:` block with `cancel-in-progress: true` so stacked PR pushes cancel in-flight runs instead of queuing (closes #289). Zero behavior change on the happy path. (#296)
+
 ## [0.32.2](https://github.com/ziyilam3999/forge-harness/compare/v0.32.1...v0.32.2) (2026-04-19)
 
 ### Bug Fixes

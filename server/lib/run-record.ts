@@ -57,7 +57,7 @@ export interface RunRecord {
     durationMs: number;
     estimatedCostUsd?: number | null;
   };
-  outcome: "success" | "validation-failure" | "api-error" | "timeout";
+  outcome: "success" | "validation-failure" | "api-error" | "timeout" | "corrector-failed";
 }
 
 /**

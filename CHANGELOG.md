@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.4](https://github.com/ziyilam3999/forge-harness/compare/v0.32.3...v0.32.4) (2026-04-19)
+
+### Miscellaneous
+- **dashboard:** auto-open polish bundle from PR #290 ship-review. `stat`-catch guard widened to treat errors without a `code` property as skip rather than "marker absent" (closes #291). Test fixture renamed to a neutral label instead of misleading `/tmp/…nonexistent-xyz` naming (closes #293). Shared env-gate setup factored into `useAutoOpenEnvGate()` helper (closes #294). Env-gate test extracted to its own describe block (closes #295). Zero behavior change on the happy path. Full suite 748 → 749 tests (+1 for the new undefined-code coverage). (#299)
+
 ## [0.32.3](https://github.com/ziyilam3999/forge-harness/compare/v0.32.2...v0.32.3) (2026-04-19)
 
 ### Miscellaneous

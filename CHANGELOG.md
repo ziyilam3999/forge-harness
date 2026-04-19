@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.0](https://github.com/ziyilam3999/forge-harness/compare/v0.31.1...v0.32.0) (2026-04-19)
+
+### Features
+- **dashboard:** env-gated OS-native browser auto-open on first render. `renderDashboard()` spawns the default browser when `FORGE_DASHBOARD_AUTO_OPEN=1` is in the environment and the per-project `.forge/.dashboard-opened` marker is absent. Uses `spawn` with an argv array (no shell interpolation) and `detached+unref` so the MCP subprocess stays independent. Failure is swallowed per the existing renderer error policy — tests and CI are unaffected when the var is unset. Delete the marker to re-open the tab. (#280)
+
+### Bug Fixes
+- **dashboard-acceptance:** S8 Kanban acceptance wrapper (`scripts/s8-kanban-dashboard-acceptance.sh`) was silently failing AC-07 because the fixture used hardcoded past timestamps (`2026-04-18T10:00:0X`) while the driver passed `currentPlanStartTimeMs = Date.now() - 5min`; under `assessPhase`'s time-window filter the records were dropped and the header rendered `0/9` instead of `4/9`. Fixture timestamps now generated relative to `Date.now() - 60s`. CI never caught it because no workflow invoked the wrapper; follow-up tracked at #284. (#280)
+
 ## [0.31.1](https://github.com/ziyilam3999/forge-harness/compare/v0.31.0...v0.31.1) (2026-04-19)
 
 ### Miscellaneous

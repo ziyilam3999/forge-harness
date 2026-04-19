@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.1](https://github.com/ziyilam3999/forge-harness/compare/v0.32.0...v0.32.1) (2026-04-19)
+
+### Miscellaneous
+- **ci:** wire S8 Kanban dashboard acceptance wrapper (`scripts/s8-kanban-dashboard-acceptance.sh`) into a path-filtered GH Actions workflow so PRs touching `server/lib/{dashboard-renderer,coordinator,progress,run-record,activity}.ts` or the wrapper itself run the wrapper as a required PR check. Closes #284 — prevents the class of fixture drift that regressed AC-07 between PR #269 and PR #280. (#285)
+
 ## [0.32.0](https://github.com/ziyilam3999/forge-harness/compare/v0.31.1...v0.32.0) (2026-04-19)
 
 ### Features

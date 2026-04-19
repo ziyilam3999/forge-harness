@@ -468,11 +468,18 @@ describe("renderDashboard — failure isolation (AC-18)", () => {
   });
 });
 
-describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
-  const PROJECT_ROOT = process.platform === "win32"
-    ? "Z:\\forge-auto-open-fixture"
-    : "/tmp/forge-auto-open-nonexistent-xyz";
+// ── maybeAutoOpenBrowser — shared test helpers ─────────────────────────────
+// Neutral fixture path: tests fully inject AutoOpenIo and never touch disk,
+// so the label is "this is the fake project root" rather than "a nonexistent
+// real path". Renamed from the previous `/tmp/forge-auto-open-nonexistent-xyz`
+// per #293.
+const FIXTURE_PROJECT_ROOT =
+  process.platform === "win32" ? "Z:\\project-fixture" : "/project-fixture";
 
+// Factored shared setup/teardown for auto-open describes per #294. Returns
+// nothing — the afterEach hook restores mocks globally. Call from the top of
+// each describe that exercises the env-gated auto-open path.
+function useAutoOpenEnvGate(): void {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     process.env.FORGE_DASHBOARD_AUTO_OPEN = "1";
@@ -482,6 +489,10 @@ describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
     delete process.env.FORGE_DASHBOARD_AUTO_OPEN;
     vi.restoreAllMocks();
   });
+}
+
+describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
+  useAutoOpenEnvGate();
 
   it("does NOT write the marker when openExternal rejects (spawn failure)", async () => {
     const calls: Array<{ op: string; args: unknown[] }> = [];
@@ -500,7 +511,7 @@ describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
       },
     };
 
-    await maybeAutoOpenBrowser(PROJECT_ROOT, io);
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
 
     // openExternal was attempted but writeFile must NEVER have been called.
     expect(calls.some((c) => c.op === "openExternal")).toBe(true);
@@ -516,7 +527,7 @@ describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
       writeFile: async (p, d, e) => { calls.push({ op: "writeFile", args: [p, d, e] }); },
     };
 
-    await maybeAutoOpenBrowser(PROJECT_ROOT, io);
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
 
     const opOrder = calls.map((c) => c.op);
     expect(opOrder).toEqual(["openExternal", "writeFile"]);
@@ -525,22 +536,10 @@ describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
   });
 });
 
-describe("maybeAutoOpenBrowser — stat catch narrowing (#283)", () => {
-  const PROJECT_ROOT = process.platform === "win32"
-    ? "Z:\\forge-auto-open-stat-fixture"
-    : "/tmp/forge-auto-open-stat-nonexistent-xyz";
+describe("maybeAutoOpenBrowser — stat catch narrowing (#283 + #291)", () => {
+  useAutoOpenEnvGate();
 
-  beforeEach(() => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    process.env.FORGE_DASHBOARD_AUTO_OPEN = "1";
-  });
-
-  afterEach(() => {
-    delete process.env.FORGE_DASHBOARD_AUTO_OPEN;
-    vi.restoreAllMocks();
-  });
-
-  it("non-ENOENT stat error skips open and does NOT call openExternal or writeFile", async () => {
+  it("non-ENOENT stat error (e.g. EPERM) skips open and does NOT call openExternal or writeFile", async () => {
     const calls: Array<{ op: string }> = [];
     const eperm = Object.assign(new Error("EPERM"), { code: "EPERM" });
     const io: AutoOpenIo = {
@@ -549,15 +548,47 @@ describe("maybeAutoOpenBrowser — stat catch narrowing (#283)", () => {
       writeFile: async () => { calls.push({ op: "writeFile" }); },
     };
 
-    await maybeAutoOpenBrowser(PROJECT_ROOT, io);
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
 
     // Non-ENOENT must neither re-open nor re-write the marker —
     // otherwise every render would re-spawn a browser tab.
     expect(calls.length).toBe(0);
   });
 
-  it("env var unset → no io calls at all", async () => {
+  it("plain Error with no code (undefined) is treated as 'skip', NOT 'marker absent' (#291)", async () => {
+    const calls: Array<{ op: string }> = [];
+    // Plain Error has no `.code` property — previous guard
+    // `if (code && code !== "ENOENT")` fell through to open.
+    // After the #291 widening (`if (code !== "ENOENT")`), undefined
+    // also skips because undefined !== "ENOENT".
+    const io: AutoOpenIo = {
+      stat: async () => { throw new Error("mystery stat failure"); },
+      openExternal: async () => { calls.push({ op: "openExternal" }); },
+      writeFile: async () => { calls.push({ op: "writeFile" }); },
+    };
+
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
+
+    // No io other than stat must have been touched.
+    expect(calls.length).toBe(0);
+  });
+});
+
+describe("maybeAutoOpenBrowser — env gate (#295)", () => {
+  // Env-gate suppression is a distinct concern from stat-narrowing, so it
+  // lives in its own describe per #295. useAutoOpenEnvGate() is deliberately
+  // NOT used here — the whole point is that the env var is unset.
+
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     delete process.env.FORGE_DASHBOARD_AUTO_OPEN;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("env var unset → no io calls at all (early return)", async () => {
     const calls: Array<{ op: string }> = [];
     const io: AutoOpenIo = {
       stat: async () => { calls.push({ op: "stat" }); },
@@ -565,7 +596,7 @@ describe("maybeAutoOpenBrowser — stat catch narrowing (#283)", () => {
       writeFile: async () => { calls.push({ op: "writeFile" }); },
     };
 
-    await maybeAutoOpenBrowser(PROJECT_ROOT, io);
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
 
     expect(calls.length).toBe(0);
   });

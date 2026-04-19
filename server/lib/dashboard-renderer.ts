@@ -644,10 +644,12 @@ const DEFAULT_AUTO_OPEN_IO: AutoOpenIo = {
  * event — if the spawn fails (e.g. `xdg-open` missing on a headless box),
  * no marker lands and the next render re-attempts. Issue #281.
  *
- * The `stat` catch narrows to ENOENT only; other errors (EPERM, EIO, etc)
- * are re-thrown to the outer catch so they are logged rather than silently
- * treated as "marker absent" (which would re-open a tab on every render).
- * Issue #283.
+ * The `stat` catch treats **only** `ENOENT` as "marker absent, proceed to
+ * open". Any other error — including errors without a `code` property —
+ * is logged and the render skips auto-open for this tick. This prevents
+ * EPERM/EIO (or a non-Node-FS rejection) from being silently re-interpreted
+ * as "no marker yet" and re-opening a tab on every render. Issue #283 +
+ * #291 widening.
  *
  * Exported + accepts an injectable `AutoOpenIo` so the env-gated behavior
  * can be unit-tested without real filesystem side effects. Issue #282.
@@ -670,14 +672,17 @@ export async function maybeAutoOpenBrowser(
     return;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code && code !== "ENOENT") {
+    if (code !== "ENOENT") {
+      // Any non-ENOENT condition — including undefined code from a plain
+      // Error — is treated as "cannot determine marker state safely; skip
+      // open". This matches the spirit of #283 (#291 widening).
       console.error(
         "forge: dashboard auto-open stat failed (continuing):",
         err instanceof Error ? err.message : String(err),
       );
       return;
     }
-    /* ENOENT or unknown — marker absent, proceed to open */
+    /* ENOENT — marker absent, proceed to open */
   }
 
   try {

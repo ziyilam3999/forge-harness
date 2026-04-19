@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.5](https://github.com/ziyilam3999/forge-harness/compare/v0.32.4...v0.32.5) (2026-04-19)
+
+### Bug Fixes
+- **setup:** `scripts/setup-config.cjs` now registers the forge MCP server to Claude Code's canonical user-scope path (`~/.claude.json` top-level `mcpServers`, written via `claude mcp add ... -s user`) instead of the dead-letter `~/.claude/settings.json.mcpServers` (which Claude Code never read). Primary path uses the `claude` CLI with an absolute path to `dist/index.js` (sidesteps the missing `--cwd` flag in CLI v2.1.114, so relative paths no longer break for users whose session cwd is not forge-harness). Fallback path atomically writes `~/.claude.json` directly when the CLI is not on PATH, preserving all other keys. Migration warnings (non-fatal, no auto-delete) cover stale `~/.claude/settings.json.mcpServers.forge` and stray `~/.claude/mcp.json`. New acceptance wrapper `scripts/setup-config-acceptance.sh` drives 10 AC against an isolated scratch HOME. Reported by monday during monday-bot bootstrap (2026-04-19). **Users who previously ran `./setup.sh` should: `claude mcp remove forge -s user` (optional cleanup) → re-run `./setup.sh` → quit-and-relaunch Claude Code.** (closes #304) (#305)
+
 ## [0.32.4](https://github.com/ziyilam3999/forge-harness/compare/v0.32.3...v0.32.4) (2026-04-19)
 
 ### Miscellaneous

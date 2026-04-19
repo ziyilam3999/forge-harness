@@ -79,6 +79,26 @@ export function getClient(): Anthropic {
   );
 }
 
+/**
+ * Thrown when the LLM response was cut off because it hit the max_tokens ceiling.
+ * The text that did come back is almost always malformed (truncated mid-string /
+ * mid-token), so callers must not try to extractJson() it. Raise the maxTokens
+ * on the call or shrink the request and retry.
+ */
+export class LLMOutputTruncatedError extends Error {
+  readonly maxTokensLimit: number;
+  readonly outputChars: number;
+  constructor(maxTokensLimit: number, outputChars: number) {
+    super(
+      `LLM output truncated: stop_reason=max_tokens hit at limit ${maxTokensLimit}. ` +
+        `Received ${outputChars} chars before cutoff. Raise maxTokens or shrink the prompt.`,
+    );
+    this.name = "LLMOutputTruncatedError";
+    this.maxTokensLimit = maxTokensLimit;
+    this.outputChars = outputChars;
+  }
+}
+
 export interface CallClaudeOptions {
   system: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
@@ -148,10 +168,11 @@ export function extractJson(text: string): unknown {
  */
 export async function callClaude(options: CallClaudeOptions): Promise<CallClaudeResult> {
   const anthropic = getClient();
+  const effectiveMaxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
 
   const response = await anthropic.messages.create({
     model: options.model ?? DEFAULT_MODEL,
-    max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+    max_tokens: effectiveMaxTokens,
     system: options.jsonMode
       ? options.system +
         "\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown fences, no preamble text, no trailing text. Just the JSON object."
@@ -164,6 +185,13 @@ export async function callClaude(options: CallClaudeOptions): Promise<CallClaude
     .filter((block): block is Anthropic.TextBlock => block.type === "text")
     .map((block) => block.text)
     .join("");
+
+  // Detect truncation by max_tokens and throw, rather than returning text the
+  // caller will fail to parse. Keeps silent-truncation bugs loud — see forge_plan
+  // corrector crash (monday blocker, 2026-04-19, v0.32.6).
+  if (response.stop_reason === "max_tokens") {
+    throw new LLMOutputTruncatedError(effectiveMaxTokens, text.length);
+  }
 
   const usage = {
     inputTokens: response.usage.input_tokens,

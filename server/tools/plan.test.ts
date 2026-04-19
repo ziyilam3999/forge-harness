@@ -383,6 +383,100 @@ describe("handlePlan", () => {
     });
   });
 
+  describe("corrector-failed outcome (v0.32.6 — monday blocker)", () => {
+    let testProjectPath: string;
+
+    beforeEach(() => {
+      // writeRunRecordIfNeeded is a no-op when projectPath is absent. Supply a
+      // dummy path so the mocked writeRunRecord gets called and we can inspect
+      // the RunRecord's outcome field.
+      testProjectPath = mkdtempSync(join(tmpdir(), "plan-test-"));
+    });
+
+    afterEach(() => {
+      if (testProjectPath) rmSync(testProjectPath, { recursive: true, force: true });
+    });
+
+    it("RunRecord outcome is 'corrector-failed' when corrector throws (e.g. LLMOutputTruncatedError)", async () => {
+      const plan = makeValidPlan();
+      const findings = [
+        { severity: "CRITICAL", storyId: "US-01", acId: null, description: "d", suggestedFix: "f" },
+      ];
+
+      mockedCallClaude
+        .mockResolvedValueOnce(makeCallResult(plan)) // planner
+        .mockResolvedValueOnce(makeCriticResult(findings)) // critic-1
+        .mockRejectedValueOnce(new Error("simulated truncation")); // corrector-1 throws
+
+      await handlePlan({ intent: "add dark mode", projectPath: testProjectPath, tier: "standard" });
+
+      expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+      const written = mockedWriteRunRecord.mock.calls[0][1];
+      expect(written.outcome).toBe("corrector-failed");
+      // The lie-by-omission is also surfaced via findings accounting:
+      expect(written.metrics.findingsTotal).toBe(1);
+      expect(written.metrics.findingsApplied).toBe(0);
+    });
+
+    it("RunRecord outcome is 'corrector-failed' when corrector output fails validation", async () => {
+      const plan = makeValidPlan();
+      const findings = [
+        { severity: "CRITICAL", storyId: "US-01", acId: null, description: "d", suggestedFix: "f" },
+      ];
+      const brokenPlan = { schemaVersion: "3.0.0", stories: [] }; // fails validation (needs ≥1 story)
+
+      mockedCallClaude
+        .mockResolvedValueOnce(makeCallResult(plan)) // planner
+        .mockResolvedValueOnce(makeCriticResult(findings)) // critic-1
+        .mockResolvedValueOnce(makeCorrectorResult(brokenPlan)); // corrector returns invalid
+
+      await handlePlan({ intent: "add dark mode", projectPath: testProjectPath, tier: "standard" });
+
+      expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+      const written = mockedWriteRunRecord.mock.calls[0][1];
+      expect(written.outcome).toBe("corrector-failed");
+    });
+
+    it("RunRecord outcome stays 'success' when corrector succeeds (regression positive)", async () => {
+      const plan = makeValidPlan();
+      const findings = [
+        { severity: "MINOR", storyId: "US-01", acId: null, description: "d", suggestedFix: "f" },
+      ];
+
+      mockedCallClaude
+        .mockResolvedValueOnce(makeCallResult(plan)) // planner
+        .mockResolvedValueOnce(makeCriticResult(findings)) // critic-1
+        .mockResolvedValueOnce(makeCorrectorResult(plan, [{ findingIndex: 0, applied: true, reason: "ok" }])); // corrector OK
+
+      await handlePlan({ intent: "add dark mode", projectPath: testProjectPath, tier: "standard" });
+
+      expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+      const written = mockedWriteRunRecord.mock.calls[0][1];
+      expect(written.outcome).toBe("success");
+      expect(written.metrics.findingsApplied).toBe(1);
+    });
+
+    it("RunRecord outcome is 'corrector-failed' even if LATER rounds succeed (any-round-failed sticky)", async () => {
+      const plan = makeValidPlan();
+      const findings = [
+        { severity: "CRITICAL", storyId: "US-01", acId: null, description: "d", suggestedFix: "f" },
+      ];
+
+      mockedCallClaude
+        .mockResolvedValueOnce(makeCallResult(plan)) // planner
+        .mockResolvedValueOnce(makeCriticResult(findings)) // critic-1
+        .mockRejectedValueOnce(new Error("round 1 corrector crashed")) // corrector-1 throws
+        .mockResolvedValueOnce(makeCriticResult(findings)) // critic-2
+        .mockResolvedValueOnce(makeCorrectorResult(plan, [{ findingIndex: 0, applied: true, reason: "ok" }])); // corrector-2 OK
+
+      await handlePlan({ intent: "add dark mode", projectPath: testProjectPath, tier: "thorough" });
+
+      expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+      const written = mockedWriteRunRecord.mock.calls[0][1];
+      expect(written.outcome).toBe("corrector-failed");
+    });
+  });
+
   describe("codebase scanning", () => {
     it("calls scanCodebase when projectPath provided", async () => {
       const plan = makeValidPlan();

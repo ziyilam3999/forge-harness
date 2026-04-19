@@ -313,12 +313,21 @@ async function runCritic(
 /**
  * Run a corrector agent. Returns corrected plan or the original on failure.
  */
+
+/**
+ * Corrector output budget. A full revised execution/master plan can run 20-40KB
+ * of indented JSON (stories × AC × paths). 8192 tokens (~27KB) was the default
+ * and truncated monday-bot's plan at position 26918 on 2026-04-19 (v0.32.6 fix).
+ * 32000 tokens ≈ 105KB — fits every plan size observed so far with headroom.
+ */
+const CORRECTOR_MAX_TOKENS = 32000;
+
 async function runCorrector(
   plan: ExecutionPlan,
   findings: CritiqueFindings,
   model: string | undefined,
   ctx: RunContext,
-): Promise<{ plan: ExecutionPlan; dispositions: CorrectorOutput["dispositions"] }> {
+): Promise<{ plan: ExecutionPlan; dispositions: CorrectorOutput["dispositions"]; correctorFailed: boolean }> {
   const system = buildCorrectorPrompt();
   const planJson = JSON.stringify(plan, null, 2);
   const findingsJson = JSON.stringify(findings, null, 2);
@@ -331,6 +340,7 @@ async function runCorrector(
       ],
       model,
       jsonMode: true,
+      maxTokens: CORRECTOR_MAX_TOKENS,
     });
 
     const parsed = extractJson(result.text) as CorrectorOutput;
@@ -342,16 +352,16 @@ async function runCorrector(
         "forge_plan: corrector output failed validation, using pre-correction plan:",
         validation.errors,
       );
-      return { plan, dispositions: [] };
+      return { plan, dispositions: [], correctorFailed: true };
     }
 
-    return { plan: parsed.plan, dispositions: parsed.dispositions ?? [] };
+    return { plan: parsed.plan, dispositions: parsed.dispositions ?? [], correctorFailed: false };
   } catch (e) {
     console.error(
       "forge_plan: corrector failed, using pre-correction plan:",
       e instanceof Error ? e.message : String(e),
     );
-    return { plan, dispositions: [] };
+    return { plan, dispositions: [], correctorFailed: true };
   }
 }
 
@@ -457,7 +467,7 @@ async function runMasterCorrector(
   findings: MasterCritiqueFindings,
   model: string | undefined,
   ctx: RunContext,
-): Promise<{ plan: MasterPlan; dispositions: MasterCorrectorOutput["dispositions"] }> {
+): Promise<{ plan: MasterPlan; dispositions: MasterCorrectorOutput["dispositions"]; correctorFailed: boolean }> {
   const system = buildMasterCorrectorPrompt();
   const planJson = JSON.stringify(plan, null, 2);
   const findingsJson = JSON.stringify(findings, null, 2);
@@ -470,6 +480,7 @@ async function runMasterCorrector(
       ],
       model,
       jsonMode: true,
+      maxTokens: CORRECTOR_MAX_TOKENS,
     });
 
     const parsed = extractJson(result.text) as MasterCorrectorOutput;
@@ -480,16 +491,16 @@ async function runMasterCorrector(
         "forge_plan: master corrector output failed validation, using pre-correction plan:",
         validation.errors,
       );
-      return { plan, dispositions: [] };
+      return { plan, dispositions: [], correctorFailed: true };
     }
 
-    return { plan: parsed.plan, dispositions: parsed.dispositions ?? [] };
+    return { plan: parsed.plan, dispositions: parsed.dispositions ?? [], correctorFailed: false };
   } catch (e) {
     console.error(
       "forge_plan: master corrector failed, using pre-correction plan:",
       e instanceof Error ? e.message : String(e),
     );
-    return { plan, dispositions: [] };
+    return { plan, dispositions: [], correctorFailed: true };
   }
 }
 
@@ -679,6 +690,7 @@ async function writeRunRecordIfNeeded(
   critiqueRounds: Array<{ findings: { findings: unknown[] }; dispositions: Array<{ applied: boolean }> }>,
   validationRetries: number,
   ctx: RunContext,
+  correctorFailed: boolean = false,
 ): Promise<void> {
   if (!projectPath) return;
 
@@ -705,7 +717,7 @@ async function writeRunRecordIfNeeded(
       durationMs: Date.now() - startTime,
       estimatedCostUsd: costSummary.estimatedCostUsd,
     },
-    outcome: "success",
+    outcome: correctorFailed ? "corrector-failed" : "success",
   };
   await writeRunRecord(projectPath, runRecord);
 }
@@ -763,6 +775,7 @@ async function handleMasterPlan(options: HandlePlanOptions) {
     findings: MasterCritiqueFindings;
     dispositions: MasterCorrectorOutput["dispositions"];
   }> = [];
+  let anyCorrectorFailed = false;
 
   if (effectiveTier !== "quick") {
     const maxRounds = effectiveTier === "thorough" ? 2 : 1;
@@ -774,9 +787,10 @@ async function handleMasterPlan(options: HandlePlanOptions) {
         continue;
       }
 
-      const { plan: correctedPlan, dispositions } = await runMasterCorrector(plan, findings, undefined, ctx);
+      const { plan: correctedPlan, dispositions, correctorFailed } = await runMasterCorrector(plan, findings, undefined, ctx);
       plan = correctedPlan;
       critiqueRounds.push({ findings, dispositions });
+      if (correctorFailed) anyCorrectorFailed = true;
     }
   }
 
@@ -791,7 +805,7 @@ async function handleMasterPlan(options: HandlePlanOptions) {
   sections.push(buildUsageSection(ctx));
 
   await writeRunRecordIfNeeded(
-    projectPath, startTime, "master", null, effectiveTier, critiqueRounds, validationRetries, ctx,
+    projectPath, startTime, "master", null, effectiveTier, critiqueRounds, validationRetries, ctx, anyCorrectorFailed,
   );
 
   return { content: [{ type: "text" as const, text: sections.join("\n\n") }] };
@@ -833,6 +847,7 @@ async function handlePhasePlan(options: HandlePlanOptions) {
     findings: CritiqueFindings;
     dispositions: CorrectorOutput["dispositions"];
   }> = [];
+  let anyCorrectorFailed = false;
 
   if (effectiveTier !== "quick") {
     const maxRounds = effectiveTier === "thorough" ? 2 : 1;
@@ -844,9 +859,10 @@ async function handlePhasePlan(options: HandlePlanOptions) {
         continue;
       }
 
-      const { plan: correctedPlan, dispositions } = await runCorrector(plan, findings, undefined, ctx);
+      const { plan: correctedPlan, dispositions, correctorFailed } = await runCorrector(plan, findings, undefined, ctx);
       plan = correctedPlan;
       critiqueRounds.push({ findings, dispositions });
+      if (correctorFailed) anyCorrectorFailed = true;
     }
   }
 
@@ -898,7 +914,7 @@ async function handlePhasePlan(options: HandlePlanOptions) {
   sections.push(buildUsageSection(ctx));
 
   await writeRunRecordIfNeeded(
-    projectPath, startTime, "phase", effectiveMode, effectiveTier, critiqueRounds, validationRetries, ctx,
+    projectPath, startTime, "phase", effectiveMode, effectiveTier, critiqueRounds, validationRetries, ctx, anyCorrectorFailed,
   );
 
   return {
@@ -943,6 +959,7 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
     findings: CritiqueFindings;
     dispositions: CorrectorOutput["dispositions"];
   }> = [];
+  let anyCorrectorFailed = false;
 
   if (effectiveTier !== "quick") {
     const maxRounds = effectiveTier === "thorough" ? 2 : 1;
@@ -954,9 +971,10 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
         continue;
       }
 
-      const { plan: correctedPlan, dispositions } = await runCorrector(plan, findings, undefined, ctx);
+      const { plan: correctedPlan, dispositions, correctorFailed } = await runCorrector(plan, findings, undefined, ctx);
       plan = correctedPlan;
       critiqueRounds.push({ findings, dispositions });
+      if (correctorFailed) anyCorrectorFailed = true;
     }
   }
 
@@ -990,7 +1008,7 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
   sections.push(buildUsageSection(ctx));
 
   await writeRunRecordIfNeeded(
-    projectPath, startTime, "update", null, effectiveTier, critiqueRounds, validationRetries, ctx,
+    projectPath, startTime, "update", null, effectiveTier, critiqueRounds, validationRetries, ctx, anyCorrectorFailed,
   );
 
   // Additive top-level fields on the MCP response (P50 additive extension).
@@ -1061,6 +1079,7 @@ async function handleDefaultPlan(options: HandlePlanOptions) {
     findings: CritiqueFindings;
     dispositions: CorrectorOutput["dispositions"];
   }> = [];
+  let anyCorrectorFailed = false;
 
   if (effectiveTier !== "quick") {
     const maxRounds = effectiveTier === "thorough" ? 2 : 1;
@@ -1072,9 +1091,10 @@ async function handleDefaultPlan(options: HandlePlanOptions) {
         continue;
       }
 
-      const { plan: correctedPlan, dispositions } = await runCorrector(plan, findings, undefined, ctx);
+      const { plan: correctedPlan, dispositions, correctorFailed } = await runCorrector(plan, findings, undefined, ctx);
       plan = correctedPlan;
       critiqueRounds.push({ findings, dispositions });
+      if (correctorFailed) anyCorrectorFailed = true;
     }
   }
 
@@ -1126,7 +1146,7 @@ async function handleDefaultPlan(options: HandlePlanOptions) {
   sections.push(buildUsageSection(ctx));
 
   await writeRunRecordIfNeeded(
-    projectPath, startTime, null, effectiveMode, effectiveTier, critiqueRounds, validationRetries, ctx,
+    projectPath, startTime, null, effectiveMode, effectiveTier, critiqueRounds, validationRetries, ctx, anyCorrectorFailed,
   );
 
   return {

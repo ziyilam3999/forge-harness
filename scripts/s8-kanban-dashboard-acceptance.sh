@@ -76,9 +76,24 @@ JSON
 
 # RunRecords marking US-01 through US-04 PASS. Cost per run = $2.15/4 so
 # the aggregated budget.usedUsd is $2.15 total (matching AC-07).
+#
+# Timestamps are generated relative to NOW (60s ago + 1..4s offset) so they
+# fall inside the driver's `currentPlanStartTimeMs = Date.now() - 5min`
+# window at server/lib/coordinator.ts:314. Previously the fixture used
+# hardcoded absolute timestamps which drifted outside the window, causing
+# assessPhase to silently skip them and AC-07 to fail.
+TS_LIST=($(node -e '
+  const base = Date.now() - 60000;
+  const parts = [];
+  for (let i = 1; i <= 4; i++) parts.push(new Date(base + i * 1000).toISOString());
+  process.stdout.write(parts.join(" "));
+'))
 for n in 01 02 03 04; do
-  ts="2026-04-18T10:00:0${n:1}.000Z"
-  safe_ts="2026-04-18T10-00-0${n:1}-000Z"
+  idx=$((10#$n - 1))
+  ts="${TS_LIST[$idx]}"
+  # filesystem-safe variant: replace ':' and '.' with '-'
+  safe_ts="${ts//:/-}"
+  safe_ts="${safe_ts//./-}"
   # $2.15 / 4 = $0.5375 per record. Four records sum to exactly $2.15.
   cat > "$FIXTURE_DIR/.forge/runs/forge_evaluate-${safe_ts}-00${n}.json" <<JSON_INNER
 {

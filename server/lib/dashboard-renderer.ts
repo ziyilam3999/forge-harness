@@ -28,7 +28,8 @@
  *     (exposed for unit tests that supply known inputs directly).
  */
 
-import { writeFile, rename, mkdir, readFile } from "node:fs/promises";
+import { writeFile, rename, mkdir, readFile, stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { join, basename } from "node:path";
 import type {
   PhaseTransitionBrief,
@@ -599,11 +600,64 @@ export async function writeDashboardHtml(
 }
 
 /**
+ * Open the dashboard in the user's default browser — env-gated, one-shot.
+ *
+ * Gates (both must hold):
+ *   1. `FORGE_DASHBOARD_AUTO_OPEN=1` in the environment (opt-in; default off
+ *      so `npm test`, CI, and MCP servers launched without the flag never
+ *      spawn a browser).
+ *   2. Marker `.forge/.dashboard-opened` must be absent. First successful
+ *      open writes the marker; subsequent renders are no-ops. Delete the
+ *      marker to re-open the tab (e.g. after closing it accidentally).
+ *
+ * Uses spawn with an argv array (no shell interpolation) to avoid any
+ * command-injection surface on user-controlled projectPath values. The
+ * child is detached + unreffed so the MCP process exits independently.
+ *
+ * Failure-swallowed per the parent renderer's error policy.
+ */
+async function maybeAutoOpenBrowser(projectPath: string): Promise<void> {
+  if (process.env.FORGE_DASHBOARD_AUTO_OPEN !== "1") return;
+
+  const markerPath = join(projectPath, ".forge", ".dashboard-opened");
+  try {
+    await stat(markerPath);
+    return;
+  } catch {
+    /* marker absent — proceed to open */
+  }
+
+  try {
+    const dashboardPath = join(projectPath, ".forge", "dashboard.html");
+    const child =
+      process.platform === "win32"
+        ? spawn("cmd", ["/c", "start", "", dashboardPath], { detached: true, stdio: "ignore" })
+        : process.platform === "darwin"
+          ? spawn("open", [dashboardPath], { detached: true, stdio: "ignore" })
+          : spawn("xdg-open", [dashboardPath], { detached: true, stdio: "ignore" });
+    child.on("error", (err) => {
+      console.error("forge: dashboard auto-open spawn failed (continuing):", err.message);
+    });
+    child.unref();
+    await writeFile(markerPath, new Date().toISOString(), "utf-8");
+  } catch (err) {
+    console.error(
+      "forge: dashboard auto-open failed (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+/**
  * Render the dashboard and write it to `.forge/dashboard.html`.
  *
  * Error policy: all I/O wrapped in a single try/catch. Any failure is
  * logged to stderr and swallowed — the parent tool's invocation is never
  * affected by a dashboard problem.
+ *
+ * Optional auto-open: if the environment variable FORGE_DASHBOARD_AUTO_OPEN
+ * is "1", the first successful render also spawns the OS-native browser
+ * against the rendered file. See maybeAutoOpenBrowser() for full gating.
  *
  * The `io` parameter is a test seam only; production callers omit it.
  */
@@ -624,6 +678,7 @@ export async function renderDashboard(
       renderedAt: new Date().toISOString(),
     });
     await writeDashboardHtml(projectPath, html, io);
+    await maybeAutoOpenBrowser(projectPath);
   } catch (err) {
     console.error(
       "forge: failed to render dashboard (continuing):",

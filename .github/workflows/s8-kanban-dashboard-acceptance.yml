@@ -1,0 +1,32 @@
+name: s8-kanban-dashboard-acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'server/lib/dashboard-renderer.ts'
+      - 'server/lib/coordinator.ts'
+      - 'server/lib/progress.ts'
+      - 'server/lib/run-record.ts'
+      - 'server/lib/activity.ts'
+      - 'scripts/s8-kanban-dashboard-acceptance.sh'
+      - '.github/workflows/s8-kanban-dashboard-acceptance.yml'
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run S8 Kanban dashboard acceptance wrapper
+        shell: bash
+        run: bash scripts/s8-kanban-dashboard-acceptance.sh

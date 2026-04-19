@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.2](https://github.com/ziyilam3999/forge-harness/compare/v0.32.1...v0.32.2) (2026-04-19)
+
+### Bug Fixes
+- **dashboard:** harden auto-open path per PR #280 ship-review. Three fixes bundled: (1) `.forge/.dashboard-opened` marker is now written only after the child process emits its `"spawn"` event, so a failed spawn (e.g. `xdg-open` missing) no longer permanently disables auto-open — closes #281; (2) `maybeAutoOpenBrowser` exported with a new `AutoOpenIo` seam so the env-gated path is unit-testable — closes #282; (3) `stat` catch narrowed to ENOENT, other errors logged and skipped rather than treated as "marker absent" — closes #283. Opt-in contract (`FORGE_DASHBOARD_AUTO_OPEN=1`) unchanged. (#290)
+
 ## [0.32.1](https://github.com/ziyilam3999/forge-harness/compare/v0.32.0...v0.32.1) (2026-04-19)
 
 ### Miscellaneous

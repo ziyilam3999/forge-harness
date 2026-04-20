@@ -1,3 +1,9 @@
+## [0.32.11](https://github.com/ziyilam3999/forge-harness/compare/v0.32.10...v0.32.11) (2026-04-20)
+
+### Bug Fixes
+
+- Forbid `cd <project-basename> && ...` prefix in planner-generated AC commands. `forge_evaluate` already sets `cwd=projectPath`, but the planner prompt was silent on cwd policy — so the LLM defaulted to prepending `cd <basename> && ...` to every AC, causing every first-run evaluate to fail with `cd: <project>: No such file or directory`. Reported by monday-bot during US-01 bootstrap (`cd: monday-bot: No such file or directory`). Adds a `Working directory:` paragraph to `AC_SUBPROCESS_RULES_PROMPT` (shared by planner + critic) with WRONG/RIGHT examples; pure rule-surface addition. `getAcLintRulesHash()` output changes — cached `lint-audit` entries become stale as designed. ([#342](https://github.com/ziyilam3999/forge-harness/pull/342))
+
 ## [0.32.10](https://github.com/ziyilam3999/forge-harness/compare/v0.32.9...v0.32.10) (2026-04-20)
 
 ### Miscellaneous

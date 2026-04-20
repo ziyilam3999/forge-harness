@@ -424,12 +424,14 @@ describe("assessPhase", () => {
 
     // Compare brief structure (excluding any non-deterministic fields).
     // timeBudget.elapsedMs is Date.now()-derived when priorRecords drive the start
-    // (2026-04-20 dashboard fix); strip it before comparing deterministic structure.
-    const strip = (brief: typeof r1.brief) => {
-      const { timeBudget, ...rest } = brief;
-      const { elapsedMs: _elapsedMs, ...tbRest } = timeBudget;
-      return { ...rest, timeBudget: tbRest };
-    };
+    // (2026-04-20 dashboard fix); keep only the deterministic fields for comparison.
+    const strip = (brief: typeof r1.brief) => ({
+      ...brief,
+      timeBudget: {
+        maxTimeMs: brief.timeBudget.maxTimeMs,
+        warningLevel: brief.timeBudget.warningLevel,
+      },
+    });
     expect(JSON.stringify(strip(r1.brief))).toBe(JSON.stringify(strip(r2.brief)));
   });
 

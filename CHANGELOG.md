@@ -1,3 +1,8 @@
+## [0.32.10](https://github.com/ziyilam3999/forge-harness/compare/v0.32.9...v0.32.10) (2026-04-20)
+
+### Miscellaneous
+
+- v0.33.0 polish bundle — PR A2 of 5 (acceptance-wrapper surface). Switch both acceptance wrappers from brittle `Tests N passed` stdout grep to `vitest --reporter=json` + `numFailedTests` structured parse (#315, retires #322). Close AC numbering gap in max-tokens-sweep wrapper (#321). Trim `wc -l` whitespace for BSD portability in both wrappers (#323). Unplanned in-scope fix: project-relative `tmp/` for vitest JSON output to avoid Windows MSYS `/tmp` vs node.exe drive-root asymmetry. ([#339](https://github.com/ziyilam3999/forge-harness/pull/339))
 ## [0.32.9](https://github.com/ziyilam3999/forge-harness/compare/v0.32.8...v0.32.9) (2026-04-20)
 
 ### Miscellaneous

@@ -1,3 +1,15 @@
+## [0.32.14](https://github.com/ziyilam3999/forge-harness/compare/v0.32.13...v0.32.14) (2026-04-20)
+
+### Miscellaneous
+
+- v0.33.0 polish bundle — PR D of 5 (evaluate.ts max_tokens audit, 1 issue).
+
+  Final audit slice before the cumulative v0.33.0 release. v0.32.7 (PR #320) raised `DEFAULT_MAX_TOKENS` 8192 → 32000 for every LLM call site riding the default; issue #324 asked whether `server/tools/evaluate.ts` contains any *explicit* `maxTokens` override that would have opted out of that sweep (an override of, say, `maxTokens: 4096` would silently cap a coherence / reverse / critic eval at the old low ceiling).
+
+  Audit outcome (measured against master SHA `2de7e1d`): `server/tools/evaluate.ts` contains zero `maxTokens` / `max_tokens` references across its 3 `trackedCallClaude` sites (coherence-eval L282, reverse-eval L489, critic-eval L676) — all three ride the raised default. The companion file `server/lib/evaluator.ts` is LLM-free (pure shell-command execution), so it has nothing to audit.
+
+  No runtime code change. The audit is locked as a structural invariant via a new test (`server/tools/evaluate-max-tokens-audit.test.ts`) that reads `evaluate.ts` from disk and asserts zero `maxTokens` matches — any future edit that reintroduces an explicit ceiling fails CI with a diff pointer and a reminder to re-open the #324 decision trail. Sanity companion assertion: at least one `trackedCallClaude` site must remain, so a full refactor of the LLM calls out of this file visibly breaks the test rather than leaving it silently green on an empty file. (closes #324)
+
 ## [0.32.13](https://github.com/ziyilam3999/forge-harness/compare/v0.32.12...v0.32.13) (2026-04-20)
 
 ### Miscellaneous

@@ -81,7 +81,11 @@ check "AC-7" "full vitest suite passes (no test failures; teardown-rpc flake ign
 npm run build > /tmp/ac8.log 2>&1 && AC8=0 || AC8=1
 check "AC-8" "npm run build compiles cleanly" "$AC8"
 
-# AC-10 (partial — AC-9 is this wrapper's own pass/fail): setup.sh unchanged vs master
+# AC-9: wrapper script is executable
+[ -x "$0" ] && AC9=0 || AC9=1
+check "AC-9" "wrapper script is executable (\$0 has +x bit)" "$AC9"
+
+# AC-10: setup.sh unchanged vs master
 SETUP_DIFF=$(git diff origin/master -- setup.sh 2>/dev/null | wc -l | tr -d ' ' || echo "0")
 [ "$SETUP_DIFF" -eq 0 ] && AC10=0 || AC10=1
 check "AC-10" "setup.sh unchanged vs origin/master (diff lines: $SETUP_DIFF)" "$AC10"

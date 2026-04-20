@@ -87,24 +87,59 @@ describe("ProgressReporter", () => {
     // begun stage index to label the [N/total] emitted to the dashboard
     // hook. When close arrives for an out-of-order stage, the label
     // carried the wrong [N/total]. After the fix, the label is derived
-    // from the stageName being closed. We exercise this by verifying
-    // that calling complete("Stage B") after begin("Stage C") records
-    // a "completed" result tied to Stage B (not to whichever stage was
-    // most recently begun). The absence of a throw + the correct result
-    // is load-bearing evidence.
-    const reporter = new ProgressReporter("forge_plan", [
-      "Stage A",
-      "Stage B",
-      "Stage C",
-    ]);
-    reporter.begin("Stage A");
-    reporter.begin("Stage C"); // most-recently-begun = Stage C
-    reporter.complete("Stage B"); // closes B out of order — must not die
+    // from the stageName being closed. We exercise this by mocking the
+    // dashboard hook and asserting the captured Activity payload's label
+    // is "[2/3] Stage B" when completing out-of-order — the load-bearing
+    // behavior is that `stageNum = indexOf(stageName) + 1`, not
+    // `currentIndex + 1`.
+    vi.resetModules();
+    const writeSpy = vi.fn().mockResolvedValue(undefined);
+    vi.doMock("./activity.js", () => ({ writeActivity: writeSpy }));
+    vi.doMock("./dashboard-renderer.js", () => ({
+      renderDashboard: vi.fn().mockResolvedValue(undefined),
+    }));
 
-    const results = reporter.getResults();
-    const b = results.find((r) => r.name === "Stage B");
-    expect(b).toBeDefined();
-    expect(b!.status).toBe("completed");
+    return (async () => {
+      const { ProgressReporter } = await import("./progress.js");
+      const bogusRoot = process.platform === "win32"
+        ? "Z:\\forge-272-fixture"
+        : "/tmp/forge-272-nonexistent-xyz";
+      const reporter = new ProgressReporter("forge_plan", [
+        "Stage A",
+        "Stage B",
+        "Stage C",
+      ]);
+      reporter.setProjectContext(bogusRoot, "US-272");
+
+      reporter.begin("Stage A");
+      reporter.begin("Stage C"); // most-recently-begun = Stage C
+      reporter.complete("Stage B"); // closes B out of order — must not die
+
+      // Drain microtasks so the fire-and-forget hook settles.
+      for (let i = 0; i < 4; i += 1) {
+        await new Promise((r) => setImmediate(r));
+      }
+
+      // The complete("Stage B") call is the last begin/complete we care
+      // about — its Activity payload must carry label "[2/3] Stage B",
+      // not "[3/3] Stage B" (which would indicate stageNum was derived
+      // from the most-recently-begun stage index).
+      const completeCall = writeSpy.mock.calls.find(
+        (call) => (call[1] as { stage: string }).stage === "Stage B",
+      );
+      expect(completeCall).toBeDefined();
+      const activity = completeCall![1] as { label: string };
+      expect(activity.label).toBe("[2/3] Stage B");
+
+      const results = reporter.getResults();
+      const b = results.find((r) => r.name === "Stage B");
+      expect(b).toBeDefined();
+      expect(b!.status).toBe("completed");
+
+      vi.doUnmock("./activity.js");
+      vi.doUnmock("./dashboard-renderer.js");
+      vi.resetModules();
+    })();
   });
 
   it("activityStartedAt resets to null once all stages drain (#275)", () => {

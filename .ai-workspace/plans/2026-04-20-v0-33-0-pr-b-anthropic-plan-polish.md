@@ -68,7 +68,10 @@ Reviewer runs each command; exit code 0 = pass. All commands runnable from repo 
 11. **AC-B11 (build):**
     `npm run build` exits 0 and produces `dist/lib/anthropic.js`, `dist/tools/plan.js`.
 12. **AC-B12 (no drive-by edits — allowlist):**
-    `git diff master...HEAD --name-only` returns a subset of `{server/lib/anthropic.ts, server/lib/anthropic.test.ts, server/tools/plan.ts, server/tools/plan.test.ts, .ai-workspace/plans/2026-04-20-v0-33-0-pr-b-anthropic-plan-polish.md, scripts/pr-b-acceptance.sh, package.json, CHANGELOG.md}`. Note: `server/tools/plan.test.ts` is in the allowlist regardless of whether it pre-exists — the executor may create it for AC-B4's test home.
+    `git diff master...HEAD --name-only` returns a subset of `{server/lib/anthropic.ts, server/lib/anthropic.test.ts, server/tools/plan.ts, server/tools/plan.test.ts, server/tools/reconcile.test.ts, .ai-workspace/plans/2026-04-20-v0-33-0-pr-b-anthropic-plan-polish.md, scripts/pr-b-acceptance.sh, package.json, CHANGELOG.md}`. Notes: `server/tools/plan.test.ts` is in the allowlist regardless of whether it pre-exists — the executor may create it for AC-B4's test home. `server/tools/reconcile.test.ts` was added by amendment 2026-04-20 so the executor can remove the stale AC8 guard (see AC-B13).
+
+13. **AC-B13 (stale reconcile AC8 guard removed — plan amendment 2026-04-20):**
+    `node -e "const s=require('fs').readFileSync('server/tools/reconcile.test.ts','utf8'); const has=/AC8:\s*(plan\.ts not modified|git diff master\.\.HEAD -- server\/tools\/plan\.ts is empty)/.test(s); process.exit(has?1:0)"` exits 0 — both the `describe(\"handleReconcile — plan.ts untouched\", ...)` block and its single `it(\"AC8: ...\")` case are removed entirely (not renamed or skipped). Rationale: AC8 was a one-time PR-scope guard from PR #164 verifying that that PR did not directly edit plan.ts; it has no perpetual architectural value, and it deterministically fails on any future branch that legitimately edits plan.ts (e.g., PR B for #317 + #330). `AC9: handlePlan called with documentTier:"update"` is the proper perpetual invariant for the reconcile→plan contract and is retained unchanged.
 
 ## Out of scope
 
@@ -81,6 +84,7 @@ Reviewer runs each command; exit code 0 = pass. All commands runnable from repo 
 - Fixing or refactoring `extractJson` (not a PR B surface).
 - Any changes to monday-bot or monday-bot's plan files.
 - Changing how `tsconfig.json` or `vitest.config.ts` resolve files.
+- **Any test in `server/tools/reconcile.test.ts` other than the stale AC8 guard.** AC1–AC7 and AC9 are untouched — PR B only removes the AC8 `describe`+`it` pair that was a one-time PR-scope check left lingering (see AC-B13).
 
 ## Ordering constraints
 
@@ -111,6 +115,9 @@ npx vitest run -t 'CORRECTOR_MAX_TOKENS'
 
 # 6. Diff allowlist
 git diff master...HEAD --name-only
+
+# 7. AC-B13: stale AC8 guard removed
+node -e "const s=require('fs').readFileSync('server/tools/reconcile.test.ts','utf8'); process.exit(/AC8:\s*(plan\.ts not modified|git diff master\.\.HEAD -- server\/tools\/plan\.ts is empty)/.test(s)?1:0)"
 ```
 
 ## Critical files
@@ -118,6 +125,7 @@ git diff master...HEAD --name-only
 - `server/lib/anthropic.ts` — callClaude, CallClaudeResult, LLMOutputTruncatedError. Target for #314 (typed stop_reason) and #329 (usage widening).
 - `server/lib/anthropic.test.ts` — streaming transport + truncation + max_tokens tests. Target for #316 (drop message substring), #318 (afterEach tripwire).
 - `server/tools/plan.ts` — `CORRECTOR_MAX_TOKENS` constant + `runCorrector`. Target for #317 (export + env override) and #330 (JSDoc consolidation).
+- `server/tools/reconcile.test.ts` — delete the stale AC8 one-time PR-scope guard at approximately lines 323–339 (`describe("handleReconcile — plan.ts untouched", ...)` block + its single `it("AC8: ...")`). Do not touch AC1–AC7 or AC9.
 - `scripts/pr-b-acceptance.sh` — plan-mandated acceptance wrapper; must run every AC in order and exit 0 iff all pass.
 - `package.json` — version bump in the release stage only (not by the executor).
 - `CHANGELOG.md` — release entry in the release stage only.
@@ -132,10 +140,11 @@ git diff master...HEAD --name-only
 - [ ] #316 — redundant `err.message.toContain(...)` assertions removed
 - [ ] #318 — `afterEach` tripwire added asserting `mockCreate` was never called
 - [ ] #330 — orphaned JSDoc consolidated; no dangling comment blocks
+- [ ] AC-B13 — stale reconcile AC8 guard removed (plan amendment 2026-04-20; unblocks AC-B10)
 - [ ] `scripts/pr-b-acceptance.sh` written and green
 - [ ] Full `npm test` green
 - [ ] PR created, CI green, stateless review passes
 - [ ] Merged via /ship; 6 issues auto-closed by "fixes" trailer
 - [ ] v0.33.0 still pending (bundle release is after PR D)
 
-Last updated: 2026-04-20 — post-/coherent-plan (2 major + 4 minor findings fixed inline, under escalation threshold).
+Last updated: 2026-04-20 — amended mid-execution after AC-B10 blocker: stale `reconcile.test.ts` AC8 guard from PR #164 trips on any branch legitimately editing plan.ts. Added AC-B13 to remove it, widened AC-B12 allowlist, updated Out of scope + Critical files + Verification procedure to match. Executor applies this amendment as a `docs(plan):` commit on the feature branch per CLAUDE.md's mid-flight-amendment rule.

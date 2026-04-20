@@ -53,6 +53,20 @@ if (primary.reason === "missing") {
 }
 process.exit(0);
 
+/**
+ * Attempt to register the forge MCP server via the `claude` CLI (primary path).
+ *
+ * Returns a tagged union describing the outcome:
+ *   - `{ ok: true,  reason: null }`       — registration succeeded.
+ *   - `{ ok: false, reason: "missing" }`  — `claude` CLI was not found on PATH;
+ *                                            caller should fall back to direct write.
+ *   - `{ ok: false, reason: "failed" }`   — `claude` CLI was present but
+ *                                            `claude mcp add` returned non-zero;
+ *                                            caller should fall back to direct write.
+ *
+ * @param {string} distIndexAbs Absolute path (forward-slash form) to `dist/index.js`.
+ * @returns {{ ok: boolean, reason: "missing" | "failed" | null }}
+ */
 function tryClaudeMcpAdd(distIndexAbs) {
   const probeSpawn = spawnClaude(["--version"]);
   if (!probeSpawn.available) {
@@ -83,24 +97,69 @@ function tryClaudeMcpAdd(distIndexAbs) {
   return { ok: true, reason: null };
 }
 
-// Spawn the claude CLI with args. Handles Windows `.cmd` shim via shell: true.
+// Cache of the resolved claude binary path. `undefined` = not yet resolved;
+// `null` = resolution ran and found nothing (binary not on PATH).
+let claudeBinaryPathCache;
+
+/**
+ * Resolve the absolute path to the `claude` CLI binary, without going through a
+ * shell. Using `shell: false` in spawnSync avoids cmd.exe string-splitting bugs
+ * when the dist path (or any argv entry) contains spaces.
+ *
+ * Windows: `where claude` lists every candidate; prefer the `.cmd` shim because
+ *   node's spawnSync on Windows invokes .cmd/.bat directly only with shell:true
+ *   OR when handed the `.cmd` path explicitly. We choose the latter.
+ * Unix/MSYS: `which claude` prints the first match on PATH; use as-is.
+ *
+ * Returns the absolute path string, or `null` if the binary is not on PATH.
+ */
+function resolveClaude() {
+  if (claudeBinaryPathCache !== undefined) {
+    return claudeBinaryPathCache;
+  }
+  const locator = process.platform === "win32" ? "where" : "which";
+  const probe = spawnSync(locator, ["claude"], { encoding: "utf-8" });
+  if (probe.error || probe.status !== 0 || !probe.stdout) {
+    claudeBinaryPathCache = null;
+    return null;
+  }
+  const candidates = probe.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (candidates.length === 0) {
+    claudeBinaryPathCache = null;
+    return null;
+  }
+  // On Windows, prefer the `.cmd` shim so spawnSync with shell:false can invoke it.
+  // Fall back to the first candidate otherwise.
+  let chosen = candidates[0];
+  if (process.platform === "win32") {
+    const cmdShim = candidates.find((c) => /\.cmd$/i.test(c));
+    if (cmdShim) {
+      chosen = cmdShim;
+    }
+  }
+  claudeBinaryPathCache = chosen;
+  return chosen;
+}
+
+// Spawn the claude CLI with args using an explicitly resolved binary path.
 // Returns { available: boolean, result: SpawnSyncResult | null }.
-// `available: false` means the binary was not found on PATH (ENOENT).
+// `available: false` means the binary was not found on PATH.
+// shell:false is load-bearing — it prevents cmd.exe string-splitting when any
+// argv entry (e.g., dist path) contains spaces.
 function spawnClaude(args) {
-  const result = spawnSync("claude", args, {
+  const claudeBin = resolveClaude();
+  if (!claudeBin) {
+    return { available: false, result: null };
+  }
+  const result = spawnSync(claudeBin, args, {
     encoding: "utf-8",
-    shell: process.platform === "win32",
+    shell: false,
   });
   if (result.error && result.error.code === "ENOENT") {
     return { available: false, result };
-  }
-  // On Windows with shell:true, ENOENT surfaces differently — a non-zero exit
-  // and stderr like "'claude' is not recognized..." Treat that as unavailable too.
-  if (process.platform === "win32" && result.status !== 0 && result.stderr) {
-    const stderr = result.stderr.toString();
-    if (stderr.includes("not recognized") || stderr.includes("command not found")) {
-      return { available: false, result };
-    }
   }
   return { available: true, result };
 }
@@ -150,8 +209,10 @@ function emitMigrationWarnings() {
     } catch (err) {
       // settings.json is not valid JSON or unreadable. We can't inspect it for the
       // stale `mcpServers.forge` entry, so surface a note rather than silently skip.
+      // JSON.parse always throws an Error with a populated `.message`; readFileSync
+      // throws fs errors that also carry `.message`. Both cases give us a useful string.
       console.error(
-        `setup-config: note — ~/.claude/settings.json is not valid JSON (${err && err.message ? err.message : "parse error"}). Skipping the pre-v0.32.5 migration check for this file; fix or remove it if you want the check to run on the next setup.`
+        `setup-config: note — ~/.claude/settings.json is not valid JSON (${err.message}). Skipping the pre-v0.32.5 migration check for this file; fix or remove it if you want the check to run on the next setup.`
       );
     }
   }

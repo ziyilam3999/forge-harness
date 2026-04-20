@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildPlannerPrompt,
   buildPlannerUserMessage,
   buildMasterPlannerPrompt,
   buildMasterPlannerUserMessage,
@@ -202,5 +203,40 @@ describe("buildUpdatePlannerUserMessage", () => {
     expect(msg).toContain("## Current Plan");
     expect(msg).toContain("## Implementation Notes");
     expect(msg).toContain("Used Redis instead of Memcached");
+  });
+});
+
+describe("AC cwd-policy — prevents doubled-cd defect (monday-bot 2026-04-20)", () => {
+  const modes = ["feature", "full-project", "bugfix"] as const;
+
+  it.each(modes)(
+    "buildPlannerPrompt(%s) tells the model cwd is already projectPath",
+    (mode) => {
+      const prompt = buildPlannerPrompt(mode);
+      expect(prompt).toContain("Working directory");
+      expect(prompt).toContain("cwd is ALREADY the project root");
+      expect(prompt).toContain("projectPath");
+    },
+  );
+
+  it.each(modes)(
+    "buildPlannerPrompt(%s) forbids `cd <project-basename> && ...` prefix",
+    (mode) => {
+      const prompt = buildPlannerPrompt(mode);
+      expect(prompt).toContain("cd <project-basename>");
+      expect(prompt).toContain("cd my-project && npx tsc");
+      expect(prompt).toContain("RIGHT: `npx tsc --noEmit`");
+    },
+  );
+
+  it("the forbidden example names monday-bot so future readers see the provenance", () => {
+    const prompt = buildPlannerPrompt("full-project");
+    expect(prompt).toContain("monday-bot/monday-bot/");
+  });
+
+  it("buildPhasePlannerPrompt inherits the cwd-policy from the base prompt", () => {
+    const prompt = buildPhasePlannerPrompt("feature");
+    expect(prompt).toContain("cwd is ALREADY the project root");
+    expect(prompt).toContain("cd <project-basename>");
   });
 });

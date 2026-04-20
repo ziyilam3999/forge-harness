@@ -21,6 +21,15 @@ import { createHash } from "node:crypto";
 export const AC_SUBPROCESS_RULES_PROMPT = `### AC Command Contract
 AC commands execute inside node:child_process.exec() with bash shell.
 Environment: no TTY, no stdin, stdout/stderr captured as evidence, 30s timeout.
+Working directory: cwd is ALREADY the project root (the forge_evaluate \`projectPath\`
+argument). Write AC commands as if you are already inside that directory — do NOT
+prefix them with \`cd <project-basename> && ...\`. That prefix is always wrong: the
+project is already the cwd, so \`cd monday-bot && npm install\` looks for
+\`monday-bot/monday-bot/\` and fails. \`cd\` into *sub-directories* of the project
+(\`cd packages/foo && ...\`) is fine when genuinely needed; the rule is specifically
+against re-entering the project root.
+  WRONG: \`cd my-project && npx tsc --noEmit\`
+  RIGHT: \`npx tsc --noEmit\`
 Exit code 0 = PASS, non-zero = FAIL. Design commands accordingly:
 - Prefer exit-code checks over stdout parsing:
   GOOD: \`npx vitest run -t 'budget'\` (exits 0 on pass)

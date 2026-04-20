@@ -19,6 +19,12 @@ const path = require("path");
 const os = require("os");
 const { spawnSync } = require("child_process");
 
+// Cache of the resolved claude binary path. Declared at module scope (above the
+// first call into resolveClaude()) so the `let` binding is initialized before
+// any top-level code that triggers a spawnClaude() chain.
+// `undefined` = not yet resolved; `null` = resolution ran and found nothing.
+let claudeBinaryPathCache;
+
 const repoRoot = process.argv[2];
 if (!repoRoot) {
   console.error("ERROR: repo root path argument required.");
@@ -96,10 +102,6 @@ function tryClaudeMcpAdd(distIndexAbs) {
   }
   return { ok: true, reason: null };
 }
-
-// Cache of the resolved claude binary path. `undefined` = not yet resolved;
-// `null` = resolution ran and found nothing (binary not on PATH).
-let claudeBinaryPathCache;
 
 /**
  * Resolve the absolute path to the `claude` CLI binary, without going through a

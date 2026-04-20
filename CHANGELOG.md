@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.3](https://github.com/ziyilam3999/forge-harness/compare/v0.33.2...v0.33.3) (2026-04-20)
+
+### Bug Fixes
+
+- **dashboard:** v0.34.1 bundle — 4 test/doc polish fixes + 3 close-and-cite (Fixes #301, #302, #303, #355; Closes #293, #294, #295). PR #378.
+  - **#301** — `useAutoOpenEnvGate` helper gets a JSDoc docstring explaining it registers `beforeEach`/`afterEach` against the enclosing describe at call-time. Prevents future test authors from mis-reading the helper as a pure utility.
+  - **#302** — `const eperm` constant inlined at its single use-site. Removes a stray named constant that read like it was shared.
+  - **#303** — `maybeAutoOpenBrowser` JSDoc now notes the `FORGE_DASHBOARD_AUTO_OPEN` env check runs per invocation, so toggling mid-process takes effect on the next render.
+  - **#355** — `chooseBannerCopy(level, toolRunning, elapsedMs)` extracted as a pure top-level helper returning `{ className, textContent }`. Serialized into the `updateBanner` IIFE via `.toString()` mirroring `classifyStaleness`. 7 new tests cover all 6 `(level, toolRunning)` branch combinations + an `elapsedMs`-affects-only-green regression guard.
+  - **#293, #294, #295**: already fixed on master (landed with PRs #290/#299 follow-ups but issues weren't closed at the time). Close-and-cite via PR body only.
+  - Suite: 792 passed / 0 failed (up from 785 baseline). Iter-1 PASS with zero enhancements filed — cleanest v0.34.x ship so far.
+
 ## [0.33.2](https://github.com/ziyilam3999/forge-harness/compare/v0.33.1...v0.33.2) (2026-04-20)
 
 ### Bug Fixes

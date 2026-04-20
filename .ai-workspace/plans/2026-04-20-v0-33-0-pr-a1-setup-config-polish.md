@@ -70,7 +70,7 @@ rm -rf "$SCRATCH"
 ```
 
 ### AC-7 — triage plan on master (satisfied at merge)
-`git show HEAD:.ai-workspace/plans/2026-04-20-v0-33-0-polish-bundle-triage.md | grep -c '^| #'` ≥ 20 (verdict table has a row per issue).
+`MSYS_NO_PATHCONV=1 git show HEAD:.ai-workspace/plans/2026-04-20-v0-33-0-polish-bundle-triage.md | grep -cE '^\| [0-9]+ \|'` ≥ 20 (verdict table has a data row per issue — header row `| # |` is deliberately not counted).
 
 ### AC-8 — this A1 plan landed on master (satisfied at merge)
 `test -f .ai-workspace/plans/2026-04-20-v0-33-0-pr-a1-setup-config-polish.md`.

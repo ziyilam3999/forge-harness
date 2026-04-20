@@ -14,6 +14,11 @@ PASS=0
 FAIL=0
 declare -a FAILURES
 
+# Wrapper writes vitest JSON output to a project-relative tmp dir so paths
+# resolve identically under bash (MSYS /tmp ≠ node.exe /tmp on Windows) and
+# node. tmp/ is gitignored per .gitignore.
+mkdir -p tmp
+
 check() {
   local name="$1"
   local description="$2"
@@ -50,8 +55,8 @@ check "AC-4" "explicit maxTokens override still wins (regression positive)" "$AC
 # AC-5: full suite clean — no test FAILURES (ignore vitest teardown-rpc flake).
 # Use vitest's structured JSON reporter so we parse numFailedTests rather than
 # stdout text, which is brittle across vitest upgrades.
-npx vitest run --reporter=json --outputFile=/tmp/ac5.json > /tmp/ac5.log 2>&1 || true
-if [ -s /tmp/ac5.json ] && node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/ac5.json","utf-8")); process.exit(d.numFailedTests > 0 ? 1 : 0)'; then
+npx vitest run --reporter=json --outputFile=tmp/ac5.json > /tmp/ac5.log 2>&1 || true
+if [ -s tmp/ac5.json ] && node -e 'const d=JSON.parse(require("fs").readFileSync("tmp/ac5.json","utf-8")); process.exit(d.numFailedTests > 0 ? 1 : 0)'; then
   AC5=0
 else
   AC5=1

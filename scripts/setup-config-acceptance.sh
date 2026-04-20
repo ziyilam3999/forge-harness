@@ -4,9 +4,11 @@
 # AC-1..AC-10 are checked against an isolated scratch HOME so the reviewer's
 # real ~/.claude.json is never touched.
 #
-# Exit 0 iff all AC pass. Windows-only: requires Git Bash / MSYS2 (cygpath,
-# /c/Windows/System32 path form). Non-Windows hosts will be detected and the
-# wrapper will exit with a clear message rather than running broken checks.
+# Exit 0 iff all AC pass. This wrapper is designed for Windows (Git Bash /
+# MSYS2): it relies on cygpath and the `/c/Windows/System32` path form for the
+# PATH-stripping AC-4 case. On non-Windows hosts the MSYS-specific bits are
+# best-effort fallbacks — some checks (especially AC-4's PATH stripping) may
+# be less meaningful, but the wrapper will still run.
 
 set -euo pipefail
 
@@ -14,6 +16,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
+
+# ---------- Host-pollution snapshot (AC-9 precondition for #308) ----------
+# Capture sha256 of the reviewer's real ~/.claude.json (or record ABSENT)
+# BEFORE any child process — including the pre-flight rebuild step — can fire.
+# This is the invariant for AC-9: "host config is byte-identical before/after."
+# Uses node to avoid sha256sum/shasum portability traps.
+HOST_CLAUDE_JSON="$HOME/.claude.json"
+if [ -f "$HOST_CLAUDE_JSON" ]; then
+  HOST_CLAUDE_JSON_BEFORE_SHA256=$(node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"));' "$HOST_CLAUDE_JSON")
+else
+  HOST_CLAUDE_JSON_BEFORE_SHA256="ABSENT"
+fi
 
 # ---------- Scratch HOME setup (bridges Git Bash / MSYS path mismatch) ----------
 # Git Bash's /tmp maps to $USERPROFILE/AppData/Local/Temp, which Node sees as
@@ -51,18 +65,6 @@ if [ ! -f "$REPO_ROOT/dist/index.js" ]; then
   npm run build >/dev/null 2>&1
 fi
 [ -f "$REPO_ROOT/dist/index.js" ] && ok "dist/index.js exists" || fail "dist/index.js missing after build"
-
-# ---------- Host-pollution capture (AC-9 precondition for #308) ----------
-# The wrapper must not mutate the reviewer's real ~/.claude.json. We sha256 it
-# (or record its absence) now, and re-check at the end before summary. Any
-# divergence = fail loud. Uses node to avoid sha256sum/shasum portability traps.
-HOST_CLAUDE_JSON="$HOME/.claude.json"
-if [ -f "$HOST_CLAUDE_JSON" ]; then
-  # Compute sha256 of host ~/.claude.json before any subprocess runs.
-  HOST_CLAUDE_JSON_BEFORE_SHA256=$(node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"));' "$HOST_CLAUDE_JSON")
-else
-  HOST_CLAUDE_JSON_BEFORE_SHA256="ABSENT"
-fi
 
 # ---------- AC-1 — primary path writes canonical shape ----------
 ac "AC-1 — primary path shape"
@@ -271,7 +273,7 @@ else
   HOST_CLAUDE_JSON_AFTER_SHA256="ABSENT"
 fi
 if [ "$HOST_CLAUDE_JSON_BEFORE_SHA256" = "$HOST_CLAUDE_JSON_AFTER_SHA256" ]; then
-  ok "AC-9 host ~/.claude.json unchanged (sha256 before=after=$HOST_CLAUDE_JSON_BEFORE_SHA256)"
+  ok "AC-9 host ~/.claude.json unchanged (sha256 before=after)"
 else
   fail "AC-9 host ~/.claude.json mutated (sha256 before=$HOST_CLAUDE_JSON_BEFORE_SHA256 after=$HOST_CLAUDE_JSON_AFTER_SHA256)"
 fi

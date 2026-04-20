@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.1](https://github.com/ziyilam3999/forge-harness/compare/v0.33.0...v0.33.1) (2026-04-20)
+
+### Bug Fixes
+
+- **coordinator:** non-zero `usedUsd` / `elapsedMs` emitted to the dashboard BUDGET and TIME cards even when the caller doesn't pass a budget cap or a plan start time (Fixes #368, reported by monday-bot via mailbox). Two adjacent coordinator bugs were emitting hardcoded zeros to the dashboard whenever optional args were null:
+  - `checkBudget` now runs the cost-aggregation loop unconditionally; the `budgetUsd == null` branch only gates the cap / ratio / warning logic, not the `usedUsd` sum. Dashboard now shows real cumulative spend (e.g. `$0.59`) in the "no limit" case instead of `$0.00`.
+  - `checkTimeBudget` gained an optional `priorRecords?: ReadonlyArray<TaggedRunRecord>` third parameter. When the caller doesn't pass `startTimeMs`, the function falls back to the earliest primary-record timestamp (matching the pattern at `coordinator.ts:1074-1077`). Caller-provided `startTimeMs` stays authoritative when present. Empty / omitted records preserve the original `elapsedMs: 0, warningLevel: "unknown"` behavior for backward compat.
+  - Single call site (`assessPhase` at L682) wired to pass `allRecords`; zero ripple to other callers.
+  - 4 new unit tests + 1 existing test updated (was encoding the buggy zero-emit behavior); 780 tests pass (up from 776). PR #369.
+
 ## [0.33.0](https://github.com/ziyilam3999/forge-harness/compare/v0.32.14...v0.33.0) (2026-04-20)
 
 ### Miscellaneous

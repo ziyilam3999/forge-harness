@@ -1,3 +1,9 @@
+## [0.32.12](https://github.com/ziyilam3999/forge-harness/compare/v0.32.11...v0.32.12) (2026-04-20)
+
+### Miscellaneous
+
+- v0.33.0 polish bundle — PR B of 5 (anthropic + plan surface, 6 issues + 1 AC8 cleanup). Widen `CallClaudeResult.usage` with optional `cacheCreationInputTokens` + `cacheReadInputTokens` (#329). Replace bare `stop_reason === "max_tokens"` string-equality check with a typed exhaustive `isMaxTokensStop()` helper so new SDK variants break at compile time (#314). Export `CORRECTOR_MAX_TOKENS` with `FORGE_CORRECTOR_MAX_TOKENS` env override for operators (#317). Hoist `mockCreate.not.toHaveBeenCalled()` tripwire into suite-scoped `afterEach` so every test enforces the "never falls back to non-streaming" invariant (#318). Drop redundant `err.message.toContain(...)` assertions in truncation test — structured fields cover the contract (#316). Consolidate orphaned `runCorrector` JSDoc (#330). Plan amendment AC-B13 during execution: delete stale `server/tools/reconcile.test.ts` AC8 unit-test guard from PR #164 (one-time PR-scope check that tripped on any branch legitimately editing `plan.ts`; AC9's `documentTier:"update"` invariant is the proper perpetual guard and is retained). ([#346](https://github.com/ziyilam3999/forge-harness/pull/346))
+
 ## [0.32.11](https://github.com/ziyilam3999/forge-harness/compare/v0.32.10...v0.32.11) (2026-04-20)
 
 ### Bug Fixes

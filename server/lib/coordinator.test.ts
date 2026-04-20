@@ -634,7 +634,7 @@ describe("checkTimeBudget", () => {
     const result = checkTimeBudget(callerStart, 10_000, records);
     // elapsed should be ~5000ms (from callerStart), not ~3_600_000ms (from records).
     expect(result.elapsedMs).toBeGreaterThanOrEqual(5000);
-    expect(result.elapsedMs).toBeLessThan(60_000);
+    expect(result.elapsedMs).toBeLessThan(10_000);
   });
 
   it("maxTimeMs missing → time no-op, warningLevel none", () => {

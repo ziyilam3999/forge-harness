@@ -45,11 +45,11 @@ check "AC-3" "default-maxTokens-passed-through unit test passes" "$AC3"
 npx vitest run server/lib/anthropic.test.ts -t "explicit maxTokens override still wins" > /tmp/ac4.log 2>&1 && AC4=0 || AC4=1
 check "AC-4" "explicit maxTokens override still wins (regression positive)" "$AC4"
 
-# AC-5: full suite clean — no test FAILURES (ignore vitest teardown-rpc flake)
-npx vitest run > /tmp/ac5.log 2>&1 || true
-if grep -qE "Tests  [0-9]+ failed" /tmp/ac5.log; then
-  AC5=1
-elif grep -qE "Tests  [0-9]+ passed" /tmp/ac5.log; then
+# AC-5: full suite clean — no test FAILURES (ignore vitest teardown-rpc flake).
+# Use vitest's structured JSON reporter so we parse numFailedTests rather than
+# stdout text, which is brittle across vitest upgrades.
+npx vitest run --reporter=json --outputFile=/tmp/ac5.json > /tmp/ac5.log 2>&1 || true
+if [ -s /tmp/ac5.json ] && node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/ac5.json","utf-8")); process.exit(d.numFailedTests > 0 ? 1 : 0)'; then
   AC5=0
 else
   AC5=1

@@ -61,12 +61,11 @@ check "AC-6" "plan.test.ts regression-positive (corrector success → outcome:su
 # AC-7: full vitest suite clean — no test FAILURES. We ignore the non-zero exit
 # when it comes from the pre-existing dashboard-renderer.test.ts teardown-rpc
 # race (Vitest 4.x EnvironmentTeardownError) because that flake is orthogonal
-# to the corrector fix. The authoritative signal is "Tests X passed" with no
-# failed tests reported on the summary line.
-npx vitest run > /tmp/ac7.log 2>&1 || true
-if grep -qE "Tests  [0-9]+ failed" /tmp/ac7.log; then
-  AC7=1
-elif grep -qE "Tests  [0-9]+ passed" /tmp/ac7.log; then
+# to the corrector fix. The authoritative signal is `numFailedTests == 0` in
+# vitest's structured JSON output (not stdout text, which is brittle across
+# vitest upgrades).
+npx vitest run --reporter=json --outputFile=/tmp/ac7.json > /tmp/ac7.log 2>&1 || true
+if [ -s /tmp/ac7.json ] && node -e 'const d=JSON.parse(require("fs").readFileSync("/tmp/ac7.json","utf-8")); process.exit(d.numFailedTests > 0 ? 1 : 0)'; then
   AC7=0
 else
   AC7=1

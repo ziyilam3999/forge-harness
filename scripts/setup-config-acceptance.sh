@@ -44,18 +44,11 @@ fail() { echo "  ✗ $1"; FAIL=1; }
 
 ac() { echo; echo "=== $1 ==="; }
 
-# ---------- Pre-flight ----------
-ac "Pre-flight"
-if [ ! -f "$REPO_ROOT/dist/index.js" ]; then
-  echo "  ! dist/index.js not found — running npm run build..."
-  npm run build >/dev/null 2>&1
-fi
-[ -f "$REPO_ROOT/dist/index.js" ] && ok "dist/index.js exists" || fail "dist/index.js missing after build"
-
 # ---------- Host-pollution capture (AC-9 precondition for #308) ----------
 # The wrapper must not mutate the reviewer's real ~/.claude.json. We sha256 it
-# (or record its absence) now, and re-check at the end before summary. Any
-# divergence = fail loud. Uses node to avoid sha256sum/shasum portability traps.
+# (or record its absence) now, BEFORE any subprocess runs (including pre-flight
+# npm run build), and re-check at the end before summary. Any divergence = fail
+# loud. Uses node to avoid sha256sum/shasum portability traps.
 HOST_CLAUDE_JSON="$HOME/.claude.json"
 if [ -f "$HOST_CLAUDE_JSON" ]; then
   # Compute sha256 of host ~/.claude.json before any subprocess runs.
@@ -63,6 +56,14 @@ if [ -f "$HOST_CLAUDE_JSON" ]; then
 else
   HOST_CLAUDE_JSON_BEFORE_SHA256="ABSENT"
 fi
+
+# ---------- Pre-flight ----------
+ac "Pre-flight"
+if [ ! -f "$REPO_ROOT/dist/index.js" ]; then
+  echo "  ! dist/index.js not found — running npm run build..."
+  npm run build >/dev/null 2>&1
+fi
+[ -f "$REPO_ROOT/dist/index.js" ] && ok "dist/index.js exists" || fail "dist/index.js missing after build"
 
 # ---------- AC-1 — primary path writes canonical shape ----------
 ac "AC-1 — primary path shape"

@@ -115,7 +115,51 @@ export interface CallClaudeOptions {
 export interface CallClaudeResult {
   text: string;
   parsed?: unknown;
-  usage: { inputTokens: number; outputTokens: number };
+  /**
+   * Token usage from the SDK's `response.usage`.
+   *
+   * `inputTokens` / `outputTokens` are always set. The two cache fields are
+   * optional because the SDK returns them as `number | null` — they are only
+   * populated when the request used prompt caching AND the SDK surfaced a
+   * numeric value. Downstream cost/telemetry code should treat `undefined`
+   * the same as zero.
+   */
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationInputTokens?: number;
+    cacheReadInputTokens?: number;
+  };
+}
+
+/**
+ * Narrowing helper for Anthropic's `stop_reason` union. Returns `true` iff
+ * the caller is looking at the `"max_tokens"` variant, and — crucially —
+ * enforces exhaustive handling of the full `StopReason` union at compile
+ * time via the `never` fallthrough. If the SDK ships a new variant and this
+ * switch is not updated, `tsc --noEmit` fails at the `never` assignment.
+ *
+ * The union is widened to accept `null` because `Message.stop_reason` is
+ * typed `StopReason | null` on the response.
+ */
+function isMaxTokensStop(stopReason: Anthropic.StopReason | null): boolean {
+  switch (stopReason) {
+    case "max_tokens":
+      return true;
+    case "end_turn":
+    case "stop_sequence":
+    case "tool_use":
+    case "pause_turn":
+    case "refusal":
+    case null:
+      return false;
+    default: {
+      // Compile-time exhaustiveness guard — a new SDK variant will surface
+      // here as a TS2322 "Type 'X' is not assignable to type 'never'".
+      const _exhaustive: never = stopReason;
+      return _exhaustive;
+    }
+  }
 }
 
 /**
@@ -201,15 +245,27 @@ export async function callClaude(options: CallClaudeOptions): Promise<CallClaude
 
   // Detect truncation by max_tokens and throw, rather than returning text the
   // caller will fail to parse. Keeps silent-truncation bugs loud — see forge_plan
-  // corrector crash (monday blocker, 2026-04-19, v0.32.6).
-  if (response.stop_reason === "max_tokens") {
+  // corrector crash (monday blocker, 2026-04-19, v0.32.6). Uses a typed
+  // narrowing helper so a new SDK `stop_reason` variant surfaces at compile
+  // time rather than silently slipping past this string-literal check.
+  if (isMaxTokensStop(response.stop_reason)) {
     throw new LLMOutputTruncatedError(effectiveMaxTokens, text.length);
   }
 
-  const usage = {
+  const usage: CallClaudeResult["usage"] = {
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
   };
+  // Cache token counts are `number | null` in the SDK and only populated when
+  // the request used prompt caching. Pass them through when present so
+  // downstream telemetry can distinguish cache hits / creations from
+  // cold-read input tokens (see #329 — v0.34.x cost surface will price these).
+  if (response.usage.cache_creation_input_tokens != null) {
+    usage.cacheCreationInputTokens = response.usage.cache_creation_input_tokens;
+  }
+  if (response.usage.cache_read_input_tokens != null) {
+    usage.cacheReadInputTokens = response.usage.cache_read_input_tokens;
+  }
 
   if (options.jsonMode) {
     const parsed = extractJson(text);

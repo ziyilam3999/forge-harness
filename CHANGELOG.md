@@ -74,7 +74,7 @@ All notable changes to this project will be documented in this file.
 
   **What did not change.** Zero runtime code in this release — no `server/**/*.ts` edits. Only `package.json` (version bump 0.32.14 → 0.33.0), `CHANGELOG.md` (this entry + H1 relocation), and a plan/acceptance-wrapper pair under `.ai-workspace/` and `scripts/`.
 
-  **Thanks to monday-bot operator** for the mid-bundle bug reports (#312, #319, #325, #342) that drove the v0.32.6/7/8 streaming-triad closure; the v0.33.0 milestone is the natural capstone for that arc. ([#TBD](https://github.com/ziyilam3999/forge-harness/pull/TBD))
+  **Thanks to monday-bot operator** for the mid-bundle bug reports (#312, #319, #325, #342) that drove the v0.32.6/7/8 streaming-triad closure; the v0.33.0 milestone is the natural capstone for that arc. ([#360](https://github.com/ziyilam3999/forge-harness/pull/360))
 
 ## [0.32.14](https://github.com/ziyilam3999/forge-harness/compare/v0.32.13...v0.32.14) (2026-04-20)
 

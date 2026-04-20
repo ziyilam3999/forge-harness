@@ -360,6 +360,7 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .liveness-banner.green { background: var(--green-bg); color: var(--green); }
 .liveness-banner.amber { background: var(--amber-bg); color: var(--amber); }
 .liveness-banner.red { background: var(--red-bg); color: var(--red); }
+.liveness-banner.neutral { background: var(--border-light); color: var(--text-secondary); }
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .stat-card { background: var(--white); border: 1px solid var(--border-light); border-radius: 10px; padding: 12px 16px; box-shadow: var(--shadow-sm); }
 .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 600; }
@@ -417,6 +418,12 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
 
   const lastUpdate = activity?.lastUpdate ?? renderedAt;
   const activityStarted = activity?.startedAt ?? renderedAt;
+  // Derived idle-vs-running signal: when the activity.json file is absent or
+  // contains {"tool": null}, readActivity() returns null here, so "no tool
+  // is running" collapses to `activity == null`. The `activity?.tool != null`
+  // belt-and-braces also covers any future caller that supplies a partial
+  // Activity literal. Issue #331.
+  const toolRunning = activity != null && activity.tool != null;
 
   // Serialize the pure classifier into the browser's script block so the
   // banner updates between meta-refreshes via setInterval.
@@ -442,11 +449,20 @@ ${renderFeed(auditEntries)}
 ${classifierSrc}
 var LAST_UPDATE = ${JSON.stringify(lastUpdate)};
 var ACTIVITY_STARTED = ${JSON.stringify(activityStarted)};
+var TOOL_RUNNING = ${JSON.stringify(toolRunning)};
 function updateBanner() {
   var banner = document.getElementById("liveness-banner");
   if (!banner) return;
   var elapsed = Date.now() - new Date(LAST_UPDATE).getTime();
   var level = classifyStaleness(elapsed);
+  // When no tool is running (activity.tool === null), a stale elapsed time
+  // is the legitimate idle state, not a hang. Downgrade the red alarm to
+  // a neutral "idle" banner. Issue #331.
+  if (!TOOL_RUNNING && level === "red") {
+    banner.className = "liveness-banner neutral";
+    banner.textContent = "Idle — no tool running";
+    return;
+  }
   banner.className = "liveness-banner " + level;
   if (level === "red") {
     banner.textContent = "No update for 2+ min — may be hung";

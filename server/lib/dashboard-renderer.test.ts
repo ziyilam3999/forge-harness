@@ -152,6 +152,53 @@ describe("classifyStaleness (AC-05)", () => {
   });
 });
 
+describe("renderDashboardHtml — idle-banner branch (#331)", () => {
+  it("serializes TOOL_RUNNING=false and emits 'Idle — no tool running' branch when activity is null", () => {
+    // Simulate the production path: readActivity() returns null when
+    // activity.json has {"tool": null} or is absent.
+    const html = renderDashboardHtml(baseInput());
+
+    // TOOL_RUNNING must be serialized in the client script block as `false`.
+    expect(html).toMatch(/var\s+TOOL_RUNNING\s*=\s*false\s*;/);
+
+    // The idle-banner copy must be present in the rendered script block
+    // so that updateBanner() can short-circuit the red-hang alarm for
+    // the legitimate idle case.
+    expect(html).toContain("Idle — no tool running");
+
+    // The neutral CSS class must exist so the banner styling matches the
+    // downgraded alarm level.
+    expect(html).toContain("liveness-banner.neutral");
+
+    // Regression guard: the legitimate "may be hung" red alarm copy must
+    // still be emitted for the TOOL_RUNNING === true + red branch.
+    expect(html).toContain("may be hung");
+  });
+
+  it("serializes TOOL_RUNNING=true when an activity with a real tool is supplied", () => {
+    const html = renderDashboardHtml(
+      baseInput(
+        {},
+        {
+          activity: {
+            tool: "forge_generate",
+            storyId: "US-01",
+            stage: "running",
+            startedAt: "2026-04-20T00:00:00.000Z",
+            lastUpdate: "2026-04-20T00:00:05.000Z",
+          },
+        },
+      ),
+    );
+    expect(html).toMatch(/var\s+TOOL_RUNNING\s*=\s*true\s*;/);
+    // Idle copy and may-be-hung copy are both present in the IIFE source
+    // text even when TOOL_RUNNING is true — the branching happens at
+    // runtime inside the browser. We only assert that emission doesn't
+    // regress the red-alarm copy.
+    expect(html).toContain("may be hung");
+  });
+});
+
 describe("renderDashboardHtml — column routing (AC-03)", () => {
   it("routes a done story into col-done and a ready story into col-ready", () => {
     const html = renderDashboardHtml(

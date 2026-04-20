@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Acceptance wrapper for v0.32.7 — bump DEFAULT_MAX_TOKENS 8192 → 32000 sweep.
-# Runs AC-1..AC-8 from .ai-workspace/plans/2026-04-20-default-max-tokens-sweep.md
+# Runs AC-1..AC-7 from .ai-workspace/plans/2026-04-20-default-max-tokens-sweep.md
+# (AC-8 from the plan — the setup.sh-unchanged guard — is checked here as AC-7
+# so the wrapper's numbering is contiguous; same coverage, just renumbered).
 # Exits 0 iff all ACs pass.
 
 set -euo pipefail
@@ -11,6 +13,11 @@ cd "$REPO_ROOT"
 PASS=0
 FAIL=0
 declare -a FAILURES
+
+# Wrapper writes vitest JSON output to a project-relative tmp dir so paths
+# resolve identically under bash (MSYS /tmp ≠ node.exe /tmp on Windows) and
+# node. tmp/ is gitignored per .gitignore.
+mkdir -p tmp
 
 check() {
   local name="$1"
@@ -45,11 +52,11 @@ check "AC-3" "default-maxTokens-passed-through unit test passes" "$AC3"
 npx vitest run server/lib/anthropic.test.ts -t "explicit maxTokens override still wins" > /tmp/ac4.log 2>&1 && AC4=0 || AC4=1
 check "AC-4" "explicit maxTokens override still wins (regression positive)" "$AC4"
 
-# AC-5: full suite clean — no test FAILURES (ignore vitest teardown-rpc flake)
-npx vitest run > /tmp/ac5.log 2>&1 || true
-if grep -qE "Tests  [0-9]+ failed" /tmp/ac5.log; then
-  AC5=1
-elif grep -qE "Tests  [0-9]+ passed" /tmp/ac5.log; then
+# AC-5: full suite clean — no test FAILURES (ignore vitest teardown-rpc flake).
+# Use vitest's structured JSON reporter so we parse numFailedTests rather than
+# stdout text, which is brittle across vitest upgrades.
+npx vitest run --reporter=json --outputFile=tmp/ac5.json > /tmp/ac5.log 2>&1 || true
+if [ -s tmp/ac5.json ] && node -e 'const d=JSON.parse(require("fs").readFileSync("tmp/ac5.json","utf-8")); process.exit(d.numFailedTests > 0 ? 1 : 0)'; then
   AC5=0
 else
   AC5=1
@@ -60,10 +67,10 @@ check "AC-5" "full vitest suite passes (no test failures)" "$AC5"
 npm run build > /tmp/ac6.log 2>&1 && AC6=0 || AC6=1
 check "AC-6" "npm run build compiles cleanly" "$AC6"
 
-# AC-8: setup.sh unchanged vs master
-SETUP_DIFF=$(git diff origin/master -- setup.sh 2>/dev/null | wc -l || echo "0")
-[ "$SETUP_DIFF" -eq 0 ] && AC8=0 || AC8=1
-check "AC-8" "setup.sh unchanged vs origin/master (diff lines: $SETUP_DIFF)" "$AC8"
+# AC-7: setup.sh unchanged vs master
+SETUP_DIFF=$(git diff origin/master -- setup.sh 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+[ "$SETUP_DIFF" -eq 0 ] && AC7=0 || AC7=1
+check "AC-7" "setup.sh unchanged vs origin/master (diff lines: $SETUP_DIFF)" "$AC7"
 
 echo
 echo "=== summary: $PASS pass / $FAIL fail ==="

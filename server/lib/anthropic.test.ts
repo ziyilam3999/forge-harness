@@ -41,6 +41,13 @@ beforeEach(async () => {
 afterEach(() => {
   if (ORIGINAL_ENV === undefined) delete process.env.ANTHROPIC_API_KEY;
   else process.env.ANTHROPIC_API_KEY = ORIGINAL_ENV;
+  // Suite-scoped tripwire (#318): callClaude must never fall back to the
+  // non-streaming `messages.create(...)` path — v0.32.8 flipped it to
+  // streaming unconditionally because 32000-token predicted runtimes tripped
+  // the SDK's 10-minute non-streaming ceiling. Hoisting this assertion to
+  // `afterEach` means every test in the file enforces the invariant, not
+  // just the one that asserts it today.
+  expect(mockCreate).not.toHaveBeenCalled();
 });
 
 describe("callClaude — transport (v0.32.8 streaming)", () => {
@@ -105,10 +112,10 @@ describe("callClaude — truncation handling (v0.32.6 through streaming path)", 
     } catch (e) {
       expect(e).toBeInstanceOf(LLMOutputTruncatedError);
       const err = e as InstanceType<typeof LLMOutputTruncatedError>;
+      // Structured fields are the contract — the human-readable `message`
+      // string is prose and is not asserted here (#316).
       expect(err.maxTokensLimit).toBe(8192);
       expect(err.outputChars).toBe(truncatedText.length);
-      expect(err.message).toContain("max_tokens");
-      expect(err.message).toContain("8192");
     }
   });
 

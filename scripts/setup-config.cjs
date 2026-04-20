@@ -49,10 +49,22 @@ console.error(`setup-config: registered forge via direct ~/.claude.json write �
 if (primary.reason === "missing") {
   console.error("setup-config: note — claude CLI was not found on PATH, so we wrote the config directly. If you later install the CLI, re-run setup.sh to let it manage the entry.");
 } else {
+  // Defensive default: any non-"missing" reason ("failed", or a future reason
+  // not yet enumerated) is treated as CLI-present-but-add-failed.
   console.error("setup-config: note — claude CLI was present but `claude mcp add` failed, so we wrote the config directly. See the preceding stderr for the CLI's error; re-run setup.sh once the underlying problem is resolved to let the CLI manage the entry.");
 }
 process.exit(0);
 
+/**
+ * Attempt to register the forge MCP server via the `claude` CLI.
+ *
+ * @param {string} distIndexAbs Absolute path to the forge dist/index.js entry.
+ * @returns {{ok: true, reason: null} | {ok: false, reason: "missing" | "failed"}}
+ *   Tagged union:
+ *   - `{ ok: true, reason: null }` — CLI present and `claude mcp add` succeeded.
+ *   - `{ ok: false, reason: "missing" }` — `claude` binary not on PATH.
+ *   - `{ ok: false, reason: "failed" }` — CLI present but `claude mcp add` exited non-zero.
+ */
 function tryClaudeMcpAdd(distIndexAbs) {
   const probeSpawn = spawnClaude(["--version"]);
   if (!probeSpawn.available) {

@@ -5,6 +5,8 @@
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
 
+BASELINE_TESTS="${BASELINE_TESTS:-776}"
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
@@ -56,15 +58,16 @@ pass 5 "version headers strictly descending"
 awk '/^## \[0\.33\.0\]/,/^## \[0\.32\.14\]/' CHANGELOG.md | grep -q '#354' || fail 6 "v0.33.0 entry does not reference #354"
 pass 6 "v0.33.0 entry references #354"
 
-# AC-E7: all tests pass, count unchanged from master baseline of 776
+# AC-E7: all tests pass, count unchanged from master baseline of $BASELINE_TESTS
 npx vitest run --reporter=json --outputFile=tmp/pr-e-vitest.json > /dev/null 2>&1 || true
-node -e "
+BASELINE_TESTS="$BASELINE_TESTS" node -e "
   const r = require('./tmp/pr-e-vitest.json');
-  if (r.numFailedTests === 0 && r.numPassedTests >= 776) process.exit(0);
-  console.error('tests: ' + r.numPassedTests + ' passed / ' + r.numFailedTests + ' failed (expected 0 failed, >= 776 passed)');
+  const baseline = parseInt(process.env.BASELINE_TESTS || '776');
+  if (r.numFailedTests === 0 && r.numPassedTests >= baseline) process.exit(0);
+  console.error('tests: ' + r.numPassedTests + ' passed / ' + r.numFailedTests + ' failed (expected 0 failed, >= ' + baseline + ' passed)');
   process.exit(1);
 " || fail 7 "vitest did not meet baseline"
-pass 7 "vitest: all pass, >= 776 passed"
+pass 7 "vitest: all pass, >= $BASELINE_TESTS passed"
 
 # AC-E8: changes confined to release-only surface
 UNEXPECTED=$(git diff --name-only master...HEAD | grep -vE '^(CHANGELOG\.md|package\.json|\.ai-workspace/plans/2026-04-20-v0-33-0-pr-e-cumulative-release\.md|scripts/pr-e-acceptance\.sh)$' || true)

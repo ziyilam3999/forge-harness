@@ -1307,6 +1307,61 @@ describe("documentTier: update", () => {
   });
 });
 
+// #317 — CORRECTOR_MAX_TOKENS export + FORGE_CORRECTOR_MAX_TOKENS env override.
+// The constant is resolved at module load (IIFE reads process.env once), so each
+// test mutates process.env, calls vi.resetModules(), then re-imports plan.ts.
+describe("CORRECTOR_MAX_TOKENS env override (#317)", () => {
+  const ORIGINAL_OVERRIDE = process.env.FORGE_CORRECTOR_MAX_TOKENS;
+
+  afterEach(() => {
+    if (ORIGINAL_OVERRIDE === undefined) {
+      delete process.env.FORGE_CORRECTOR_MAX_TOKENS;
+    } else {
+      process.env.FORGE_CORRECTOR_MAX_TOKENS = ORIGINAL_OVERRIDE;
+    }
+    vi.resetModules();
+  });
+
+  it("defaults to 32000 when FORGE_CORRECTOR_MAX_TOKENS is unset", async () => {
+    delete process.env.FORGE_CORRECTOR_MAX_TOKENS;
+    vi.resetModules();
+    const mod = await import("./plan.js");
+    expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
+  });
+
+  it("respects FORGE_CORRECTOR_MAX_TOKENS=12345 override", async () => {
+    process.env.FORGE_CORRECTOR_MAX_TOKENS = "12345";
+    vi.resetModules();
+    const mod = await import("./plan.js");
+    expect(mod.CORRECTOR_MAX_TOKENS).toBe(12345);
+  });
+
+  it("falls back to 32000 when FORGE_CORRECTOR_MAX_TOKENS is non-numeric", async () => {
+    process.env.FORGE_CORRECTOR_MAX_TOKENS = "not-a-number";
+    vi.resetModules();
+    const mod = await import("./plan.js");
+    expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
+  });
+
+  it("falls back to 32000 when FORGE_CORRECTOR_MAX_TOKENS is zero or negative", async () => {
+    process.env.FORGE_CORRECTOR_MAX_TOKENS = "0";
+    vi.resetModules();
+    let mod = await import("./plan.js");
+    expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
+
+    process.env.FORGE_CORRECTOR_MAX_TOKENS = "-500";
+    vi.resetModules();
+    mod = await import("./plan.js");
+    expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
+  });
+
+  it("is exported (structural)", async () => {
+    vi.resetModules();
+    const mod = await import("./plan.js");
+    expect(typeof mod.CORRECTOR_MAX_TOKENS).toBe("number");
+  });
+});
+
 describe("backward compatibility (no documentTier)", () => {
   it("produces execution plan when documentTier is omitted", async () => {
     const plan = makeValidPlan();

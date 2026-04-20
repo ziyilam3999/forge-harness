@@ -311,17 +311,29 @@ async function runCritic(
 }
 
 /**
- * Run a corrector agent. Returns corrected plan or the original on failure.
- */
-
-/**
  * Corrector output budget. A full revised execution/master plan can run 20-40KB
  * of indented JSON (stories × AC × paths). 8192 tokens (~27KB) was the default
  * and truncated monday-bot's plan at position 26918 on 2026-04-19 (v0.32.6 fix).
  * 32000 tokens ≈ 105KB — fits every plan size observed so far with headroom.
+ *
+ * Runtime override: set `FORGE_CORRECTOR_MAX_TOKENS` to a positive integer to
+ * raise (or lower) the ceiling without recompiling. Non-positive / unparseable
+ * values fall back to the 32000 default. Exported so tests and external
+ * callers can read the resolved value rather than re-parsing the env var.
  */
-const CORRECTOR_MAX_TOKENS = 32000;
+export const CORRECTOR_MAX_TOKENS: number = (() => {
+  const raw = process.env.FORGE_CORRECTOR_MAX_TOKENS;
+  if (raw === undefined || raw === "") return 32000;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    return 32000;
+  }
+  return parsed;
+})();
 
+/**
+ * Run a corrector agent. Returns corrected plan or the original on failure.
+ */
 async function runCorrector(
   plan: ExecutionPlan,
   findings: CritiqueFindings,

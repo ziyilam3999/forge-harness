@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.2](https://github.com/ziyilam3999/forge-harness/compare/v0.33.1...v0.33.2) (2026-04-20)
+
+### Bug Fixes
+
+- **dashboard:** v0.34.0 bundle — nine runtime bug fixes + two close-and-cite (Fixes #271, #272, #273, #274, #275, #276, #300, #352, #353; Closes #282, #283). PR #372.
+  - **#271** (race on `dashboard.tmp.html`): added per-project `renderQueue` Map that serializes background `writeDashboardHtml` calls — two hooks firing close together on the same project now chain via `prior.catch().then()` instead of both racing on the shared tmp filename. Different projects still write in parallel.
+  - **#272** (`ProgressReporter.complete/fail` stage-label): `stageNum` is now derived from `stages.indexOf(stageName)`, not from the last `begin()`'s `currentIndex`. Unknown stage name → early no-op (no `-1 + 1` leak). Out-of-order closes report the correct `[N/total]`.
+  - **#273** (fire-and-forget isolation test): old AC-18 asserted `.not.toThrow()` on a `void (async () => ...)()` — trivially true. Rewritten with `vi.doMock` + microtask drain + assertions that `writeActivity` and `renderDashboard` spies were both invoked.
+  - **#274** (dynamic import in hot path): `readAuditFeed` no longer does `await import('node:fs/promises')`; `readdir` is in the static top-of-file import block.
+  - **#275** (`activityStartedAt` reset discipline): new `maybeClearActivityStartedAt()` clears the field when `stageStartTimes.size === 0`. Reporter reuse no longer carries a stale start timestamp across runs.
+  - **#276** (empty-string tool hygiene): both `readActivity` and the `renderBoard` guard now reject `{tool: ""}` alongside null / undefined — empty-pill render eliminated.
+  - **#300** (typeof guard on err cast): `maybeAutoOpenBrowser` stat-catch now checks `err !== null && typeof err === "object"` before reading `.code`. Primitive throws (`throw "string"`, `throw null`) fall safely through.
+  - **#352** (amber-idle banner): `updateBanner` intercept widened from `level === "red"` to `level !== "green"`. Amber-idle now also collapses to "Idle — no tool running."
+  - **#353** (`isToolRunning` helper): extracted as top-level function; replaces duplicated `activity && activity.tool` checks at `renderBoard`, `readActivity` (inline), and `renderDashboardHtml`'s `TOOL_RUNNING` serializer.
+  - **#282, #283**: already fixed on master; close-and-cite via PR body only (no code diff — `maybeAutoOpenBrowser` already takes `io: AutoOpenIo` seam and the ENOENT narrowing at `:686-702` already in place).
+  - 5 new tests (dashboard 25→28, progress 7→9); full suite 785 / 0 failed (up from 780 baseline). 5 enhancement follow-ups filed (#373-#377).
+
 ## [0.33.1](https://github.com/ziyilam3999/forge-harness/compare/v0.33.0...v0.33.1) (2026-04-20)
 
 ### Bug Fixes

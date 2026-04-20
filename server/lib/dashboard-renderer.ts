@@ -28,7 +28,7 @@
  *     (exposed for unit tests that supply known inputs directly).
  */
 
-import { writeFile, rename, mkdir, readFile, stat } from "node:fs/promises";
+import { writeFile, rename, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { join, basename } from "node:path";
 import type {
@@ -37,6 +37,23 @@ import type {
   StoryStatus,
 } from "../types/coordinate-result.js";
 import type { Activity } from "./activity.js";
+
+// ── Activity liveness helper ──────────────────────────────────────────────
+
+/**
+ * Single source of truth for "is a tool actively running right now?" per #353.
+ *
+ * Rejects `null`, `undefined`, AND empty-string `tool` values — an `{tool: ""}`
+ * payload must never count as running (per #276, `readActivity` and the
+ * `renderBoard` guard previously disagreed on empty strings; collapsing both
+ * sites onto this helper prevents that class of drift).
+ */
+function isToolRunning(activity: Activity | null | undefined): boolean {
+  if (activity == null) return false;
+  if (activity.tool == null) return false;
+  if (activity.tool === "") return false;
+  return true;
+}
 
 // ── Pure staleness classifier ──────────────────────────────────────────────
 
@@ -270,8 +287,10 @@ function renderBoard(brief: PhaseTransitionBrief | null, activity: Activity | nu
   // If the activity signal references a story that is not present in the
   // brief's stories array (e.g. first render before any RunRecord), the
   // activity card still shows — prepend a synthetic entry to in-progress.
-  const activityHtml = activity && activity.tool
-    ? renderActivityCard(activity)
+  // `isToolRunning` rejects null / undefined / empty-string `tool` values
+  // consistently with `readActivity` (#276, #353).
+  const activityHtml = isToolRunning(activity)
+    ? renderActivityCard(activity as Activity)
     : "";
 
   const renderColumn = (id: string, title: string, accent: string) => {
@@ -423,7 +442,7 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
   // is running" collapses to `activity == null`. The `activity?.tool != null`
   // belt-and-braces also covers any future caller that supplies a partial
   // Activity literal. Issue #331.
-  const toolRunning = activity != null && activity.tool != null;
+  const toolRunning = isToolRunning(activity);
 
   // Serialize the pure classifier into the browser's script block so the
   // banner updates between meta-refreshes via setInterval.
@@ -455,10 +474,13 @@ function updateBanner() {
   if (!banner) return;
   var elapsed = Date.now() - new Date(LAST_UPDATE).getTime();
   var level = classifyStaleness(elapsed);
-  // When no tool is running (activity.tool === null), a stale elapsed time
-  // is the legitimate idle state, not a hang. Downgrade the red alarm to
-  // a neutral "idle" banner. Issue #331.
-  if (!TOOL_RUNNING && level === "red") {
+  // When no tool is running (activity.tool absent or empty), a stale
+  // elapsed time is the legitimate idle state, not a hang. Downgrade
+  // amber AND red alarms to a neutral "idle" banner — only green should
+  // slip through, since it reads correctly as "no updates, nothing
+  // running." Issue #331 + #352 (amber previously leaked as
+  // "over 1 min ago" even when idle).
+  if (!TOOL_RUNNING && level !== "green") {
     banner.className = "liveness-banner neutral";
     banner.textContent = "Idle — no tool running";
     return;
@@ -504,7 +526,9 @@ async function readActivity(projectPath: string): Promise<Activity | null> {
   try {
     const raw = await readFile(activityPath, "utf-8");
     const parsed = JSON.parse(raw) as Partial<Activity> & { tool: string | null };
-    if (!parsed || parsed.tool === null || parsed.tool === undefined) return null;
+    // Reject null / undefined / empty-string tool consistently with
+    // `isToolRunning` and the `renderBoard` guard (#276).
+    if (!parsed || parsed.tool == null || parsed.tool === "") return null;
     return parsed as Activity;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException)?.code;
@@ -527,7 +551,6 @@ async function readAuditFeed(projectPath: string): Promise<AuditFeedEntry[]> {
   // the filename for the tool-name accent, so we re-read directly here
   // using the same path layout (mirrors run-reader's contract for
   // graceful degradation).
-  const { readdir, readFile: rf } = await import("node:fs/promises");
   const auditDir = join(projectPath, ".forge", "audit");
 
   let files: string[];
@@ -550,7 +573,7 @@ async function readAuditFeed(projectPath: string): Promise<AuditFeedEntry[]> {
     const tool = toolNameFromFilename(file);
     let content: string;
     try {
-      content = await rf(join(auditDir, file), "utf-8");
+      content = await readFile(join(auditDir, file), "utf-8");
     } catch {
       continue;
     }
@@ -599,8 +622,33 @@ const DEFAULT_IO: DashboardIo = {
 };
 
 /**
+ * Per-project serialization chain for `writeDashboardHtml` (#271).
+ *
+ * Two concurrent `renderDashboard` calls against the same `projectPath`
+ * previously raced on the shared `dashboard.tmp.html` filename — the later
+ * `writeFile` could overwrite the earlier one mid-flight, or the earlier
+ * `rename` could miss its own tmp file (already moved), leaving stderr
+ * noise and a momentarily-stale `dashboard.html`.
+ *
+ * This Map chains per-project writes into a serial queue: each new write
+ * awaits the previous one's completion (success OR failure) before
+ * attempting its own mkdir / writeFile / rename sequence. No global lock
+ * — writes against different project paths still run in parallel.
+ *
+ * Keyed by `projectPath` so per-project state stays isolated. Entries are
+ * not purged — the chain's tail is always just a resolved Promise, so
+ * memory cost is one Promise-per-project, not one Promise-per-write.
+ */
+const renderQueue = new Map<string, Promise<void>>();
+
+/**
  * Atomic tmp+rename writer. Exposed so tests can verify AC-09 by supplying
  * a `DashboardIo` with mocked `writeFile` and `rename`.
+ *
+ * Serialized per `projectPath` via `renderQueue` (#271) — concurrent calls
+ * against the same project queue up rather than racing on the shared
+ * `dashboard.tmp.html` filename. Independent projects still write in
+ * parallel.
  */
 export async function writeDashboardHtml(
   projectPath: string,
@@ -610,9 +658,20 @@ export async function writeDashboardHtml(
   const forgeDir = join(projectPath, ".forge");
   const tmpPath = join(forgeDir, "dashboard.tmp.html");
   const finalPath = join(forgeDir, "dashboard.html");
-  await io.mkdir(forgeDir, { recursive: true });
-  await io.writeFile(tmpPath, html, "utf-8");
-  await io.rename(tmpPath, finalPath);
+
+  const prior = renderQueue.get(projectPath) ?? Promise.resolve();
+  const next = prior
+    .catch(() => {
+      /* swallow prior failure — each write is independent; don't chain
+         cancellations across unrelated invocations. */
+    })
+    .then(async () => {
+      await io.mkdir(forgeDir, { recursive: true });
+      await io.writeFile(tmpPath, html, "utf-8");
+      await io.rename(tmpPath, finalPath);
+    });
+  renderQueue.set(projectPath, next);
+  await next;
 }
 
 /**
@@ -687,11 +746,19 @@ export async function maybeAutoOpenBrowser(
     await io.stat(markerPath);
     return;
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
+    // Defensive typeof guard per #300: a non-object throw (`throw "string"`,
+    // `throw null`, or `throw 42`) must not trigger a property read on a
+    // primitive. Only read `.code` when `err` is a non-null object; any
+    // primitive throw falls through to the non-ENOENT "skip open" branch.
+    const code =
+      err !== null && typeof err === "object"
+        ? (err as NodeJS.ErrnoException).code
+        : undefined;
     if (code !== "ENOENT") {
       // Any non-ENOENT condition — including undefined code from a plain
-      // Error — is treated as "cannot determine marker state safely; skip
-      // open". This matches the spirit of #283 (#291 widening).
+      // Error or a primitive throw — is treated as "cannot determine
+      // marker state safely; skip open". This matches the spirit of
+      // #283 (#291 widening) + #300 (defensive typeof guard).
       console.error(
         "forge: dashboard auto-open stat failed (continuing):",
         err instanceof Error ? err.message : String(err),

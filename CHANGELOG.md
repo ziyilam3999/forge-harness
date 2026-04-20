@@ -1,3 +1,15 @@
+## [0.32.13](https://github.com/ziyilam3999/forge-harness/compare/v0.32.12...v0.32.13) (2026-04-20)
+
+### Miscellaneous
+
+- v0.33.0 polish bundle — PR C of 5 (CHANGELOG + dashboard surface, 2 issues).
+
+  CHANGELOG polish: split the dense v0.32.8 entry (1315-char single-paragraph) into readable problem/fix/arc-closure paragraphs; max line dropped to 229 chars. All load-bearing technical terms preserved (`messages.stream`, `finalMessage`, `DEFAULT_MAX_TOKENS`, `LLMOutputTruncatedError`, `stop_reason`, `closes #325`). Pure textual edit (#328).
+
+  Dashboard liveness banner: serialize a `TOOL_RUNNING` boolean into the client-side `<script>` block alongside `LAST_UPDATE`/`ACTIVITY_STARTED`. `updateBanner` now branches — when `TOOL_RUNNING === false` and elapsed > 120s, banner reads "Idle — no tool running" with neutral `.liveness-banner.neutral` styling; when `TOOL_RUNNING === true` and stale, the existing red "may be hung" alarm is preserved for the legitimate stuck-tool case. Fixes the post-bootstrap / between-invocation false alarm reported by monday-bot operator (#331). +2 unit tests cover idle branch + `TOOL_RUNNING` serialization.
+
+  Scope note: monday-bot's concurrent feature request for richer Kanban column visibility (in-progress / retry / blocked) was deliberately out-of-scope — research confirmed all three columns already exist and route correctly via `activity.storyId` + `statusToColumn`; the gap she observed is a telemetry contract question, not a renderer bug. 4 follow-up polish issues filed from stateless review (#352 amber-window idle, #353 `isToolRunning` helper extraction, #354 non-monotonic CHANGELOG header, #355 runtime-branch test via `vm` sandbox). ([#351](https://github.com/ziyilam3999/forge-harness/pull/351))
+
 ## [0.32.12](https://github.com/ziyilam3999/forge-harness/compare/v0.32.11...v0.32.12) (2026-04-20)
 
 ### Miscellaneous

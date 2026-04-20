@@ -422,8 +422,17 @@ describe("assessPhase", () => {
     const r1 = await assessPhase(plan, "/tmp/test");
     const r2 = await assessPhase(plan, "/tmp/test");
 
-    // Compare brief structure (excluding any non-deterministic fields)
-    expect(JSON.stringify(r1.brief)).toBe(JSON.stringify(r2.brief));
+    // Compare brief structure (excluding any non-deterministic fields).
+    // timeBudget.elapsedMs is Date.now()-derived when priorRecords drive the start
+    // (2026-04-20 dashboard fix); keep only the deterministic fields for comparison.
+    const strip = (brief: typeof r1.brief) => ({
+      ...brief,
+      timeBudget: {
+        maxTimeMs: brief.timeBudget.maxTimeMs,
+        warningLevel: brief.timeBudget.warningLevel,
+      },
+    });
+    expect(JSON.stringify(strip(r1.brief))).toBe(JSON.stringify(strip(r2.brief)));
   });
 
   it("NFR-C08: Object.keys of every StoryStatusEntry returns identical sorted key set across all 6 statuses", async () => {
@@ -488,7 +497,9 @@ describe("checkBudget", () => {
     expect(at100.remainingUsd).toBe(0);
   });
 
-  it("checkBudget undefined budget → warningLevel 'none', remainingUsd null", () => {
+  it("checkBudget undefined budget → warningLevel 'none', remainingUsd null, usedUsd still aggregates", () => {
+    // Fixed 2026-04-20 (monday's dashboard report): aggregation now runs unconditionally
+    // so the dashboard can display real spend even when no cap is set.
     const result = checkBudget(
       [makePrimaryRecordWithCost("US-01", "PASS", "2026-01-01T00:00:00Z", 50)],
       undefined,
@@ -496,7 +507,24 @@ describe("checkBudget", () => {
     expect(result.warningLevel).toBe("none");
     expect(result.remainingUsd).toBeNull();
     expect(result.budgetUsd).toBeNull();
-    expect(result.usedUsd).toBe(0);
+    expect(result.usedUsd).toBe(50);
+  });
+
+  it("checkBudget null-budget aggregation: sums primary-record costs across multiple records (dashboard fix)", () => {
+    // Regression test for monday's 2026-04-20 dashboard zero-emit bug:
+    // checkBudget must return a non-zero usedUsd whenever cost-bearing records
+    // exist, even when no budget cap is supplied.
+    const records = [
+      makePrimaryRecordWithCost("US-01", "PASS", "2026-01-01T00:00:00Z", 0.25),
+      makePrimaryRecordWithCost("US-02", "PASS", "2026-01-01T00:01:00Z", 0.34),
+      makeGeneratorRecord("US-03", "2026-01-01T00:02:00Z"),
+    ];
+    const result = checkBudget(records, undefined);
+    expect(result.usedUsd).toBeCloseTo(0.59, 5);
+    expect(result.budgetUsd).toBeNull();
+    expect(result.remainingUsd).toBeNull();
+    expect(result.warningLevel).toBe("none");
+    expect(result.incompleteData).toBe(false);
   });
 
   it("checkBudget generator records excluded from budget sum", () => {
@@ -572,6 +600,41 @@ describe("checkTimeBudget", () => {
     const result = checkTimeBudget(undefined, 10000);
     expect(result.elapsedMs).toBe(0);
     expect(result.warningLevel).toBe("unknown");
+  });
+
+  it("startTimeMs missing BUT priorRecords present → derives elapsed from earliest record timestamp (dashboard fix)", () => {
+    // Regression test for monday's 2026-04-20 dashboard zero-emit bug:
+    // when the caller doesn't track startTimeMs (e.g. forge_coordinate({planPath, phaseId})),
+    // checkTimeBudget must fall back to the earliest primary-record timestamp so the
+    // dashboard displays real elapsed time rather than "0m 00s".
+    const records = [
+      makePrimaryRecordWithCost("US-02", "PASS", "2026-01-01T00:05:00Z", 0.20),
+      makePrimaryRecordWithCost("US-01", "PASS", "2026-01-01T00:00:00Z", 0.30),
+      makePrimaryRecordWithCost("US-03", "PASS", "2026-01-01T00:10:00Z", 0.10),
+    ];
+    const result = checkTimeBudget(undefined, 3_600_000, records);
+    expect(result.elapsedMs).toBeGreaterThan(0);
+    expect(result.maxTimeMs).toBe(3_600_000);
+    // warningLevel should be a concrete bucket (not "unknown") now that elapsed is derived.
+    expect(result.warningLevel).not.toBe("unknown");
+  });
+
+  it("startTimeMs missing AND priorRecords empty → preserves elapsedMs 0, warningLevel unknown", () => {
+    const result = checkTimeBudget(undefined, 10000, []);
+    expect(result.elapsedMs).toBe(0);
+    expect(result.warningLevel).toBe("unknown");
+  });
+
+  it("startTimeMs present is authoritative — priorRecords do not override caller's start time", () => {
+    const callerStart = Date.now() - 5000;
+    const records = [
+      // Record timestamps from an hour ago — should NOT be used because caller provided startTimeMs.
+      makePrimaryRecordWithCost("US-01", "PASS", new Date(Date.now() - 3_600_000).toISOString(), 0.10),
+    ];
+    const result = checkTimeBudget(callerStart, 10_000, records);
+    // elapsed should be ~5000ms (from callerStart), not ~3_600_000ms (from records).
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(5000);
+    expect(result.elapsedMs).toBeLessThan(60_000);
   });
 
   it("maxTimeMs missing → time no-op, warningLevel none", () => {

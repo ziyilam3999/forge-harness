@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Acceptance wrapper for v0.32.7 — bump DEFAULT_MAX_TOKENS 8192 → 32000 sweep.
-# Runs AC-1..AC-8 from .ai-workspace/plans/2026-04-20-default-max-tokens-sweep.md
+# Runs AC-1..AC-7 from .ai-workspace/plans/2026-04-20-default-max-tokens-sweep.md
+# (AC-8 from the plan — the setup.sh-unchanged guard — is checked here as AC-7
+# so the wrapper's numbering is contiguous; same coverage, just renumbered).
 # Exits 0 iff all ACs pass.
 
 set -euo pipefail
@@ -60,10 +62,10 @@ check "AC-5" "full vitest suite passes (no test failures)" "$AC5"
 npm run build > /tmp/ac6.log 2>&1 && AC6=0 || AC6=1
 check "AC-6" "npm run build compiles cleanly" "$AC6"
 
-# AC-8: setup.sh unchanged vs master
-SETUP_DIFF=$(git diff origin/master -- setup.sh 2>/dev/null | wc -l || echo "0")
-[ "$SETUP_DIFF" -eq 0 ] && AC8=0 || AC8=1
-check "AC-8" "setup.sh unchanged vs origin/master (diff lines: $SETUP_DIFF)" "$AC8"
+# AC-7: setup.sh unchanged vs master
+SETUP_DIFF=$(git diff origin/master -- setup.sh 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+[ "$SETUP_DIFF" -eq 0 ] && AC7=0 || AC7=1
+check "AC-7" "setup.sh unchanged vs origin/master (diff lines: $SETUP_DIFF)" "$AC7"
 
 echo
 echo "=== summary: $PASS pass / $FAIL fail ==="

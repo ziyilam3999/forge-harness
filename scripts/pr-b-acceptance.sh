@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # v0.33.0 PR B acceptance wrapper.
-# Runs AC-B1 through AC-B12 in order and exits 0 iff all pass.
+# Runs AC-B1 through AC-B13 in order and exits 0 iff all pass.
 # Plan: .ai-workspace/plans/2026-04-20-v0-33-0-pr-b-anthropic-plan-polish.md
 set -euo pipefail
 
@@ -73,7 +73,7 @@ npm run build
 pass "dist/lib/anthropic.js and dist/tools/plan.js produced"
 
 section "AC-B12 (diff allowlist — no drive-by edits)"
-ALLOWED='^(server/lib/anthropic\.ts|server/lib/anthropic\.test\.ts|server/tools/plan\.ts|server/tools/plan\.test\.ts|\.ai-workspace/plans/2026-04-20-v0-33-0-pr-b-anthropic-plan-polish\.md|scripts/pr-b-acceptance\.sh|package\.json|CHANGELOG\.md)$'
+ALLOWED='^(server/lib/anthropic\.ts|server/lib/anthropic\.test\.ts|server/tools/plan\.ts|server/tools/plan\.test\.ts|server/tools/reconcile\.test\.ts|\.ai-workspace/plans/2026-04-20-v0-33-0-pr-b-anthropic-plan-polish\.md|scripts/pr-b-acceptance\.sh|package\.json|CHANGELOG\.md)$'
 while IFS= read -r f; do
   [ -z "$f" ] && continue
   if ! printf '%s\n' "$f" | grep -qE "$ALLOWED"; then
@@ -81,5 +81,10 @@ while IFS= read -r f; do
   fi
 done < <(git diff master...HEAD --name-only)
 pass "diff is a subset of the allowlist"
+
+section "AC-B13 (stale reconcile AC8 guard removed — plan amendment 2026-04-20)"
+node -e "const s=require('fs').readFileSync('server/tools/reconcile.test.ts','utf8'); process.exit(/AC8:\s*(plan\.ts not modified|git diff master\.\.HEAD -- server\/tools\/plan\.ts is empty)/.test(s)?1:0)" \
+  || fail "stale AC8 guard still present in server/tools/reconcile.test.ts"
+pass "stale AC8 guard removed"
 
 green "ALL AC PASS"

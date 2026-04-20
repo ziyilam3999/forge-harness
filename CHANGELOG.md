@@ -1,3 +1,8 @@
+## [0.32.9](https://github.com/ziyilam3999/forge-harness/compare/v0.32.8...v0.32.9) (2026-04-20)
+
+### Miscellaneous
+
+- v0.33.0 polish bundle — PR A1 of 5 (setup-config surface, 5 issues). Drop dead EXPECTED_DIST (#306), OS-guard System32 path (#307), add host-pollution sha256 assertion (#308, wrapper check count 11→12), distinguish CLI-missing vs CLI-failed fallback wording (#309), stderr note on invalid settings.json (#311). ([#332](https://github.com/ziyilam3999/forge-harness/pull/332))
 # Changelog
 
 All notable changes to this project will be documented in this file.

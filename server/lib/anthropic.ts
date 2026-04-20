@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
-const DEFAULT_MAX_TOKENS = 8192;
+// Raised from 8192 → 32000 in v0.32.7 after monday-bot hit truncation on the
+// planner call site (not just the corrector fixed in v0.32.6). Sonnet 4
+// supports 64K output tokens; 32000 covers every full-plan/findings payload
+// observed so far with headroom. Billing is per-token-used, so non-plan callers
+// pay nothing extra — the raised ceiling just stops clipping premature.
+const DEFAULT_MAX_TOKENS = 32000;
 
 let client: Anthropic | null = null;
 // Track the OAuth token's expiry so we can evict the cache before it goes stale.

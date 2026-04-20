@@ -92,6 +92,44 @@ describe("callClaude — truncation handling (v0.32.6)", () => {
     expect(result.usage.outputTokens).toBe(5);
   });
 
+  it("sends max_tokens=32000 to the SDK when caller does not pass maxTokens (v0.32.7 sweep)", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "ok" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+
+    const { callClaude } = await import("./anthropic.js");
+
+    await callClaude({
+      system: "s",
+      messages: [{ role: "user", content: "u" }],
+    });
+
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const sdkArgs = mockCreate.mock.calls[0][0];
+    expect(sdkArgs.max_tokens).toBe(32000);
+  });
+
+  it("explicit maxTokens override still wins over the default (regression positive)", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "ok" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+
+    const { callClaude } = await import("./anthropic.js");
+
+    await callClaude({
+      system: "s",
+      messages: [{ role: "user", content: "u" }],
+      maxTokens: 1024,
+    });
+
+    const sdkArgs = mockCreate.mock.calls[0][0];
+    expect(sdkArgs.max_tokens).toBe(1024);
+  });
+
   it("does NOT throw when stop_reason is 'stop_sequence'", async () => {
     mockCreate.mockResolvedValueOnce({
       content: [{ type: "text", text: "done." }],

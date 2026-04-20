@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.4](https://github.com/ziyilam3999/forge-harness/compare/v0.33.3...v0.33.4) (2026-04-20)
+
+### Bug Fixes
+
+- **setup-config:** v0.34.2 bundle — 6 setup-config fixes + 1 deferred (Fixes #310, #333, #334, #335, #336, #337). PR #379.
+  - **#310** — `spawnClaude` refactored from `shell: true` to explicit binary resolution (`where claude` / `which claude`, prefers `.cmd` on Windows) with `shell: false`. Paths containing spaces now work on all platforms. Cached in `claudeBinaryPathCache` at module scope.
+  - **#333** — `setup-config-acceptance.sh` header softened: removed "will exit with a clear message" claim that didn't match behavior.
+  - **#334** — `HOST_CLAUDE_JSON_BEFORE_SHA256` snapshot hoisted to the top of the wrapper before `npm run build` or any subprocess runs.
+  - **#335** — AC-9 success line now prints `sha256 before=after` without interpolating the full hex; fail branch still prints both for debugging.
+  - **#336** — `tryClaudeMcpAdd` got a JSDoc block documenting the `{ ok: boolean, reason: "missing" | "failed" | null }` tagged-union return.
+  - **#337** — Dead `err && err.message ?` ternary fallback removed from `JSON.parse` catch.
+  - **Deferred:** #279 (intermittent Windows-backslash-stripping mkdir) — still unreproduced.
+  - Iter-1 PASS, zero enhancements filed. 792/0 suite.
+
 ## [0.33.3](https://github.com/ziyilam3999/forge-harness/compare/v0.33.2...v0.33.3) (2026-04-20)
 
 ### Bug Fixes

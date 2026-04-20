@@ -170,12 +170,19 @@ export function extractJson(text: string): unknown {
 
 /**
  * Call Claude API with the given prompt. Handles JSON extraction when jsonMode is true.
+ *
+ * Uses `messages.stream(...).finalMessage()` unconditionally: the Anthropic SDK throws
+ * "Streaming is required for operations that may take longer than 10 minutes" synchronously
+ * when the predicted runtime of a non-streaming request exceeds 600s (v0.32.7's 32000
+ * max_tokens tips the planner/corrector over this threshold). Streaming is explicitly safe
+ * for short calls — no per-call overhead, same `Message` shape returned — so we flip the
+ * whole helper rather than adding a fragile heuristic.
  */
 export async function callClaude(options: CallClaudeOptions): Promise<CallClaudeResult> {
   const anthropic = getClient();
   const effectiveMaxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
 
-  const response = await anthropic.messages.create({
+  const stream = anthropic.messages.stream({
     model: options.model ?? DEFAULT_MODEL,
     max_tokens: effectiveMaxTokens,
     system: options.jsonMode
@@ -184,6 +191,7 @@ export async function callClaude(options: CallClaudeOptions): Promise<CallClaude
       : options.system,
     messages: options.messages,
   });
+  const response = await stream.finalMessage();
 
   // Extract text from response content blocks
   const text = response.content

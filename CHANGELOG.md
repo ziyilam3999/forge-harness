@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.7](https://github.com/ziyilam3999/forge-harness/compare/v0.32.6...v0.32.7) (2026-04-20)
+
+### Bug Fixes
+- **anthropic:** `DEFAULT_MAX_TOKENS` raised from 8192 to 32000 across all LLM call sites. v0.32.6 had raised only the 2 corrector-specific call sites to 32000; the other 8 call sites in `server/tools/plan.ts` (planner, planner-retry, critic, master-planner, master-planner-retry, master-critic, phase-planner, phase-planner-retry, update-planner, update-planner-retry) remained on the 8192 default and truncated for any plan >~27KB. Monday hit this on the planner itself at 2026-04-20T03:05Z, ~10h after v0.32.6 shipped — truncation surfaced correctly as `LLMOutputTruncatedError` (thanks to v0.32.6 fix #2) but the plan never drafted. Rather than repeat the override at 10 call sites (and risk missing future ones), raise the default itself. Single-line change. Sonnet 4 supports 64K output; 32000 is halfway with headroom. Anthropic bills per output-token-used, not per max_tokens-requested, so non-plan callers pay nothing extra. Explicit `maxTokens: CORRECTOR_MAX_TOKENS` overrides in plan.ts retained as documentation of intent. 2 new tests (default-passed-through-to-SDK + explicit-override-wins regression). (closes #319) (#320)
+
 ## [0.32.6](https://github.com/ziyilam3999/forge-harness/compare/v0.32.5...v0.32.6) (2026-04-19)
 
 ### Bug Fixes

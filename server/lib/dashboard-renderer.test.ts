@@ -494,11 +494,31 @@ describe("renderDashboard — failure isolation (AC-18)", () => {
     await expect(renderDashboard(bogusRoot, io)).resolves.toBeUndefined();
   });
 
-  it("primitive-level ProgressReporter flow resolves even when the dashboard writer throws", async () => {
-    // Simulates the AC-18 integration: an in-flight reporter triggers a
-    // dashboard render; the render explodes; the caller's async path
-    // keeps going. Uses the setProjectContext seam so no project fs is
-    // actually touched by the reporter path itself.
+  it("ProgressReporter fire-and-forget promise resolves and invokes both writeActivity + renderDashboard (#273)", async () => {
+    // Rewrite of the previous AC-18 reporter test (#273 — original only
+    // asserted that the synchronous `begin` / `complete` returns didn't
+    // throw, which is trivially true for any void-returning method and
+    // proved nothing about isolation).
+    //
+    // This test injects real mocks for writeActivity + renderDashboard
+    // (via vi.mock at the module boundary), drives begin + complete,
+    // awaits the fire-and-forget promise settle via a microtask flush,
+    // and asserts that:
+    //   (a) both mocks were invoked (the hook ran — not a silent no-op),
+    //   (b) the outer promise settled (no unhandled rejection),
+    //   (c) the reporter's synchronous path did not throw.
+    //
+    // The mocks live in dedicated sub-modules so we can reset them
+    // cleanly per test without leaking state across the test file.
+    vi.resetModules();
+    const writeActivitySpy = vi.fn().mockResolvedValue(undefined);
+    const renderDashboardSpy = vi.fn().mockResolvedValue(undefined);
+    vi.doMock("./activity.js", () => ({
+      writeActivity: writeActivitySpy,
+    }));
+    vi.doMock("./dashboard-renderer.js", () => ({
+      renderDashboard: renderDashboardSpy,
+    }));
     vi.spyOn(console, "error").mockImplementation(() => {});
     const { ProgressReporter } = await import("./progress.js");
     const bogusRoot = process.platform === "win32"
@@ -507,11 +527,152 @@ describe("renderDashboard — failure isolation (AC-18)", () => {
     const reporter = new ProgressReporter("forge_generate", ["stage-a"]);
     reporter.setProjectContext(bogusRoot, "US-18");
 
-    // Invoking begin + complete should resolve synchronously (they are
-    // void-returning) without throwing. The fire-and-forget dashboard
-    // hooks run in the background and swallow errors internally.
     expect(() => reporter.begin("stage-a")).not.toThrow();
     expect(() => reporter.complete("stage-a")).not.toThrow();
+
+    // Drain the microtask queue so the `void (async () => { ... })()`
+    // fire-and-forget Promise finishes. Two ticks: one for `writeActivity`,
+    // one for `renderDashboard`. A small setTimeout fallback catches any
+    // additional scheduled microtasks. (The begin() hook also fires one,
+    // so we allow a handful of iterations.)
+    for (let i = 0; i < 4; i += 1) {
+      await new Promise((r) => setImmediate(r));
+    }
+
+    // Both mocks must have been called — proves the hook actually ran,
+    // not silently returned (which was the #273 failure mode).
+    expect(writeActivitySpy).toHaveBeenCalled();
+    expect(renderDashboardSpy).toHaveBeenCalled();
+    // Reset module registry so subsequent tests see the real modules.
+    vi.doUnmock("./activity.js");
+    vi.doUnmock("./dashboard-renderer.js");
+    vi.resetModules();
+  });
+});
+
+describe("readActivity + renderBoard — empty-string tool (#276)", () => {
+  // #276: `{tool: ""}` must never count as an active tool. readActivity
+  // rejects it and readActivity callers skip the activity card. The
+  // renderBoard guard uses the same isToolRunning helper as #353.
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), "forge-dashboard-empty-tool-"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("activity.json with empty-string tool renders zero in-progress cards", async () => {
+    const forgeDir = join(tmpRoot, ".forge");
+    await mkdir(forgeDir, { recursive: true });
+    const brief = makeBrief({
+      stories: [makeStoryEntry("US-E", "ready")],
+      totalCount: 1,
+    });
+    await fsWriteFile(
+      join(forgeDir, "coordinate-brief.json"),
+      JSON.stringify(brief),
+      "utf-8",
+    );
+    // Empty-string tool — must be rejected identically to null.
+    await fsWriteFile(
+      join(forgeDir, "activity.json"),
+      JSON.stringify({
+        tool: "",
+        stage: "whatever",
+        startedAt: "2026-04-20T00:00:00.000Z",
+        lastUpdate: "2026-04-20T00:00:05.000Z",
+      }),
+      "utf-8",
+    );
+
+    await renderDashboard(tmpRoot);
+    const { readFile } = await import("node:fs/promises");
+    const html = await readFile(join(forgeDir, "dashboard.html"), "utf-8");
+    const inProgress = extractColumnContent(html, "col-in-progress");
+    const cardMatches = inProgress.match(/class="story-card/g) ?? [];
+    expect(cardMatches.length).toBe(0);
+
+    // And TOOL_RUNNING serializes false — the idle branch should take
+    // over at runtime.
+    expect(html).toMatch(/var\s+TOOL_RUNNING\s*=\s*false\s*;/);
+  });
+
+  it("renderDashboardHtml with activity.tool === '' renders no activity card in col-in-progress", () => {
+    const html = renderDashboardHtml(
+      baseInput(
+        {
+          stories: [makeStoryEntry("US-X", "ready")],
+          totalCount: 1,
+        },
+        {
+          activity: {
+            tool: "",
+            storyId: "US-X",
+            stage: "whatever",
+            startedAt: "2026-04-20T00:00:00.000Z",
+            lastUpdate: "2026-04-20T00:00:05.000Z",
+          },
+        },
+      ),
+    );
+    const inProgress = extractColumnContent(html, "col-in-progress");
+    // renderBoard should NOT emit an activity card for empty-string tool.
+    expect(inProgress).not.toMatch(/class="story-card active"/);
+    // TOOL_RUNNING must be false even though the raw activity payload
+    // was supplied directly (bypassing readActivity).
+    expect(html).toMatch(/var\s+TOOL_RUNNING\s*=\s*false\s*;/);
+  });
+});
+
+describe("writeDashboardHtml — per-project serial queue (#271)", () => {
+  it("serializes concurrent writes so rename of call-1 precedes writeFile of call-2", async () => {
+    const calls: Array<{ op: string; id: number; ts: number }> = [];
+    let seq = 0;
+    // Each op deliberately delays by a few ms so a racing implementation
+    // would interleave writeFile/rename between calls.
+    const io = {
+      writeFile: (_p: string, _d: string, _e: "utf-8") => {
+        const id = ++seq;
+        return new Promise<void>((resolve) => {
+          setTimeout(() => {
+            calls.push({ op: "writeFile", id, ts: Date.now() });
+            resolve();
+          }, 8);
+        });
+      },
+      rename: (_o: string, _n: string) => {
+        const id = seq;
+        return new Promise<void>((resolve) => {
+          setTimeout(() => {
+            calls.push({ op: "rename", id, ts: Date.now() });
+            resolve();
+          }, 8);
+        });
+      },
+      mkdir: async (_p: string, _o: { recursive: boolean }) => undefined,
+    };
+
+    // Launch two concurrent writes against the SAME projectPath.
+    const bogus = process.platform === "win32"
+      ? "Z:\\forge-concurrent-fixture"
+      : "/tmp/forge-concurrent-nonexistent-xyz";
+    const { writeDashboardHtml } = await import("./dashboard-renderer.js");
+    await Promise.all([
+      writeDashboardHtml(bogus, "<html>a</html>", io),
+      writeDashboardHtml(bogus, "<html>b</html>", io),
+    ]);
+
+    // Expected sequence for a serial queue: writeFile, rename, writeFile,
+    // rename (all four ops in strict order). A racing implementation
+    // would emit writeFile, writeFile, rename, rename (or similar
+    // interleaving).
+    const opSeq = calls.map((c) => c.op);
+    expect(opSeq).toEqual(["writeFile", "rename", "writeFile", "rename"]);
   });
 });
 

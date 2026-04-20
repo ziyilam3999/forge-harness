@@ -93,9 +93,23 @@ export class ProgressReporter {
     this.stageStartTimes.delete(stageName);
 
     if (this.projectPath) {
-      const stageNum = this.currentIndex + 1;
+      // Derive the stageNum from the stageName being closed rather than
+      // the most-recently-begun index (#272). Deriving from the
+      // most-recent index is fragile: if `complete` or `fail` arrives
+      // for a stage that is not the most recently begun one (e.g.
+      // overlapping stages from a re-entrant call), the label would
+      // carry the wrong [N/total]. If the stageName is not in
+      // `this.stages`, treat the close as a no-op for the dashboard
+      // hook — there is no meaningful stageNum to emit.
+      const stageIdx = this.stages.indexOf(stageName);
+      if (stageIdx === -1) {
+        this.maybeClearActivityStartedAt();
+        return;
+      }
+      const stageNum = stageIdx + 1;
       const total = this.stages.length;
       this.fireDashboardHooks(stageName, stageNum, total);
+      this.maybeClearActivityStartedAt();
     }
   }
 
@@ -107,9 +121,36 @@ export class ProgressReporter {
     this.stageStartTimes.delete(stageName);
 
     if (this.projectPath) {
-      const stageNum = this.currentIndex + 1;
+      // Derive stageNum from the stageName being closed (#272) — same
+      // rationale as `complete`. Unknown stageName → hook no-op.
+      const stageIdx = this.stages.indexOf(stageName);
+      if (stageIdx === -1) {
+        this.maybeClearActivityStartedAt();
+        return;
+      }
+      const stageNum = stageIdx + 1;
       const total = this.stages.length;
       this.fireDashboardHooks(stageName, stageNum, total);
+      this.maybeClearActivityStartedAt();
+    }
+  }
+
+  /**
+   * Clear `activityStartedAt` once no stage is in flight (#275).
+   *
+   * `activityStartedAt` is set once on the first `begin` and carried
+   * through subsequent stages so the dashboard "started at" timestamp
+   * reflects the overall tool-run, not each sub-stage. Previously it
+   * was never reset, so a reporter instance reused across multiple
+   * tool-runs would carry a stale first-run timestamp forward.
+   *
+   * The reset fires when all stage-start timestamps have been drained
+   * (i.e. every `begin` has a matching `complete`/`fail`). A subsequent
+   * `begin` re-seeds `activityStartedAt` with the new run's timestamp.
+   */
+  private maybeClearActivityStartedAt(): void {
+    if (this.stageStartTimes.size === 0) {
+      this.activityStartedAt = null;
     }
   }
 

@@ -21,6 +21,7 @@ import { join } from "node:path";
 
 import {
   classifyStaleness,
+  chooseBannerCopy,
   renderDashboardHtml,
   renderDashboard,
   maybeAutoOpenBrowser,
@@ -149,6 +150,60 @@ describe("classifyStaleness (AC-05)", () => {
 
   it("boundary: exactly 120000ms is amber", () => {
     expect(classifyStaleness(120_000)).toBe("amber");
+  });
+});
+
+describe("chooseBannerCopy (#355) — runtime branch selection", () => {
+  // Pure-function coverage of the banner copy/class pair that the
+  // `updateBanner` IIFE renders inside the browser. Extracted as a
+  // top-level helper so the runtime branches are exercised directly
+  // instead of substring-matched against serialized HTML.
+
+  it("tool-not-running + amber level → neutral idle banner (idle, not hang)", () => {
+    const copy = chooseBannerCopy("amber", false, 90_000);
+    expect(copy.className).toBe("liveness-banner neutral");
+    expect(copy.textContent).toBe("Idle — no tool running");
+  });
+
+  it("tool-not-running + red level → neutral idle banner (idle, not hang)", () => {
+    const copy = chooseBannerCopy("red", false, 150_000);
+    expect(copy.className).toBe("liveness-banner neutral");
+    expect(copy.textContent).toBe("Idle — no tool running");
+  });
+
+  it("tool-not-running + green level → green live-copy (idle downgrade skipped when level is green)", () => {
+    // When level is green the IIFE does not downgrade — the green copy
+    // reads naturally as "nothing stale yet" even without a running tool.
+    const copy = chooseBannerCopy("green", false, 10_000);
+    expect(copy.className).toBe("liveness-banner green");
+    expect(copy.textContent).toContain("Live — last update");
+  });
+
+  it("tool-running + red level → red 'may be hung' copy (legitimate hang alarm)", () => {
+    const copy = chooseBannerCopy("red", true, 150_000);
+    expect(copy.className).toBe("liveness-banner red");
+    expect(copy.textContent).toBe("No update for 2+ min — may be hung");
+  });
+
+  it("tool-running + amber level → amber 'over 1 min ago' copy", () => {
+    const copy = chooseBannerCopy("amber", true, 90_000);
+    expect(copy.className).toBe("liveness-banner amber");
+    expect(copy.textContent).toBe("Last update: over 1 min ago");
+  });
+
+  it("tool-running + green level → green live-copy with seconds-since-update", () => {
+    const copy = chooseBannerCopy("green", true, 30_000);
+    expect(copy.className).toBe("liveness-banner green");
+    // Math.round(30000 / 1000) === 30
+    expect(copy.textContent).toBe("Live — last update 30s ago");
+  });
+
+  it("elapsedMs only affects green live-copy text, not amber/red copy", () => {
+    // amber/red copies are fixed strings — they don't embed elapsedMs.
+    const amber = chooseBannerCopy("amber", true, 999_999);
+    expect(amber.textContent).toBe("Last update: over 1 min ago");
+    const red = chooseBannerCopy("red", true, 999_999);
+    expect(red.textContent).toBe("No update for 2+ min — may be hung");
   });
 });
 
@@ -684,9 +739,19 @@ describe("writeDashboardHtml — per-project serial queue (#271)", () => {
 const FIXTURE_PROJECT_ROOT =
   process.platform === "win32" ? "Z:\\project-fixture" : "/project-fixture";
 
-// Factored shared setup/teardown for auto-open describes per #294. Returns
-// nothing — the afterEach hook restores mocks globally. Call from the top of
-// each describe that exercises the env-gated auto-open path.
+/**
+ * Shared setup/teardown helper for auto-open describes (#294, #301).
+ *
+ * Side effect: when invoked from inside a `describe` block, registers a
+ * `beforeEach` hook that silences `console.error` and installs the
+ * `FORGE_DASHBOARD_AUTO_OPEN=1` env gate, plus an `afterEach` hook that
+ * deletes the env var and restores all mocks.
+ *
+ * Must be called at the top of the enclosing `describe` — the
+ * `beforeEach`/`afterEach` hooks register against the currently-active
+ * describe scope, so calling this outside a describe (or inside an `it`)
+ * would attach hooks to the wrong suite.
+ */
 function useAutoOpenEnvGate(): void {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -749,9 +814,8 @@ describe("maybeAutoOpenBrowser — stat catch narrowing (#283 + #291)", () => {
 
   it("non-ENOENT stat error (e.g. EPERM) skips open and does NOT call openExternal or writeFile", async () => {
     const calls: Array<{ op: string }> = [];
-    const eperm = Object.assign(new Error("EPERM"), { code: "EPERM" });
     const io: AutoOpenIo = {
-      stat: async () => { throw eperm; },
+      stat: async () => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); },
       openExternal: async () => { calls.push({ op: "openExternal" }); },
       writeFile: async () => { calls.push({ op: "writeFile" }); },
     };

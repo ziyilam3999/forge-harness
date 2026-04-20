@@ -75,6 +75,55 @@ export function classifyStaleness(elapsedMs: number): "green" | "amber" | "red" 
   return "green";
 }
 
+// ── Banner-copy selector ───────────────────────────────────────────────────
+
+/**
+ * Pure function: (staleness level, tool-running flag, elapsedMs) → banner
+ * (className + textContent) pair.
+ *
+ * Encodes the runtime branch selection that the `updateBanner` IIFE runs
+ * inside the browser. Extracted as a top-level helper (mirroring
+ * `classifyStaleness`) so unit tests can exercise each branch directly
+ * without parsing HTML. Serialized verbatim into the HTML `<script>` block
+ * via `${chooseBannerCopy.toString()}` so the browser runs the same logic.
+ *
+ * Branch semantics:
+ *   - When no tool is running and the level is stale (amber/red), downgrade
+ *     to a neutral "Idle — no tool running" banner. Being idle is not a hang.
+ *   - When a tool is running (or level is green), render the level-appropriate
+ *     copy — red for likely-hung, amber for slow-tick, green for live.
+ *
+ * Issues: #331, #352, #355.
+ */
+export function chooseBannerCopy(
+  level: "green" | "amber" | "red",
+  toolRunning: boolean,
+  elapsedMs: number,
+): { className: string; textContent: string } {
+  if (!toolRunning && level !== "green") {
+    return {
+      className: "liveness-banner neutral",
+      textContent: "Idle — no tool running",
+    };
+  }
+  if (level === "red") {
+    return {
+      className: "liveness-banner red",
+      textContent: "No update for 2+ min — may be hung",
+    };
+  }
+  if (level === "amber") {
+    return {
+      className: "liveness-banner amber",
+      textContent: "Last update: over 1 min ago",
+    };
+  }
+  return {
+    className: "liveness-banner green",
+    textContent: "Live — last update " + Math.round(elapsedMs / 1000) + "s ago",
+  };
+}
+
 // ── Column layout (status → column id) ────────────────────────────────────
 
 /** The 6 column ids. Encoded once; used by renderer + tested by AC-02. */
@@ -444,9 +493,10 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
   // Activity literal. Issue #331.
   const toolRunning = isToolRunning(activity);
 
-  // Serialize the pure classifier into the browser's script block so the
-  // banner updates between meta-refreshes via setInterval.
+  // Serialize the pure classifier + banner-copy selector into the browser's
+  // script block so the banner updates between meta-refreshes via setInterval.
   const classifierSrc = classifyStaleness.toString();
+  const bannerCopySrc = chooseBannerCopy.toString();
 
   const html = `<!DOCTYPE html>
 <html>
@@ -466,6 +516,7 @@ ${renderFeed(auditEntries)}
 </div>
 <script>
 ${classifierSrc}
+${bannerCopySrc}
 var LAST_UPDATE = ${JSON.stringify(lastUpdate)};
 var ACTIVITY_STARTED = ${JSON.stringify(activityStarted)};
 var TOOL_RUNNING = ${JSON.stringify(toolRunning)};
@@ -474,25 +525,13 @@ function updateBanner() {
   if (!banner) return;
   var elapsed = Date.now() - new Date(LAST_UPDATE).getTime();
   var level = classifyStaleness(elapsed);
-  // When no tool is running (activity.tool absent or empty), a stale
-  // elapsed time is the legitimate idle state, not a hang. Downgrade
-  // amber AND red alarms to a neutral "idle" banner — only green should
-  // slip through, since it reads correctly as "no updates, nothing
-  // running." Issue #331 + #352 (amber previously leaked as
-  // "over 1 min ago" even when idle).
-  if (!TOOL_RUNNING && level !== "green") {
-    banner.className = "liveness-banner neutral";
-    banner.textContent = "Idle — no tool running";
-    return;
-  }
-  banner.className = "liveness-banner " + level;
-  if (level === "red") {
-    banner.textContent = "No update for 2+ min — may be hung";
-  } else if (level === "amber") {
-    banner.textContent = "Last update: over 1 min ago";
-  } else {
-    banner.textContent = "Live — last update " + Math.round(elapsed / 1000) + "s ago";
-  }
+  // Runtime branch selection lives in chooseBannerCopy (#355) so the unit
+  // tests can exercise each branch directly rather than substring-matching
+  // against the serialized HTML. Idle-vs-running downgrade logic and the
+  // level-specific copy are encoded there. Issues #331, #352, #355.
+  var copy = chooseBannerCopy(level, TOOL_RUNNING, elapsed);
+  banner.className = copy.className;
+  banner.textContent = copy.textContent;
 }
 updateBanner();
 setInterval(updateBanner, 1000);

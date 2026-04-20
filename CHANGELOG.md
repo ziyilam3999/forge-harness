@@ -1,3 +1,28 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [0.33.0](https://github.com/ziyilam3999/forge-harness/compare/v0.32.14...v0.33.0) (2026-04-20)
+
+### Miscellaneous
+
+- **v0.33.0 — cumulative minor-version release** closing the five-slice polish bundle that shipped as v0.32.9 through v0.32.14 on 2026-04-20.
+
+  **Arc summary.** The v0.33.0 bundle landed in five PRs (A1/A2/B/C/D/E) over a single day, each a narrow polish surface with its own stateless-reviewer pass:
+
+  - **v0.32.9 (PR A1, #332)** — `setup-config` hardening: drop dead `EXPECTED_DIST` (#306), OS-guard System32 path (#307), host-pollution sha256 assertion (#308), CLI-missing vs CLI-failed fallback wording (#309), stderr note on invalid `settings.json` (#311).
+  - **v0.32.10 (PR A2, #339)** — acceptance-wrapper JSON-reporter migration: `vitest --reporter=json` + `numFailedTests` structured parse replaces brittle stdout grep (#315, retires #322), AC numbering gap closed (#321), `wc -l` whitespace trimmed for BSD portability (#323), project-relative `tmp/` for Windows MSYS path asymmetry.
+  - **v0.32.11 (#342)** — planner cwd-policy fix: forbid `cd <project-basename> && ...` prefix in AC commands. `forge_evaluate` already sets `cwd=projectPath` — the planner's spurious `cd` prefix caused every first-run evaluate to fail (`cd: <project>: No such file or directory`). Reported by monday-bot operator during US-01 bootstrap.
+  - **v0.32.12 (PR B, #346)** — anthropic + plan surface: widen `CallClaudeResult.usage` with optional cache-token fields (#329), typed exhaustive `isMaxTokensStop()` helper replaces bare string-equality (#314), `CORRECTOR_MAX_TOKENS` with env override (#317), suite-scoped `mockCreate.not.toHaveBeenCalled()` tripwire (#318), drop redundant `err.message.toContain` assertions (#316), consolidate orphaned `runCorrector` JSDoc (#330), plan amendment AC-B13 deleted stale `reconcile.test.ts` AC8 guard from PR #164.
+  - **v0.32.13 (PR C, #351)** — CHANGELOG + dashboard polish: split the dense v0.32.8 entry (1315-char single-paragraph) into readable problem/fix/arc-closure paragraphs (#328); dashboard liveness banner now distinguishes `TOOL_RUNNING` true/false, adding a neutral "Idle — no tool running" state when idle > 120s (#331).
+  - **v0.32.14 (PR D, #356)** — evaluate.ts max_tokens audit: confirmed zero explicit `maxTokens` overrides across all 3 `trackedCallClaude` sites in `server/tools/evaluate.ts` (coherence, reverse, critic); locked as a structural invariant via `evaluate-max-tokens-audit.test.ts` with rot-guard companion assertion ensuring at least one `trackedCallClaude` site remains (#324).
+
+  **CHANGELOG header ordering fix (closes #354).** Prior to this release, the `# Changelog` H1 and its intro paragraph were buried between v0.32.9 and v0.32.8 because `/ship` Stage 7 prepends every new version section to the file top without special-casing an existing title block. Each PR in the bundle compounded the drift. This release relocates the H1 + intro back to lines 1-3, restoring readable top-down navigation. The underlying `/ship` skill prepend-logic bug remains a separate candidate for the ai-brain-owned `/ship` skill definition and is out of scope for this repo.
+
+  **What did not change.** Zero runtime code in this release — no `server/**/*.ts` edits. Only `package.json` (version bump 0.32.14 → 0.33.0), `CHANGELOG.md` (this entry + H1 relocation), and a plan/acceptance-wrapper pair under `.ai-workspace/` and `scripts/`.
+
+  **Thanks to monday-bot operator** for the mid-bundle bug reports (#312, #319, #325, #342) that drove the v0.32.6/7/8 streaming-triad closure; the v0.33.0 milestone is the natural capstone for that arc. ([#TBD](https://github.com/ziyilam3999/forge-harness/pull/TBD))
+
 ## [0.32.14](https://github.com/ziyilam3999/forge-harness/compare/v0.32.13...v0.32.14) (2026-04-20)
 
 ### Miscellaneous
@@ -39,14 +64,12 @@
 ### Miscellaneous
 
 - v0.33.0 polish bundle — PR A2 of 5 (acceptance-wrapper surface). Switch both acceptance wrappers from brittle `Tests N passed` stdout grep to `vitest --reporter=json` + `numFailedTests` structured parse (#315, retires #322). Close AC numbering gap in max-tokens-sweep wrapper (#321). Trim `wc -l` whitespace for BSD portability in both wrappers (#323). Unplanned in-scope fix: project-relative `tmp/` for vitest JSON output to avoid Windows MSYS `/tmp` vs node.exe drive-root asymmetry. ([#339](https://github.com/ziyilam3999/forge-harness/pull/339))
+
 ## [0.32.9](https://github.com/ziyilam3999/forge-harness/compare/v0.32.8...v0.32.9) (2026-04-20)
 
 ### Miscellaneous
 
 - v0.33.0 polish bundle — PR A1 of 5 (setup-config surface, 5 issues). Drop dead EXPECTED_DIST (#306), OS-guard System32 path (#307), add host-pollution sha256 assertion (#308, wrapper check count 11→12), distinguish CLI-missing vs CLI-failed fallback wording (#309), stderr note on invalid settings.json (#311). ([#332](https://github.com/ziyilam3999/forge-harness/pull/332))
-# Changelog
-
-All notable changes to this project will be documented in this file.
 
 ## [0.32.8](https://github.com/ziyilam3999/forge-harness/compare/v0.32.7...v0.32.8) (2026-04-20)
 

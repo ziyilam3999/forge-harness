@@ -679,7 +679,7 @@ export async function assemblePhaseTransitionBrief(
     completedCount,
     totalCount,
     budget: checkBudget(allRecords, options.budgetUsd ?? undefined),
-    timeBudget: checkTimeBudget(options.currentPlanStartTimeMs ?? undefined, options.maxTimeMs ?? undefined),
+    timeBudget: checkTimeBudget(options.currentPlanStartTimeMs ?? undefined, options.maxTimeMs ?? undefined, allRecords),
     replanningNotes,
     recommendation,
     configSource: config?.configSource ?? {},
@@ -890,16 +890,9 @@ function buildRecommendation(
  * Advisory only — never throws on exceeded budget.
  */
 export function checkBudget(priorRecords: ReadonlyArray<TaggedRunRecord>, budgetUsd: number | undefined): BudgetInfo {
-  if (budgetUsd === undefined || budgetUsd === null) {
-    return {
-      usedUsd: 0,
-      budgetUsd: null,
-      remainingUsd: null,
-      incompleteData: false,
-      warningLevel: "none",
-    };
-  }
-
+  // Aggregate cost unconditionally — the dashboard needs usedUsd even when no cap is set.
+  // Fixes monday's 2026-04-20 dashboard report: prior early-return on undefined budget
+  // emitted usedUsd: 0 regardless of actual spend.
   let usedUsd = 0;
   let incompleteData = false;
 
@@ -911,6 +904,16 @@ export function checkBudget(priorRecords: ReadonlyArray<TaggedRunRecord>, budget
       continue;
     }
     usedUsd += cost;
+  }
+
+  if (budgetUsd === undefined || budgetUsd === null) {
+    return {
+      usedUsd,
+      budgetUsd: null,
+      remainingUsd: null,
+      incompleteData,
+      warningLevel: "none",
+    };
   }
 
   const ratio = budgetUsd > 0 ? usedUsd / budgetUsd : 0;
@@ -932,15 +935,36 @@ export function checkBudget(priorRecords: ReadonlyArray<TaggedRunRecord>, budget
 
 /**
  * Pure wall-clock time budget check (REQ-07).
- * Missing startTimeMs → 'unknown' (not 'none'). Missing maxTimeMs → 'none' (no-op).
+ * Missing startTimeMs AND missing/empty priorRecords → 'unknown' (not 'none').
+ * Missing startTimeMs but priorRecords present → derive elapsed from earliest record timestamp.
+ * Caller-provided startTimeMs is authoritative when present (not superseded by records).
+ * Missing maxTimeMs → 'none' (no-op).
  * Never throws — pure computation.
+ *
+ * Fixes monday's 2026-04-20 dashboard report: prior early-return on undefined
+ * startTimeMs emitted elapsedMs: 0 regardless of actual run history.
  */
-export function checkTimeBudget(startTimeMs: number | undefined, maxTimeMs: number | undefined): TimeBudgetInfo {
-  if (startTimeMs === undefined || startTimeMs === null) {
+export function checkTimeBudget(startTimeMs: number | undefined, maxTimeMs: number | undefined, priorRecords?: ReadonlyArray<TaggedRunRecord>): TimeBudgetInfo {
+  let effectiveStartMs: number | undefined = startTimeMs ?? undefined;
+
+  if (effectiveStartMs === undefined && priorRecords && priorRecords.length > 0) {
+    let earliest: string | undefined;
+    for (const entry of priorRecords) {
+      if (entry.source !== "primary") continue;
+      const ts = entry.record.timestamp;
+      if (earliest === undefined || ts < earliest) earliest = ts;
+    }
+    if (earliest !== undefined) {
+      const parsed = new Date(earliest).getTime();
+      if (!Number.isNaN(parsed)) effectiveStartMs = parsed;
+    }
+  }
+
+  if (effectiveStartMs === undefined) {
     return { elapsedMs: 0, maxTimeMs: maxTimeMs ?? null, warningLevel: "unknown" };
   }
 
-  const elapsedMs = Date.now() - startTimeMs;
+  const elapsedMs = Date.now() - effectiveStartMs;
 
   if (maxTimeMs === undefined || maxTimeMs === null) {
     return { elapsedMs, maxTimeMs: null, warningLevel: "none" };

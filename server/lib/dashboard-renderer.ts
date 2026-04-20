@@ -710,7 +710,9 @@ const DEFAULT_AUTO_OPEN_IO: AutoOpenIo = {
  * Gates (both must hold):
  *   1. `FORGE_DASHBOARD_AUTO_OPEN=1` in the environment (opt-in; default off
  *      so `npm test`, CI, and MCP servers launched without the flag never
- *      spawn a browser).
+ *      spawn a browser). The env var is re-read on each invocation — toggling
+ *      `FORGE_DASHBOARD_AUTO_OPEN` mid-process takes effect on the next call
+ *      (per-invocation check, not a startup-time snapshot). Issue #303.
  *   2. Marker `.forge/.dashboard-opened` must be absent. First successful
  *      open writes the marker; subsequent renders are no-ops. Delete the
  *      marker to re-open the tab (e.g. after closing it accidentally).

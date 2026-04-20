@@ -684,9 +684,19 @@ describe("writeDashboardHtml — per-project serial queue (#271)", () => {
 const FIXTURE_PROJECT_ROOT =
   process.platform === "win32" ? "Z:\\project-fixture" : "/project-fixture";
 
-// Factored shared setup/teardown for auto-open describes per #294. Returns
-// nothing — the afterEach hook restores mocks globally. Call from the top of
-// each describe that exercises the env-gated auto-open path.
+/**
+ * Shared setup/teardown helper for auto-open describes (#294, #301).
+ *
+ * Side effect: when invoked from inside a `describe` block, registers a
+ * `beforeEach` hook that silences `console.error` and installs the
+ * `FORGE_DASHBOARD_AUTO_OPEN=1` env gate, plus an `afterEach` hook that
+ * deletes the env var and restores all mocks.
+ *
+ * Must be called at the top of the enclosing `describe` — the
+ * `beforeEach`/`afterEach` hooks register against the currently-active
+ * describe scope, so calling this outside a describe (or inside an `it`)
+ * would attach hooks to the wrong suite.
+ */
 function useAutoOpenEnvGate(): void {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -749,9 +759,8 @@ describe("maybeAutoOpenBrowser — stat catch narrowing (#283 + #291)", () => {
 
   it("non-ENOENT stat error (e.g. EPERM) skips open and does NOT call openExternal or writeFile", async () => {
     const calls: Array<{ op: string }> = [];
-    const eperm = Object.assign(new Error("EPERM"), { code: "EPERM" });
     const io: AutoOpenIo = {
-      stat: async () => { throw eperm; },
+      stat: async () => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); },
       openExternal: async () => { calls.push({ op: "openExternal" }); },
       writeFile: async () => { calls.push({ op: "writeFile" }); },
     };

@@ -4,7 +4,9 @@
 # AC-1..AC-10 are checked against an isolated scratch HOME so the reviewer's
 # real ~/.claude.json is never touched.
 #
-# Exit 0 iff all AC pass. Designed for CI + local Git Bash / MSYS2.
+# Exit 0 iff all AC pass. Windows-only: requires Git Bash / MSYS2 (cygpath,
+# /c/Windows/System32 path form). Non-Windows hosts will be detected and the
+# wrapper will exit with a clear message rather than running broken checks.
 
 set -euo pipefail
 
@@ -50,8 +52,17 @@ if [ ! -f "$REPO_ROOT/dist/index.js" ]; then
 fi
 [ -f "$REPO_ROOT/dist/index.js" ] && ok "dist/index.js exists" || fail "dist/index.js missing after build"
 
-# Expected absolute path for dist/index.js (forward-slash Windows form).
-EXPECTED_DIST="$(cygpath -m "$REPO_ROOT/dist/index.js" 2>/dev/null || echo "$REPO_ROOT/dist/index.js")"
+# ---------- Host-pollution capture (AC-9 precondition for #308) ----------
+# The wrapper must not mutate the reviewer's real ~/.claude.json. We sha256 it
+# (or record its absence) now, and re-check at the end before summary. Any
+# divergence = fail loud. Uses node to avoid sha256sum/shasum portability traps.
+HOST_CLAUDE_JSON="$HOME/.claude.json"
+if [ -f "$HOST_CLAUDE_JSON" ]; then
+  # Compute sha256 of host ~/.claude.json before any subprocess runs.
+  HOST_CLAUDE_JSON_BEFORE_SHA256=$(node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"));' "$HOST_CLAUDE_JSON")
+else
+  HOST_CLAUDE_JSON_BEFORE_SHA256="ABSENT"
+fi
 
 # ---------- AC-1 — primary path writes canonical shape ----------
 ac "AC-1 — primary path shape"
@@ -117,9 +128,18 @@ SCRATCH2_WIN=$(cygpath -m "$SCRATCH2_MSYS" 2>/dev/null || echo "$SCRATCH2_MSYS")
 # Windows system dirs (System32 for cmd.exe — node's spawnSync(shell:true) uses it).
 # Use MSYS form (`/c/...`) so Git Bash's own command lookup resolves `node`; cmd.exe
 # spawned by node will see the env PATH string and resolve via its own logic.
+# System32 path is Windows/MSYS-only; guard so non-Windows hosts don't inject a
+# dangling `/c/Windows/System32` into PATH (harmless but misleading).
 NODE_DIR="$(dirname "$(which node)")"
-SYS32_MSYS=/c/Windows/System32
-STRIPPED_PATH="$NODE_DIR:$SYS32_MSYS"
+case "${OSTYPE:-}" in
+  msys*|cygwin*|win32*)
+    SYS32_MSYS=/c/Windows/System32
+    STRIPPED_PATH="$NODE_DIR:$SYS32_MSYS"
+    ;;
+  *)
+    STRIPPED_PATH="$NODE_DIR"
+    ;;
+esac
 
 HOME="$SCRATCH2_WIN" USERPROFILE="$SCRATCH2_WIN" PATH="$STRIPPED_PATH" \
   node "$REPO_ROOT/scripts/setup-config.cjs" "$REPO_ROOT" >/dev/null 2>"$SCRATCH2_MSYS/stderr-4.log" || fail "AC-4 fallback exit non-zero"
@@ -237,6 +257,23 @@ if git diff origin/master -- setup.sh 2>/dev/null | grep -q .; then
   git diff origin/master -- setup.sh | sed 's/^/      /'
 else
   ok "AC-10 setup.sh unchanged vs origin/master"
+fi
+
+# ---------- AC-9 — host ~/.claude.json untouched (pollution guard) ----------
+# #308: before the wrapper started we captured sha256 of $HOME/.claude.json (or
+# ABSENT if missing). Re-capture now and compare. Any divergence means the
+# wrapper's scratch-HOME isolation leaked — fail loud.
+ac "AC-9 — host ~/.claude.json untouched"
+if [ -f "$HOST_CLAUDE_JSON" ]; then
+  # Compute sha256 of host ~/.claude.json after all scratch-HOME subprocess runs.
+  HOST_CLAUDE_JSON_AFTER_SHA256=$(node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"));' "$HOST_CLAUDE_JSON")
+else
+  HOST_CLAUDE_JSON_AFTER_SHA256="ABSENT"
+fi
+if [ "$HOST_CLAUDE_JSON_BEFORE_SHA256" = "$HOST_CLAUDE_JSON_AFTER_SHA256" ]; then
+  ok "AC-9 host ~/.claude.json unchanged (sha256 before=after=$HOST_CLAUDE_JSON_BEFORE_SHA256)"
+else
+  fail "AC-9 host ~/.claude.json mutated (sha256 before=$HOST_CLAUDE_JSON_BEFORE_SHA256 after=$HOST_CLAUDE_JSON_AFTER_SHA256)"
 fi
 
 # ---------- Summary ----------

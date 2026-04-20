@@ -27,7 +27,18 @@ All notable changes to this project will be documented in this file.
 ## [0.32.8](https://github.com/ziyilam3999/forge-harness/compare/v0.32.7...v0.32.8) (2026-04-20)
 
 ### Bug Fixes
-- **anthropic:** `callClaude` now uses `messages.stream(...).finalMessage()` unconditionally instead of `messages.create(...)`. After v0.32.7 raised `DEFAULT_MAX_TOKENS` to 32000, the Anthropic SDK's synchronous pre-flight check began refusing planner calls with `"Streaming is required for operations that may take longer than 10 minutes"` — the SDK predicts runtime from model + input size + max_tokens and rejects non-streaming requests projected beyond the 600s cap. `messages.stream().finalMessage()` is the SDK-recommended path, returns the same `Message` object (same `content`, `stop_reason`, `usage`), so callers and `LLMOutputTruncatedError` detection are unchanged. Streaming is explicitly safe for short calls per Anthropic docs — zero per-call overhead — so this is flipped at the helper level rather than via a fragile heuristic. Closes the class-of-bug arc v0.32.6 → v0.32.7 → v0.32.8: `callClaude` is now the single seam handling max_tokens, stop_reason, and streaming correctly. 5 retrofitted tests (existing truncation + max_tokens coverage reused via streaming mock) + 1 new transport regression test (`messages.stream` invoked, `messages.create` never invoked). Reported by monday during monday-bot bootstrap (mailbox thread `forge-harness-monday-bot-support`, 2026-04-20T03:35Z). (closes #325)
+
+- **anthropic:** `callClaude` now uses `messages.stream(...).finalMessage()` unconditionally instead of `messages.create(...)`. (closes #325)
+
+  **Problem.** After v0.32.7 raised `DEFAULT_MAX_TOKENS` to 32000, the Anthropic SDK's synchronous pre-flight check began refusing planner calls with `"Streaming is required for operations that may take longer than 10 minutes"`.
+  The SDK predicts runtime from model + input size + max_tokens and rejects non-streaming requests projected beyond the 600s cap.
+  Reported by monday during monday-bot bootstrap (mailbox thread `forge-harness-monday-bot-support`, 2026-04-20T03:35Z).
+
+  **Fix.** `messages.stream().finalMessage()` is the SDK-recommended path and returns the same `Message` object (same `content`, `stop_reason`, `usage`), so callers and `LLMOutputTruncatedError` detection are unchanged.
+  Streaming is explicitly safe for short calls per Anthropic docs — zero per-call overhead — so this is flipped at the helper level rather than via a fragile heuristic.
+  Coverage: 5 retrofitted tests (existing truncation + max_tokens reused via streaming mock) + 1 new transport regression test (`messages.stream` invoked, `messages.create` never invoked).
+
+  **Arc closure.** Closes the class-of-bug arc v0.32.6 → v0.32.7 → v0.32.8: `callClaude` is now the single seam handling max_tokens, stop_reason, and streaming correctly.
 
 ## [0.32.7](https://github.com/ziyilam3999/forge-harness/compare/v0.32.6...v0.32.7) (2026-04-20)
 

@@ -37,22 +37,26 @@ if (!fs.existsSync(distIndex)) {
 
 emitMigrationWarnings();
 
-const primaryOk = tryClaudeMcpAdd(distIndex);
-if (primaryOk) {
+const primary = tryClaudeMcpAdd(distIndex);
+if (primary.ok) {
   console.error(`setup-config: registered forge via \`claude mcp add -s user\` ✓ (entry: ${distIndex})`);
   process.exit(0);
 }
 
-// Fallback path — claude CLI not on PATH or failed.
+// Fallback path — claude CLI not on PATH or `claude mcp add` failed.
 fallbackDirectWrite(distIndex);
 console.error(`setup-config: registered forge via direct ~/.claude.json write ✓ (entry: ${distIndex})`);
-console.error("setup-config: note — claude CLI was unavailable, so we wrote the config directly. If you later install the CLI, re-run setup.sh to let it manage the entry.");
+if (primary.reason === "missing") {
+  console.error("setup-config: note — claude CLI was not found on PATH, so we wrote the config directly. If you later install the CLI, re-run setup.sh to let it manage the entry.");
+} else {
+  console.error("setup-config: note — claude CLI was present but `claude mcp add` failed, so we wrote the config directly. See the preceding stderr for the CLI's error; re-run setup.sh once the underlying problem is resolved to let the CLI manage the entry.");
+}
 process.exit(0);
 
 function tryClaudeMcpAdd(distIndexAbs) {
   const probeSpawn = spawnClaude(["--version"]);
   if (!probeSpawn.available) {
-    return false;
+    return { ok: false, reason: "missing" };
   }
 
   // Idempotency: remove any existing user-scope entry first. Ignore "not found" errors.
@@ -74,9 +78,9 @@ function tryClaudeMcpAdd(distIndexAbs) {
     const stderr = add.result && add.result.stderr ? add.result.stderr.toString() : "(no stderr)";
     console.error("setup-config: WARNING — `claude mcp add` failed. Falling back to direct write.");
     console.error("setup-config: claude stderr:", stderr.trim());
-    return false;
+    return { ok: false, reason: "failed" };
   }
-  return true;
+  return { ok: true, reason: null };
 }
 
 // Spawn the claude CLI with args. Handles Windows `.cmd` shim via shell: true.
@@ -143,8 +147,12 @@ function emitMigrationWarnings() {
           "setup-config: WARNING — ~/.claude/settings.json contains a `mcpServers.forge` entry from a pre-v0.32.5 setup. This path is INERT (Claude Code does not read mcpServers from settings.json). You can remove the `mcpServers` key manually; leave the rest of the file alone. Not auto-deleted."
         );
       }
-    } catch {
-      // settings.json is not valid JSON or unreadable; not our concern here, skip warning.
+    } catch (err) {
+      // settings.json is not valid JSON or unreadable. We can't inspect it for the
+      // stale `mcpServers.forge` entry, so surface a note rather than silently skip.
+      console.error(
+        `setup-config: note — ~/.claude/settings.json is not valid JSON (${err && err.message ? err.message : "parse error"}). Skipping the pre-v0.32.5 migration check for this file; fix or remove it if you want the check to run on the next setup.`
+      );
     }
   }
 

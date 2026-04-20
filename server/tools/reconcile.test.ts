@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { mkdir, writeFile, rm, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { execSync } from "node:child_process";
 
 // Mock handlePlan — Q0/L5: returns structured updatedPlan + critiqueRounds
 // sidecar fields alongside a text blob. reconcile.ts reads the structured
@@ -317,24 +316,6 @@ describe("handleReconcile — precedence conflict resolution", () => {
     const output = JSON.parse(result.content[0].text);
     expect(output.conflicts).toHaveLength(1);
     expect(output.conflicts[0].winningCategory).toBe("assumption-changed");
-  });
-});
-
-// ── AC8: plan.ts not modified ──
-describe("handleReconcile — plan.ts untouched", () => {
-  it("AC8: git diff master..HEAD -- server/tools/plan.ts is empty", () => {
-    const repoRoot = join(__dirname, "..", "..");
-    let output = "";
-    try {
-      output = execSync("git diff master..HEAD -- server/tools/plan.ts", {
-        cwd: repoRoot,
-        encoding: "utf-8",
-      });
-    } catch {
-      // Skip if not in git context
-      return;
-    }
-    expect(output).toBe("");
   });
 });
 

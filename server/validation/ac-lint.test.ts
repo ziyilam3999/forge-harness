@@ -96,6 +96,53 @@ describe("lintAcCommand — WRONG patterns (must flag)", () => {
   });
 });
 
+describe("F57-cd-basename — #343 (cwd is ALREADY the project root)", () => {
+  it("flags the canonical WRONG example (cd my-project && npx tsc)", () => {
+    const cmd = "cd my-project && npx tsc --noEmit";
+    const r = lintAcCommand(cmd);
+    expect(r.suspect).toBe(true);
+    expect(r.findings.some((f) => f.ruleId === "F57-cd-basename")).toBe(true);
+  });
+
+  it("flags `cd monday-bot && npm install` (provenance case)", () => {
+    const cmd = "cd monday-bot && npm install";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F57-cd-basename")).toBe(true);
+  });
+
+  it("flags single-segment cd followed by any command", () => {
+    const cmd = "cd foo && echo bar";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F57-cd-basename")).toBe(true);
+  });
+
+  it("does NOT flag subdirectory cd (cd packages/foo && ... is allowed)", () => {
+    const cmd = "cd packages/foo && npm run build";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F57-cd-basename")).toBe(false);
+  });
+
+  it("does NOT flag `cd server/lib && grep -l x .` (multi-segment subdir)", () => {
+    const cmd = "cd server/lib && ls";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F57-cd-basename")).toBe(false);
+  });
+
+  it("does NOT flag the RIGHT example (no cd prefix at all)", () => {
+    const cmd = "npx tsc --noEmit";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F57-cd-basename")).toBe(false);
+  });
+
+  it("does NOT flag a bare `cd foo` without && chain", () => {
+    // cd alone (no && follow-on) is not the doubled-cd anti-pattern this
+    // rule targets; the anti-pattern is specifically cd + chained command.
+    const cmd = "cd my-project";
+    const r = lintAcCommand(cmd);
+    expect(r.findings.some((f) => f.ruleId === "F57-cd-basename")).toBe(false);
+  });
+});
+
 describe("lintAcCommand — Q0.5/A2 MAJOR-2/MINOR-3/4/5 additions", () => {
   // MAJOR-2 false-positive regressions — each was falsely SKIPPED by A1's regex.
   it("MAJOR-2 FP-a: grep + && + url containing 'src' must NOT flag F36", () => {
@@ -166,7 +213,7 @@ describe("AC_LINT_RULES structure (Q0.5/A2 typed-export contract)", () => {
     }
   });
 
-  it("exports exactly the 5 rules A1 shipped (no accidental drops)", () => {
+  it("exports exactly the 6 rules currently shipped (5 from A1 + F57 from #343)", () => {
     const ids = AC_LINT_RULES.map((r) => r.id).sort();
     expect(ids).toEqual([
       "F36-raw-rg",
@@ -174,6 +221,7 @@ describe("AC_LINT_RULES structure (Q0.5/A2 typed-export contract)", () => {
       "F55-passed-grep",
       "F55-vitest-count-grep",
       "F56-multigrep-pipe",
+      "F57-cd-basename",
     ]);
   });
 });

@@ -67,8 +67,10 @@ export function getClient(): Anthropic {
   }
 
   // 2. Fall back to Claude OAuth token (Claude Code Max subscription).
-  //    Note: OAuth tokens only work when proxied through Claude Code's infrastructure.
-  //    Direct API calls with OAuth return 401 "OAuth authentication is currently not supported."
+  //    The OAuth access token from ~/.claude/.credentials.json is accepted by the
+  //    Anthropic SDK as authToken for direct API calls (no Claude Code proxy
+  //    required). Works for Max-plan users who haven't set ANTHROPIC_API_KEY.
+  //    Token expiry is handled by the cache eviction check above (5-min margin).
   const oauthCreds = readOAuthToken();
   if (oauthCreds) {
     console.error("forge: using Claude OAuth token for auth");

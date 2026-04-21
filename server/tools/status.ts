@@ -175,12 +175,24 @@ function rollUpStories(records: readonly PrimaryRecord[]): StoryStatus[] {
             ? "UNKNOWN"
             : existing?.lastVerdict ?? null;
 
-    // lastPhase / lastGitSha: we don't have dedicated fields, so we
-    // derive conservatively. phaseId is sometimes embedded in
-    // escalationReason or elsewhere — for v1 we leave `lastPhase`
-    // as null unless we can reliably populate it.
+    // lastPhase: we don't have a dedicated field, so we derive
+    // conservatively. phaseId is sometimes embedded in escalationReason
+    // or elsewhere — for v1 we leave `lastPhase` as null unless we can
+    // reliably populate it.
     const lastPhase: string | null = existing?.lastPhase ?? null;
-    const lastGitSha: string | null = existing?.lastGitSha ?? null;
+
+    // lastGitSha: v0.35.1 AC-2 pipes git HEAD sha through the RunRecord.
+    // We surface the most-recent PASS record's `gitSha` when present,
+    // preserving prior sha through non-PASS runs (a later FAIL shouldn't
+    // overwrite the "last known shipped" sha with null).
+    const recordGitSha =
+      typeof rec.gitSha === "string" && /^[0-9a-f]{40}$/.test(rec.gitSha)
+        ? rec.gitSha
+        : null;
+    const lastGitSha: string | null =
+      rec.evalVerdict === "PASS" && recordGitSha !== null
+        ? recordGitSha
+        : existing?.lastGitSha ?? null;
 
     // Derive state: shipped on the latest PASS; blocked on latest FAIL;
     // in-progress when there is a run but no verdict; unknown otherwise.

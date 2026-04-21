@@ -46,6 +46,16 @@ export interface RunRecord {
    * mirrors the `evalReport?` pattern above (no schema version bump).
    */
   criticReport?: CriticEvalReport;
+  /**
+   * Git SHA of HEAD at the moment the RunRecord is written (40-char hex).
+   * v0.35.1 additive-optional field: populated by `forge_evaluate` when the
+   * story PASSes so `forge_status` can surface `lastGitSha` (`server/tools/status.ts`
+   * previously hardcoded `null`). Omitted when (a) projectPath is not a git
+   * working copy, (b) the git call fails for any reason, or (c) the record is
+   * written by a tool other than evaluate. Forward-only — historical records
+   * lacking this field remain valid.
+   */
+  gitSha?: string;
   metrics: {
     inputTokens: number;
     outputTokens: number;

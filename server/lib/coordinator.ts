@@ -19,6 +19,8 @@ import type {
 } from "../types/coordinate-result.js";
 import { topoSort } from "./topo-sort.js";
 import { readRunRecords, readAuditEntries, type PrimaryRecord, type TaggedRunRecord } from "./run-reader.js";
+import { getDeclaration, clearDeclaration } from "./declaration-store.js";
+import { getCredentialSource } from "./anthropic.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
@@ -380,6 +382,27 @@ export async function assessPhase(
   }
 
   const entries = sorted.map((s) => statusMap.get(s.id)!);
+
+  // ── v0.35.1 AC-1: auto-clear in-memory declaration when its story is done ──
+  // Goal invariant 1 — after forge_coordinate classifies the declared story
+  // as `done`, forge_status must return activeRun: null (unless a new
+  // declaration arrives). The declaration store is a process-scoped singleton
+  // (see server/lib/declaration-store.ts) so clearing it here propagates
+  // immediately to the next forge_status call. No-op when:
+  //   - no declaration is active
+  //   - the declared story is not in this phase's classification
+  //   - the declared story is not classified as "done"
+  // The check runs AFTER classification so racing declarations (arriving
+  // between assessPhase's run-records read and here) are safe — a newer
+  // declaration with a different storyId is not cleared.
+  const activeDeclaration = getDeclaration();
+  if (activeDeclaration) {
+    const declaredEntry = statusMap.get(activeDeclaration.storyId);
+    if (declaredEntry?.status === "done") {
+      clearDeclaration();
+    }
+  }
+
   const brief = await assemblePhaseTransitionBrief(entries, options, allRecords, stories, {
     config: options.config,
     haltClearedByHuman: options.haltClearedByHuman,
@@ -670,6 +693,13 @@ export async function assemblePhaseTransitionBrief(
     recommendation += "\n\nStory details:\n" + details;
   }
 
+  // v0.35.1 AC-6 — detect OAuth credential source ONCE per brief assembly;
+  // getCredentialSource() reads env + credential file, so it's not free to
+  // call repeatedly. `isOAuth === true` only when the MCP process resolved
+  // via Claude OAuth (Max plan); api-key and unknown both leave the
+  // BudgetInfo.isOAuth field absent (schema additive).
+  const isOAuth = getCredentialSource() === "oauth";
+
   const brief: PhaseTransitionBrief = {
     status,
     stories: entries,
@@ -678,7 +708,7 @@ export async function assemblePhaseTransitionBrief(
     failedStories,
     completedCount,
     totalCount,
-    budget: checkBudget(allRecords, options.budgetUsd ?? undefined),
+    budget: checkBudget(allRecords, options.budgetUsd ?? undefined, isOAuth),
     timeBudget: checkTimeBudget(options.currentPlanStartTimeMs ?? undefined, options.maxTimeMs ?? undefined, allRecords),
     replanningNotes,
     recommendation,
@@ -888,8 +918,17 @@ function buildRecommendation(
  * Pure budget check over tagged-union run records (REQ-06, NFR-C04, NFR-C09).
  * Filters to primary records, sums estimatedCostUsd, returns BudgetInfo.
  * Advisory only — never throws on exceeded budget.
+ *
+ * v0.35.1 AC-6 — an optional `isOAuth` argument propagates the running
+ * MCP process's credential source into BudgetInfo so the dashboard BUDGET
+ * widget can render "Max plan — $0 actual" for OAuth users. When `isOAuth`
+ * is omitted, the field is dropped from the result (schema additive).
  */
-export function checkBudget(priorRecords: ReadonlyArray<TaggedRunRecord>, budgetUsd: number | undefined): BudgetInfo {
+export function checkBudget(
+  priorRecords: ReadonlyArray<TaggedRunRecord>,
+  budgetUsd: number | undefined,
+  isOAuth?: boolean,
+): BudgetInfo {
   // Aggregate cost unconditionally — the dashboard needs usedUsd even when no cap is set.
   // Fixes monday's 2026-04-20 dashboard report: prior early-return on undefined budget
   // emitted usedUsd: 0 regardless of actual spend.
@@ -906,6 +945,9 @@ export function checkBudget(priorRecords: ReadonlyArray<TaggedRunRecord>, budget
     usedUsd += cost;
   }
 
+  const oauthPart: { isOAuth?: boolean } =
+    isOAuth === true ? { isOAuth: true } : {};
+
   if (budgetUsd === undefined || budgetUsd === null) {
     return {
       usedUsd,
@@ -913,6 +955,7 @@ export function checkBudget(priorRecords: ReadonlyArray<TaggedRunRecord>, budget
       remainingUsd: null,
       incompleteData,
       warningLevel: "none",
+      ...oauthPart,
     };
   }
 
@@ -930,6 +973,7 @@ export function checkBudget(priorRecords: ReadonlyArray<TaggedRunRecord>, budget
     remainingUsd: budgetUsd - usedUsd,
     incompleteData,
     warningLevel,
+    ...oauthPart,
   };
 }
 

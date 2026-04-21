@@ -6,6 +6,8 @@ import { generateInputSchema, handleGenerate } from "./tools/generate.js";
 import { coordinateInputSchema, handleCoordinate } from "./tools/coordinate.js";
 import { reconcileInputSchema, handleReconcile } from "./tools/reconcile.js";
 import { lintRefreshInputSchema, handleLintRefresh } from "./tools/lint-refresh.js";
+import { statusInputSchema, handleStatus } from "./tools/status.js";
+import { declareStoryInputSchema, handleDeclareStory } from "./tools/declare-story.js";
 
 const server = new McpServer({
   name: "forge",
@@ -99,6 +101,38 @@ server.registerTool(
     annotations: { readOnlyHint: false },
   },
   handleLintRefresh,
+);
+
+server.registerTool(
+  "forge_status",
+  {
+    title: "Forge Status",
+    description:
+      "Read-only status query. Merges `.forge/runs/*.json` (disk) with live in-memory signals " +
+      "(`.forge/activity.json` + module-scoped story declarations) into a single snapshot. " +
+      "Output kinds: snapshot | differential | empty | corrupted. Scope-narrow by storyId/phaseId/planPath; " +
+      "pass `since` ISO timestamp for differential mode. Never writes, never mutates coordinator state, " +
+      "never calls an LLM. Safe in tight polling loops.",
+    inputSchema: statusInputSchema,
+    annotations: { readOnlyHint: true },
+  },
+  handleStatus,
+);
+
+server.registerTool(
+  "forge_declare_story",
+  {
+    title: "Forge Declare Story",
+    description:
+      "An agent declares 'I am implementing storyId (optionally within phaseId) from now on.' " +
+      "Writes to the MCP server process's module-level declaration store so forge_status can surface " +
+      "the storyId/phaseId in its `activeRun` field during init windows where no ProgressReporter has " +
+      "flushed activity.json yet. Process-scoped, NOT persisted to disk — declaration is lost on MCP " +
+      "server restart by design.",
+    inputSchema: declareStoryInputSchema,
+    annotations: { readOnlyHint: false },
+  },
+  handleDeclareStory,
 );
 
 async function main() {

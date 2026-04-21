@@ -37,6 +37,7 @@ import type {
   StoryStatus,
 } from "../types/coordinate-result.js";
 import type { Activity } from "./activity.js";
+import { getDeclaration, type StoryDeclaration } from "./declaration-store.js";
 
 // ── Activity liveness helper ──────────────────────────────────────────────
 
@@ -195,6 +196,18 @@ export interface DashboardRenderInput {
   auditEntries: ReadonlyArray<AuditFeedEntry>;
   /** ISO timestamp of this render — used for staleness banner. */
   renderedAt: string;
+  /**
+   * Active story declaration (from `forge_declare_story`), or null when no
+   * agent has declared a story in this MCP process. When non-null, the
+   * dashboard header surfaces a "Declared: US-XX" pill so operators can see
+   * the active story during the implementation gap window — the period
+   * between `forge_generate`-complete and `forge_evaluate`-begin when
+   * `.forge/activity.json` is idle but an agent is still writing code.
+   *
+   * Optional-with-default-null so existing callers (renderer tests that build
+   * `DashboardRenderInput` literals) don't need to thread a new field.
+   */
+  declaration?: StoryDeclaration | null;
 }
 
 // ── Format helpers ────────────────────────────────────────────────────────
@@ -223,7 +236,29 @@ function formatTimeOfDay(iso: string): string {
 
 // ── HTML builders ─────────────────────────────────────────────────────────
 
-function renderHeader(brief: PhaseTransitionBrief | null): string {
+/**
+ * Render the active-story declaration pill, or "" when no declaration is
+ * active. The pill surfaces `forge_declare_story`'s state into the header
+ * so the declaration is visible during the implementation gap window
+ * (between `forge_generate`-complete and `forge_evaluate`-begin) when
+ * `.forge/activity.json` is idle.
+ *
+ * Returns empty string when `declaration === null` (Goal invariant 2 — no
+ * placeholder strings when nothing is declared).
+ */
+function renderDeclarationPill(declaration: StoryDeclaration | null | undefined): string {
+  if (!declaration) return "";
+  const phaseSuffix = declaration.phaseId
+    ? ` <span class="decl-phase">(${escapeHtml(declaration.phaseId)})</span>`
+    : "";
+  return `<div class="declaration-pill" data-story-id="${escapeHtml(declaration.storyId)}"><span class="decl-label">Declared</span> <span class="decl-story-id">${escapeHtml(declaration.storyId)}</span>${phaseSuffix}</div>`;
+}
+
+function renderHeader(
+  brief: PhaseTransitionBrief | null,
+  declaration: StoryDeclaration | null | undefined,
+): string {
+  const declarationHtml = renderDeclarationPill(declaration);
   if (!brief) {
     return `
 <div class="top-bar">
@@ -231,6 +266,7 @@ function renderHeader(brief: PhaseTransitionBrief | null): string {
     <div class="logo">Hive Mind <span>Forge</span><span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
     <div class="phase-tag">no brief</div>
     <div class="phase-status-pill">waiting</div>
+    ${declarationHtml}
   </div>
   <div class="top-bar-right">
     <span class="liveness-banner green" id="liveness-banner">initializing...</span>
@@ -261,6 +297,7 @@ function renderHeader(brief: PhaseTransitionBrief | null): string {
     <div class="logo">Hive Mind <span>Forge</span><span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
     <div class="phase-tag">${escapeHtml(brief.status)}</div>
     <div class="phase-status-pill ${escapeHtml(brief.status)}">${escapeHtml(brief.status)}</div>
+    ${declarationHtml}
   </div>
   <div class="top-bar-right">
     <span class="liveness-banner green" id="liveness-banner">initializing...</span>
@@ -424,6 +461,10 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .phase-status-pill.complete { background: var(--green-bg); color: var(--green); }
 .phase-status-pill.needs-replan, .phase-status-pill.halted { background: var(--red-bg); color: var(--red); }
 .phase-status-pill.in-progress { background: var(--amber-bg); color: var(--amber); }
+.declaration-pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: var(--green-bg); color: var(--green); display: inline-flex; align-items: center; gap: 6px; }
+.declaration-pill .decl-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); font-weight: 700; }
+.declaration-pill .decl-story-id { font-family: var(--font-mono); font-weight: 700; }
+.declaration-pill .decl-phase { font-family: var(--font-mono); color: var(--text-secondary); font-weight: 500; }
 .liveness-banner { font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; }
 .liveness-banner.green { background: var(--green-bg); color: var(--green); }
 .liveness-banner.amber { background: var(--amber-bg); color: var(--amber); }
@@ -483,6 +524,11 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 
 export function renderDashboardHtml(input: DashboardRenderInput): string {
   const { brief, activity, auditEntries, renderedAt } = input;
+  // Declaration is optional on the input (default null) so the wide universe
+  // of renderer tests that build `DashboardRenderInput` literals keep working
+  // untouched. When absent, `renderDeclarationPill` emits "" — no false
+  // positives in the rendered HTML (Goal invariant 2).
+  const declaration = input.declaration ?? null;
 
   const lastUpdate = activity?.lastUpdate ?? renderedAt;
   const activityStarted = activity?.startedAt ?? renderedAt;
@@ -509,7 +555,7 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
 </head>
 <body>
 <div class="dashboard">
-${renderHeader(brief)}
+${renderHeader(brief, declaration)}
 ${renderReplanningNotes(brief)}
 ${renderBoard(brief, activity)}
 ${renderFeed(auditEntries)}
@@ -844,11 +890,19 @@ export async function renderDashboard(
       readActivity(projectPath),
       readAuditFeed(projectPath),
     ]);
+    // Declaration is a synchronous in-memory read — deliberately NOT bundled
+    // into the Promise.all above because there's no I/O to overlap. Reading
+    // at render time (same pattern forge_status uses via buildActiveRun in
+    // server/tools/status.ts:242) lets this render pick up declarations made
+    // AFTER the renderer's last invocation without any additional coupling
+    // between `forge_declare_story` and the dashboard write path.
+    const declaration = getDeclaration();
     const html = renderDashboardHtml({
       brief,
       activity,
       auditEntries,
       renderedAt: new Date().toISOString(),
+      declaration,
     });
     await writeDashboardHtml(projectPath, html, io);
     await maybeAutoOpenBrowser(projectPath);

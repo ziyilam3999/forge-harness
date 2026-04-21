@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.0] (2026-04-21)
+
+### Features
+
+- **Dashboard now surfaces active story declarations.** `.forge/dashboard.html` reads the `forge_declare_story` declaration store at render time and shows a "Declared US-XX" pill in the header whenever an agent has declared a story — independent of whether any tool is currently running. Closes the implementation-gap window: between `forge_generate`-complete and `forge_evaluate`-begin, the HTML on disk previously showed "idle" even though the declared story was still being implemented.
+- `DashboardRenderInput` grows an optional `declaration: StoryDeclaration | null` field (default null, no regression for existing callers). `renderDashboard` reads `getDeclaration()` synchronously alongside its existing `Promise.all` disk reads — mirrors the union pattern `forge_status` already uses in `buildActiveRun` (`server/tools/status.ts:242-276`).
+- Declaration pill hides entirely when no declaration is active (no placeholder strings, no false positives). CSS additions are minimal — a single `.declaration-pill` rule set.
+
+### Provenance
+
+- Field report from monday on 2026-04-21 in thread `v034-field-report-2026-04-21` after her first successful v0.34.0 US-04 end-to-end (PASS 6/6). She proposed three options (a, b, c); option (a) — "dashboard reads declarations" — was chosen because (b) conflated ephemeral activity signal with persistent declarations and (c) was overkill. Rationale in full in `.ai-workspace/plans/2026-04-21-v0-35-0-dashboard-declarations.md`.
+
+### Miscellaneous
+
+- New `scripts/v035-0-dash-acceptance.sh` wrapper runs AC-1..AC-8 sequentially; exit 0 iff all pass. Build step runs first (AC-2/AC-3 import from `dist/`).
+- Test count +7 (827 → 834); zero new failures. 12 tests now match the `/declaration/i` name filter (up from 5).
+
 ## [0.34.0](https://github.com/ziyilam3999/forge-harness/compare/v0.33.9...v0.34.0) (2026-04-21)
 
 ### Features

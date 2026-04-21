@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.7](https://github.com/ziyilam3999/forge-harness/compare/v0.33.6...v0.33.7) (2026-04-21)
+
+### Bug Fixes
+
+- evaluate audit refinements slice — 3 quality-of-signal fixes from PR #356 (v0.33.0 PR D) stateless review:
+  - **#357** — Tightened audit-test regex from substring match (`/maxTokens|max_tokens/g`) to SDK-option shape (`/\bmaxTokens\s*:|\bmax_tokens\s*:/g`). Future contributors can write `// note: maxTokens is intentionally omitted` in comments without tripping CI.
+  - **#358** — Removed self-referential AC-D7 section from `scripts/pr-d-acceptance.sh` (it checked "this script is executable" — but the AC only runs *because* the script is executable; pure tautology).
+  - **#359** — Added `existsSync` pre-check in the audit test via an extracted `readAuditTarget()` helper that throws `audit target missing: <path>` with a reference to issue #324, replacing the raw `readFileSync` ENOENT error when `server/tools/evaluate.ts` is moved.
+
+### Miscellaneous
+
+- New `scripts/v034-5-acceptance.sh` acceptance wrapper runs AC-1..AC-10 internally (AC-11 is PR-body-only; AC-12 is the wrapper's own existence).
+- Invariants preserved: `evaluate.ts` maxTokens count still 0, audit test still 2/2 green, full suite still green, diff limited to 4-file allowlist.
+- 3 enhancement issues filed by the stateless reviewer: #396 (regex misses JSON-quoted `"max_tokens":`), #397 (undocumented D7 gap in pr-d-acceptance.sh), #398 (AC-7 `>= baseline-2` slack pattern-wide across v034-N wrappers).
+
 ## [0.33.6](https://github.com/ziyilam3999/forge-harness/compare/v0.33.5...v0.33.6) (2026-04-21)
 
 ### Bug Fixes

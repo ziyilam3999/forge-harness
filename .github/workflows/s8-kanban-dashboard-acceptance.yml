@@ -10,12 +10,12 @@ on:
       - 'server/lib/activity.ts'
       - 'scripts/s8-kanban-dashboard-acceptance.sh'
       - '.github/workflows/s8-kanban-dashboard-acceptance.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 # Cancel superseded runs on rapid branch pushes — the wrapper is ~35s but
 # stacking runs against the same ref wastes CI minutes.
 concurrency:
-  group: s8-dashboard-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

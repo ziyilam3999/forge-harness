@@ -69,6 +69,10 @@ fi
 pass 6 "new tests added (dashboard: $BEFORE_DASH -> $AFTER_DASH, DELTA=$DELTA)"
 
 # AC-7: Full test suite green (>= 785 passed).
+# Baseline is set ~2 tests below the shipped count as an intentional buffer
+# for parallel-churn: concurrent slices landing between plan-time and
+# executor-time can add/remove one or two tests, and we don't want that
+# incidental noise to fail this historical release-pinned wrapper.
 MSYS_NO_PATHCONV=1 npx vitest run --reporter=json --outputFile=tmp/v034-1-full.json > /dev/null 2>&1 || true
 node -e "const r=require('./tmp/v034-1-full.json'); if (r.numFailedTests === 0 && r.numPassedTests >= 785) process.exit(0); console.error('full suite: ' + r.numPassedTests + ' passed / ' + r.numFailedTests + ' failed (expected 0 failed, >= 785 passed)'); process.exit(1);" \
   || fail 7 "full vitest suite did not meet baseline"

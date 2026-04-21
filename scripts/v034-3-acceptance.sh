@@ -167,6 +167,10 @@ check "AC-8" "all 5 cwd-policy tokens single-sourced behind AC_CWD_POLICY_* cons
 # AC-9: Full vitest suite clean -- numFailedTests === 0 and numPassedTests
 # >= 793 (master 792 + 1 for additive F57 coverage; our branch adds 7 F57
 # tests so the real count is 799, which comfortably exceeds 793).
+# The gap between the threshold and the real count is an intentional buffer
+# for parallel-churn — concurrent slices landing between plan-time and
+# executor-time can add/remove one or two tests and we don't want that
+# noise to fail this historical release-pinned wrapper.
 # ---------------------------------------------------------------------------
 rm -f tmp/v034-3-full.json
 npx vitest run --reporter=json --outputFile=tmp/v034-3-full.json > tmp/v034-3-full.log 2>&1 || true

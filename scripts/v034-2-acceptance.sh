@@ -80,6 +80,10 @@ fi
 pass 7 "err.message ternary fallback removed"
 
 # AC-8: full test suite green (>= 792 passed).
+# Baseline is set ~2 tests below the shipped count as an intentional buffer
+# for parallel-churn: concurrent slices landing between plan-time and
+# executor-time can add/remove one or two tests, and we don't want that
+# incidental noise to fail this historical release-pinned wrapper.
 MSYS_NO_PATHCONV=1 npx vitest run --reporter=json --outputFile=tmp/v034-2-full.json > /dev/null 2>&1 || true
 node -e "const r=require('./tmp/v034-2-full.json'); if (r.numFailedTests === 0 && r.numPassedTests >= 792) process.exit(0); console.error('full suite: ' + r.numPassedTests + ' passed / ' + r.numFailedTests + ' failed (expected 0 failed, >= 792 passed)'); process.exit(1);" \
   || fail 8 "full vitest suite did not meet baseline"

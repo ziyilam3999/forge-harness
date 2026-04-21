@@ -59,14 +59,22 @@ awk '/^## \[0\.33\.0\]/,/^## \[0\.32\.14\]/' CHANGELOG.md | grep -q '#354' || fa
 pass 6 "v0.33.0 entry references #354"
 
 # AC-E7: all tests pass, count unchanged from master baseline of $BASELINE_TESTS
-npx vitest run --reporter=json --outputFile=tmp/pr-e-vitest.json > /dev/null 2>&1 || true
+# Do NOT mask vitest's exit code with `|| true` — a missing JSON file then
+# surfaces as a confusing "Cannot find module" error below instead of the
+# real "vitest crashed before emitting the report" signal (#364). Capture
+# the exit code, then check existence explicitly before parsing.
+VITEST_RC=0
+npx vitest run --reporter=json --outputFile=tmp/pr-e-vitest.json > /dev/null 2>&1 || VITEST_RC=$?
+if ! [ -f tmp/pr-e-vitest.json ]; then
+  fail 7 "vitest did not emit tmp/pr-e-vitest.json (exit code $VITEST_RC) — test runner likely crashed before reporter wrote"
+fi
 BASELINE_TESTS="$BASELINE_TESTS" node -e "
   const r = require('./tmp/pr-e-vitest.json');
   const baseline = parseInt(process.env.BASELINE_TESTS || '776');
   if (r.numFailedTests === 0 && r.numPassedTests >= baseline) process.exit(0);
   console.error('tests: ' + r.numPassedTests + ' passed / ' + r.numFailedTests + ' failed (expected 0 failed, >= ' + baseline + ' passed)');
   process.exit(1);
-" || fail 7 "vitest did not meet baseline"
+" || fail 7 "vitest did not meet baseline (vitest exit code $VITEST_RC)"
 pass 7 "vitest: all pass, >= $BASELINE_TESTS passed"
 
 # AC-E8: changes confined to release-only surface

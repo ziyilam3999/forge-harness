@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.8](https://github.com/ziyilam3999/forge-harness/compare/v0.33.7...v0.33.8) (2026-04-21)
+
+### CI + Release Polish (7 issues — final v0.34.x sweep slice)
+
+- **#297** — Switched concurrency group on `.github/workflows/s8-kanban-dashboard-acceptance.yml` to the idiomatic `${{ github.workflow }}-${{ github.ref }}` form (self-scoping, copy-paste-safe).
+- **#298** — Dropped empty mapping from `workflow_dispatch: {}` → bare `workflow_dispatch:` (cosmetic, matches GitHub Actions examples).
+- **#364** — Fixed `scripts/pr-e-acceptance.sh` AC-E7: vitest crashes are now surfaced via explicit `VITEST_RC` capture + JSON file existence check + no `|| true` masking. Previous behavior produced a confusing "Cannot find module" when vitest crashed before writing the JSON report.
+- **#398** — Added inline buffer-policy comments to `scripts/v034-{1,2,3,4}-acceptance.sh` documenting the 2-test headroom pattern. `v034-5` already carried "headroom" wording from its own ship and needed no edit.
+
+### Closed as already shipped (3 issues)
+
+- **#287** — `.github/workflows/s8-kanban-dashboard-acceptance.yml:1` already uses title-case `name: S8 Kanban Dashboard Acceptance` (landed incidentally in an earlier sweep slice).
+- **#288** — Lines 34-37 already carry the `--ignore-scripts` rationale comment (landed incidentally).
+- **#289** — Lines 17-19 already define the concurrency block (landed incidentally).
+
+### Miscellaneous
+
+- New `scripts/v034-6-acceptance.sh` acceptance wrapper runs AC-1..AC-9 internally (AC-10..AC-12 are post-ship/post-merge/post-planner-close gates).
+- Invariants preserved: 800/800 vitest green (unchanged from v0.33.7), AC-8 verified `scripts/v034-0-acceptance.sh` untouched, 12-AC plan file rides the executor's branch.
+- 3 enhancement issues filed by the stateless reviewer: #400 (AC-8 silent-pass when master ref unavailable), #401 (PR body wording inconsistency v034-{1,2,3,4} vs plan's v034-{1..5}), #402 (pr-e-acceptance.sh doesn't cross-check VITEST_RC with JSON completeness).
+- **Marks the end of the v0.34.x polish sweep** — 7 consecutive iter-1 PASS slices (v0.33.2..v0.33.8).
+
 ## [0.33.7](https://github.com/ziyilam3999/forge-harness/compare/v0.33.6...v0.33.7) (2026-04-21)
 
 ### Bug Fixes

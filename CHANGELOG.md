@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.9](https://github.com/ziyilam3999/forge-harness/compare/v0.33.8...v0.33.9) (2026-04-21)
+
+### Miscellaneous
+
+* **anthropic**: correct OAuth fallback comment on direct API call support — the prior note at `server/lib/anthropic.ts:69-73` claimed OAuth tokens only work via a Claude Code proxy and that direct API calls return 401, both contradicted by the adjacent `new Anthropic({ authToken })` call that succeeds for Max-plan users. Rewrote to accurately describe direct-SDK support with reference to the existing 5-minute cache eviction. Comment-only; no runtime behavior or tests changed. ([#403](https://github.com/ziyilam3999/forge-harness/pull/403), closes [#113](https://github.com/ziyilam3999/forge-harness/issues/113))
+
 ## [0.33.8](https://github.com/ziyilam3999/forge-harness/compare/v0.33.7...v0.33.8) (2026-04-21)
 
 ### CI + Release Polish (7 issues — final v0.34.x sweep slice)

@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.5](https://github.com/ziyilam3999/forge-harness/compare/v0.33.4...v0.33.5) (2026-04-21)
+
+### Bug Fixes
+
+- acceptance wrapper hygiene slice — 6 fixes bundled:
+  - **#338** — contiguous AC numbering in `corrector-crash-fix-acceptance.sh` (see also #367).
+  - **#340** — `typeof numFailedTests === "number"` type guard in `corrector-crash-fix-acceptance.sh` and `default-max-tokens-sweep-acceptance.sh` (defeats `undefined > 0` vacuous-pass).
+  - **#341** — relocate 23 `/tmp/ac*.log` references to project-relative `tmp/` across 3 wrappers (corrector, default-max, q1-cross-phase).
+  - **#343** — add `F57-cd-basename` rule to `AC_LINT_RULES` with unit-test coverage in `server/validation/ac-lint.test.ts`.
+  - **#344** — `server/lib/prompts/shared/ac-subprocess-rules.ts` is now fully ASCII (removed 13 em-dashes).
+  - **#345** — extract 5 cwd-policy prose tokens as `AC_CWD_POLICY_*` shared constants; `planner.test.ts` imports by name instead of re-spelling.
+
+### Miscellaneous
+
+- New `scripts/v034-3-acceptance.sh` wrapper runs AC-1..AC-11 + AC-13 end-to-end.
+- Pre-existing `fix:` commits on master since v0.33.4: CHANGELOG TBD-link repair (#361/#380), pr-e baseline parameterization (#363/#381), checkTimeBudget upper-bound tighten (#371/#382), #272-test label assertion (#373/#383).
+
 ## [0.33.4](https://github.com/ziyilam3999/forge-harness/compare/v0.33.3...v0.33.4) (2026-04-20)
 
 ### Bug Fixes

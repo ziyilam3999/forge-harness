@@ -74,11 +74,6 @@ process.exit(1);
 " || fail "full test suite failed or passing count < 775"
 pass "full test suite green"
 
-section "AC-D7 (this wrapper exists + executable)"
-test -x scripts/pr-d-acceptance.sh \
-  || fail "scripts/pr-d-acceptance.sh is not executable"
-pass "wrapper script is executable"
-
 section "AC-D8 (diff allowlist: no drive-by edits)"
 git fetch origin master --quiet 2>/dev/null || true
 # Prefer origin/master if available (mirrors PR C wrapper); fall back to

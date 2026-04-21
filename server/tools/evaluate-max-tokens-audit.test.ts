@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -33,15 +33,40 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const evaluateSourcePath = join(here, "evaluate.ts");
 
+/**
+ * Read `evaluate.ts` with a human-readable guardrail for the case where the
+ * audit target has been moved or deleted. Without this pre-check, the test
+ * throws a raw `readFileSync` ENOENT, which obscures the actionable message
+ * ("audit target missing — re-scope the audit") behind a stack trace.
+ * Resolves issue #359.
+ */
+function readAuditTarget(): string {
+  if (!existsSync(evaluateSourcePath)) {
+    throw new Error(
+      `audit target missing: ${evaluateSourcePath} does not exist. ` +
+        `If evaluate.ts was intentionally moved or renamed, update this ` +
+        `test's evaluateSourcePath accordingly and re-scope the audit ` +
+        `(see issue #324 for the decision trail).`,
+    );
+  }
+  return readFileSync(evaluateSourcePath, "utf8");
+}
+
 describe("evaluate.ts max_tokens audit (issue #324)", () => {
   it("contains zero maxTokens / max_tokens references", () => {
-    const source = readFileSync(evaluateSourcePath, "utf8");
-    // Count matches of either camelCase (TS/JS option key) or snake_case
-    // (Anthropic SDK raw field). Either form would opt the call site out of
-    // the v0.32.7 DEFAULT_MAX_TOKENS = 32000 sweep.
-    const pattern = /maxTokens|max_tokens/g;
+    const source = readAuditTarget();
+    // Match the Anthropic SDK option shape (`<name>:`) rather than a bare
+    // substring, so that prose mentions of maxTokens inside comments or
+    // JSDoc do not trip the audit. Either camelCase (TS/JS option key) or
+    // snake_case (SDK raw field) in option-shape position would opt the
+    // call site out of the v0.32.7 DEFAULT_MAX_TOKENS = 32000 sweep.
+    // Resolves issue #357.
+    const pattern = /\bmaxTokens\s*:|\bmax_tokens\s*:/g;
     const matches = source.match(pattern) ?? [];
-    expect(matches, `expected zero maxTokens references in evaluate.ts, found ${matches.length}`).toHaveLength(0);
+    expect(
+      matches,
+      `expected zero maxTokens: / max_tokens: option-shape references in evaluate.ts, found ${matches.length}`,
+    ).toHaveLength(0);
   });
 
   it("still contains the trackedCallClaude sites the audit was scoped around", () => {
@@ -50,7 +75,7 @@ describe("evaluate.ts max_tokens audit (issue #324)", () => {
     // calls out of this file entirely, the premise changes and we want the
     // test to visibly break so the audit can be re-scoped rather than
     // silently still-green on a now-empty file.
-    const source = readFileSync(evaluateSourcePath, "utf8");
+    const source = readAuditTarget();
     const callSites = source.match(/trackedCallClaude\(/g) ?? [];
     expect(callSites.length).toBeGreaterThanOrEqual(1);
   });

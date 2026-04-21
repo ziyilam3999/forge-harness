@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.6](https://github.com/ziyilam3999/forge-harness/compare/v0.33.5...v0.33.6) (2026-04-21)
+
+### Bug Fixes
+
+- anthropic/plan max-tokens follow-ups slice — 3 code fixes + 1 documented design choice, all ship-review enhancements from PR #346 (v0.33.0 PR B):
+  - **#347** — dropped redundant in-test `expect(mockCreate).not.toHaveBeenCalled()` at `server/lib/anthropic.test.ts:68`; the suite-scoped `afterEach` tripwire at line 50 is now the sole enforcer.
+  - **#348** — loud stderr warning when `FORGE_CORRECTOR_MAX_TOKENS` is invalid (non-numeric, zero, or negative). Matches the `getClient()`/`readOAuthToken()` loud-failure pattern; operator mistypes no longer silently fall back.
+  - **#349** — `isMaxTokensStop` default branch now returns a well-defined `false` (fail-safe) while preserving the `const _exhaustive: never = stopReason;` compile-time guard. Unknown SDK stop_reason variants no longer produce truthy returns that would trigger spurious `LLMOutputTruncatedError`.
+  - **#350** — kept `CORRECTOR_MAX_TOKENS` as module-load IIFE constant per the issue's own guidance ("fine for v0.33.0; flag only if runtime reconfig becomes a goal"); added JSDoc note documenting the module-load trade-off.
+
+### Miscellaneous
+
+- New `scripts/v034-4-acceptance.sh` acceptance wrapper runs all 12 checkable AC internally with per-AC exit-code discrimination.
+- Test count: 800 passed / 4 skipped (baseline 799 + 1 new fail-safe test for #349).
+- 4 enhancement issues filed by the stateless reviewer: #391 (tighter `.includes("0")` assertion), #392 (drop trivially-true defensive asserts), #393 (align test commits with their fix commits), #394 (fuse never-cast + fail-safe into single expression).
+
 ## [0.33.5](https://github.com/ziyilam3999/forge-harness/compare/v0.33.4...v0.33.5) (2026-04-21)
 
 ### Bug Fixes

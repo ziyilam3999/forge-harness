@@ -15,6 +15,27 @@ let client: Anthropic | null = null;
 // Track the OAuth token's expiry so we can evict the cache before it goes stale.
 let clientExpiresAt: number | null = null;
 
+/** v0.35.1 AC-6 — credential-source provenance for the BUDGET widget marker. */
+export type CredentialSource = "api-key" | "oauth" | "unknown";
+
+/**
+ * Detect which credential source `getClient()` *would* use on the next call,
+ * without instantiating a client. Pure read of process.env and the
+ * credentials file. Returns:
+ *   - "api-key" when `ANTHROPIC_API_KEY` is set
+ *   - "oauth"   when the OAuth token file is present and non-expired
+ *   - "unknown" otherwise (no creds available)
+ *
+ * Used by the dashboard renderer to annotate the BUDGET widget with a
+ * "Max plan — $0 actual" marker when the running MCP server resolved via
+ * OAuth. The two paths mirror `getClient()` precedence exactly.
+ */
+export function getCredentialSource(): CredentialSource {
+  if (process.env.ANTHROPIC_API_KEY) return "api-key";
+  if (readOAuthToken() !== null) return "oauth";
+  return "unknown";
+}
+
 /**
  * Read the Claude OAuth access token from ~/.claude/.credentials.json.
  * Returns null if the file doesn't exist, is invalid, or the token is expired.

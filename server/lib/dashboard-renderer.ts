@@ -208,6 +208,23 @@ export interface DashboardRenderInput {
    * `DashboardRenderInput` literals) don't need to thread a new field.
    */
   declaration?: StoryDeclaration | null;
+  /**
+   * v0.35.1 AC-3 — idle-free totals aggregated across `.forge/runs/` records
+   * (same semantics as `forge_status.totals`). When provided, the TIME widget
+   * renders `totals.elapsedMs` (sum of `metrics.durationMs`) instead of the
+   * brief's wall-clock `timeBudget.elapsedMs`. The two differ meaningfully:
+   * `timeBudget.elapsedMs` measures wall-clock since plan start (inflated by
+   * idle time); `totals.elapsedMs` measures only the time tools were
+   * actually running.
+   *
+   * Optional-with-default-undefined so existing renderer tests that build
+   * DashboardRenderInput literals continue to work. When absent, the TIME
+   * widget falls back to `brief.timeBudget.elapsedMs` (pre-v0.35.1 behavior).
+   */
+  totals?: {
+    elapsedMs: number;
+    spentUsd?: number;
+  };
 }
 
 // ── Format helpers ────────────────────────────────────────────────────────
@@ -216,19 +233,61 @@ function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-function formatMinutes(ms: number): string {
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.floor((ms % 60_000) / 1_000);
-  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+/**
+ * v0.35.1 AC-4 — scalable elapsed formatter.
+ *
+ * Breakpoints:
+ *   - ≥ 24h   → `Dd Hh Mm Ss`   (e.g., `1d 17h 40m 00s`)
+ *   - ≥ 1h    → `Hh Mm Ss`      (e.g., `2h 15m 03s`)
+ *   - < 1h    → `Mm Ss`         (e.g., `5m 07s`)
+ *
+ * Negative / NaN input coerces to 0 so the dashboard never renders garbage.
+ * `Math.floor` throughout — no rounding, so `59.9s` renders as `59s`, not
+ * `60s` (which would roll over the minute counter incorrectly).
+ */
+export function formatElapsed(ms: number): string {
+  const safe = Number.isFinite(ms) && ms > 0 ? ms : 0;
+  const totalSeconds = Math.floor(safe / 1_000);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const ss = seconds.toString().padStart(2, "0");
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m ${ss}s`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${ss}s`;
+  }
+  return `${minutes}m ${ss}s`;
 }
 
+/**
+ * v0.35.1 AC-5 — format an ISO timestamp as `YYYY-MM-DD HH:MM:SS` (UTC).
+ *
+ * Pre-v0.35.1 this only rendered `HH:MM:SS`, which made cross-day rows in
+ * the activity feed look chronologically scrambled (all rows showed the
+ * same time-of-day band with no date distinction). The date prefix is
+ * emitted ahead of the time so the Regex AC (`/YYYY-MM-DD.*HH:MM:SS/`)
+ * can match within one feed row.
+ *
+ * UTC getters (`getUTCFullYear`, etc.) guarantee the rendered date matches
+ * the ISO input's date component regardless of the host timezone — avoids
+ * the edge case where a machine east/west of UTC would show a one-day-off
+ * label near midnight UTC. The Reviewer AC fixture uses a mid-afternoon
+ * UTC timestamp, but making this timezone-stable costs nothing and prevents
+ * flakiness on CI runners in any TZ.
+ */
 function formatTimeOfDay(iso: string): string {
   try {
     const d = new Date(iso);
-    const hh = d.getHours().toString().padStart(2, "0");
-    const mm = d.getMinutes().toString().padStart(2, "0");
-    const ss = d.getSeconds().toString().padStart(2, "0");
-    return `${hh}:${mm}:${ss}`;
+    const yyyy = d.getUTCFullYear().toString();
+    const mo = (d.getUTCMonth() + 1).toString().padStart(2, "0");
+    const dd = d.getUTCDate().toString().padStart(2, "0");
+    const hh = d.getUTCHours().toString().padStart(2, "0");
+    const mm = d.getUTCMinutes().toString().padStart(2, "0");
+    const ss = d.getUTCSeconds().toString().padStart(2, "0");
+    return `${yyyy}-${mo}-${dd} ${hh}:${mm}:${ss}`;
   } catch {
     return iso;
   }
@@ -257,6 +316,7 @@ function renderDeclarationPill(declaration: StoryDeclaration | null | undefined)
 function renderHeader(
   brief: PhaseTransitionBrief | null,
   declaration: StoryDeclaration | null | undefined,
+  totalsElapsedMs: number | null,
 ): string {
   const declarationHtml = renderDeclarationPill(declaration);
   if (!brief) {
@@ -275,14 +335,36 @@ function renderHeader(
   }
 
   const budget = brief.budget;
-  const budgetHtml = budget.budgetUsd === null
-    ? `<div class="stat-card"><div class="stat-label">Budget</div><div class="stat-value">${formatUsd(budget.usedUsd)}</div><div class="stat-sub">no limit</div></div>`
-    : `<div class="stat-card"><div class="stat-label">Budget</div><div class="stat-value">${formatUsd(budget.usedUsd)} / ${formatUsd(budget.budgetUsd)}</div><div class="stat-bar"><div class="stat-bar-fill ${budget.warningLevel}" style="width: ${Math.min(100, (budget.usedUsd / Math.max(budget.budgetUsd, 0.0001)) * 100).toFixed(1)}%"></div></div></div>`;
+  // v0.35.1 AC-6 — when BudgetInfo carries `isOAuth: true`, the BUDGET
+  // widget annotates the spent value with a "Max plan — $0 actual" marker
+  // so operators reading the dashboard don't think the Max-plan OAuth user
+  // is being billed per-token. When `isOAuth` is false/missing, render as
+  // before. Mutually exclusive with the non-null-budget branch below — the
+  // OAuth marker only fires when no external budget cap is configured (Max
+  // plan cost accounting is opaque, so there's no meaningful "X / Y" ratio).
+  const isOAuth = budget.isOAuth === true;
+  let budgetHtml: string;
+  if (budget.budgetUsd === null) {
+    if (isOAuth) {
+      budgetHtml = `<div class="stat-card"><div class="stat-label">Budget</div><div class="stat-value">${formatUsd(budget.usedUsd)}</div><div class="stat-sub oauth-marker">Max plan — $0 actual (API-equivalent)</div></div>`;
+    } else {
+      budgetHtml = `<div class="stat-card"><div class="stat-label">Budget</div><div class="stat-value">${formatUsd(budget.usedUsd)}</div><div class="stat-sub">no limit</div></div>`;
+    }
+  } else {
+    budgetHtml = `<div class="stat-card"><div class="stat-label">Budget</div><div class="stat-value">${formatUsd(budget.usedUsd)} / ${formatUsd(budget.budgetUsd)}</div><div class="stat-bar"><div class="stat-bar-fill ${budget.warningLevel}" style="width: ${Math.min(100, (budget.usedUsd / Math.max(budget.budgetUsd, 0.0001)) * 100).toFixed(1)}%"></div></div></div>`;
+  }
 
+  // v0.35.1 AC-3 — prefer idle-free `totals.elapsedMs` over wall-clock
+  // `timeBudget.elapsedMs`. `totals.elapsedMs` is the sum of tool
+  // `metrics.durationMs` across RunRecords (same value forge_status returns
+  // in `.totals.elapsedMs`). Only fall back to wall-clock when totals is
+  // not threaded through (e.g., renderer tests that pre-date this change).
   const timeBudget = brief.timeBudget;
+  const effectiveElapsedMs =
+    totalsElapsedMs !== null ? totalsElapsedMs : timeBudget.elapsedMs;
   const timeHtml = timeBudget.maxTimeMs === null
-    ? `<div class="stat-card"><div class="stat-label">Time</div><div class="stat-value">${formatMinutes(timeBudget.elapsedMs)}</div><div class="stat-sub">no limit</div></div>`
-    : `<div class="stat-card"><div class="stat-label">Time</div><div class="stat-value">${formatMinutes(timeBudget.elapsedMs)} / ${formatMinutes(timeBudget.maxTimeMs)}</div><div class="stat-bar"><div class="stat-bar-fill ${timeBudget.warningLevel}" style="width: ${Math.min(100, (timeBudget.elapsedMs / Math.max(timeBudget.maxTimeMs, 1)) * 100).toFixed(1)}%"></div></div></div>`;
+    ? `<div class="stat-card"><div class="stat-label">Time</div><div class="stat-value">${formatElapsed(effectiveElapsedMs)}</div><div class="stat-sub">no limit</div></div>`
+    : `<div class="stat-card"><div class="stat-label">Time</div><div class="stat-value">${formatElapsed(effectiveElapsedMs)} / ${formatElapsed(timeBudget.maxTimeMs)}</div><div class="stat-bar"><div class="stat-bar-fill ${timeBudget.warningLevel}" style="width: ${Math.min(100, (effectiveElapsedMs / Math.max(timeBudget.maxTimeMs, 1)) * 100).toFixed(1)}%"></div></div></div>`;
 
   const progressPct = brief.totalCount > 0
     ? Math.round((brief.completedCount / brief.totalCount) * 100)
@@ -529,6 +611,12 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
   // untouched. When absent, `renderDeclarationPill` emits "" — no false
   // positives in the rendered HTML (Goal invariant 2).
   const declaration = input.declaration ?? null;
+  // v0.35.1 AC-3 — idle-free elapsed; when absent, the TIME widget falls
+  // back to brief.timeBudget.elapsedMs (pre-v0.35.1 behavior).
+  const totalsElapsedMs =
+    input.totals && typeof input.totals.elapsedMs === "number"
+      ? input.totals.elapsedMs
+      : null;
 
   const lastUpdate = activity?.lastUpdate ?? renderedAt;
   const activityStarted = activity?.startedAt ?? renderedAt;
@@ -555,7 +643,7 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
 </head>
 <body>
 <div class="dashboard">
-${renderHeader(brief, declaration)}
+${renderHeader(brief, declaration, totalsElapsedMs)}
 ${renderReplanningNotes(brief)}
 ${renderBoard(brief, activity)}
 ${renderFeed(auditEntries)}
@@ -624,6 +712,91 @@ async function readActivity(projectPath: string): Promise<Activity | null> {
     }
     return null;
   }
+}
+
+/**
+ * v0.35.1 AC-7 — synthesize activity-feed entries from `.forge/runs/*.json`
+ * RunRecords so the dashboard surfaces `forge_evaluate` / `forge_coordinate`
+ * invocations alongside `forge_plan` / `forge_generate` audit entries.
+ *
+ * RunRecords don't carry `stage` / `agentRole` / `decision` / `reasoning`
+ * columns — we synthesize reasonable defaults:
+ *   - `stage`    ← record.outcome  ("success" / "validation-failure" / …)
+ *   - `agentRole`← record.tool     (same as the tool column, for the role
+ *                                   sidebar in the activity feed)
+ *   - `decision` ← record.evalVerdict ?? record.outcome (a one-word marker
+ *                                   so the "decision:" column still reads)
+ *   - `reasoning`← "" (no free-form field on RunRecord)
+ *
+ * Also synthesizes one entry per active declaration (from the in-memory
+ * declaration store) using the declaration's `declaredAt` timestamp, so
+ * `forge_declare_story` calls appear alongside the rest even though they
+ * don't write RunRecords. The declaration is a singleton — at most one
+ * entry ever comes from this source per render.
+ *
+ * `forge_status` is deliberately silent (read-only by design); polling spam
+ * would drown the feed. See plan Goal invariant 7.
+ */
+async function readRunsFeed(projectPath: string): Promise<AuditFeedEntry[]> {
+  const runsDir = join(projectPath, ".forge", "runs");
+  let files: string[];
+  try {
+    files = await readdir(runsDir);
+  } catch {
+    return [];
+  }
+  const out: AuditFeedEntry[] = [];
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    let content: string;
+    try {
+      content = await readFile(join(runsDir, file), "utf-8");
+    } catch {
+      continue;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(content) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const tool = typeof parsed.tool === "string" ? parsed.tool : "";
+    const timestamp =
+      typeof parsed.timestamp === "string" ? parsed.timestamp : "";
+    if (!tool || !timestamp) continue;
+    const outcome =
+      typeof parsed.outcome === "string" ? parsed.outcome : "";
+    const evalVerdict =
+      typeof parsed.evalVerdict === "string" ? parsed.evalVerdict : "";
+    out.push({
+      timestamp,
+      stage: outcome,
+      agentRole: tool,
+      decision: evalVerdict || outcome || "",
+      reasoning: "",
+      tool,
+    });
+  }
+  return out;
+}
+
+/**
+ * v0.35.1 AC-7 — synthesize an activity-feed entry for the in-memory
+ * declaration, if any. At most one entry ever comes from this source.
+ */
+function readDeclarationFeed(): AuditFeedEntry[] {
+  const decl = getDeclaration();
+  if (!decl) return [];
+  return [
+    {
+      timestamp: decl.declaredAt,
+      stage: "declared",
+      agentRole: "forge_declare_story",
+      decision: decl.storyId,
+      reasoning: decl.phaseId ? `phase=${decl.phaseId}` : "",
+      tool: "forge_declare_story",
+    },
+  ];
 }
 
 /**
@@ -880,6 +1053,33 @@ export async function maybeAutoOpenBrowser(
  *
  * The `io` parameter is a test seam only; production callers omit it.
  */
+/**
+ * v0.35.1 AC-7 — union feed entries from all three activity sources:
+ *   1. `.forge/audit/*.jsonl` (forge_plan + forge_generate write here)
+ *   2. `.forge/runs/*.json`   (forge_evaluate + forge_coordinate write here)
+ *   3. declaration store       (forge_declare_story lives in memory)
+ *
+ * Merge-sort by timestamp descending, clip to 20. `forge_status` is
+ * deliberately absent — it's read-only by design.
+ *
+ * Exported so tests can exercise the union directly against a fixture
+ * `.forge/` tree without re-rendering the whole dashboard.
+ */
+export async function readActivityFeed(
+  projectPath: string,
+): Promise<AuditFeedEntry[]> {
+  const [audit, runs] = await Promise.all([
+    readAuditFeed(projectPath),
+    readRunsFeed(projectPath),
+  ]);
+  const decl = readDeclarationFeed();
+  const merged = [...audit, ...runs, ...decl];
+  merged.sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+  return merged.slice(0, 20);
+}
+
 export async function renderDashboard(
   projectPath: string,
   io: DashboardIo = DEFAULT_IO,
@@ -888,7 +1088,7 @@ export async function renderDashboard(
     const [brief, activity, auditEntries] = await Promise.all([
       readCoordinateBrief(projectPath),
       readActivity(projectPath),
-      readAuditFeed(projectPath),
+      readActivityFeed(projectPath),
     ]);
     // Declaration is a synchronous in-memory read — deliberately NOT bundled
     // into the Promise.all above because there's no I/O to overlap. Reading
@@ -897,12 +1097,19 @@ export async function renderDashboard(
     // AFTER the renderer's last invocation without any additional coupling
     // between `forge_declare_story` and the dashboard write path.
     const declaration = getDeclaration();
+
+    // v0.35.1 AC-3 — compute idle-free totals.elapsedMs (sum of durationMs
+    // across `.forge/runs/` primary records), so the TIME widget reads
+    // execution time, not wall-clock. Same semantics as forge_status.totals.
+    const totals = await readTotalsFromRuns(projectPath);
+
     const html = renderDashboardHtml({
       brief,
       activity,
       auditEntries,
       renderedAt: new Date().toISOString(),
       declaration,
+      totals,
     });
     await writeDashboardHtml(projectPath, html, io);
     await maybeAutoOpenBrowser(projectPath);
@@ -912,4 +1119,46 @@ export async function renderDashboard(
       err instanceof Error ? err.message : String(err),
     );
   }
+}
+
+/**
+ * v0.35.1 AC-3 — sum `metrics.durationMs` across `.forge/runs/*.json`
+ * primary records. Same semantics as forge_status.totals.elapsedMs. Missing
+ * dir / unreadable files / corrupt JSON are silently skipped; the worst
+ * case is `elapsedMs: 0`, which the renderer treats as a fallback to the
+ * brief's wall-clock timeBudget.elapsedMs.
+ */
+async function readTotalsFromRuns(
+  projectPath: string,
+): Promise<{ elapsedMs: number; spentUsd: number }> {
+  const runsDir = join(projectPath, ".forge", "runs");
+  let files: string[];
+  try {
+    files = await readdir(runsDir);
+  } catch {
+    return { elapsedMs: 0, spentUsd: 0 };
+  }
+  let elapsedMs = 0;
+  let spentUsd = 0;
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    let content: string;
+    try {
+      content = await readFile(join(runsDir, file), "utf-8");
+    } catch {
+      continue;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(content) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const metrics = parsed.metrics;
+    if (!metrics || typeof metrics !== "object") continue;
+    const m = metrics as Record<string, unknown>;
+    if (typeof m.durationMs === "number") elapsedMs += m.durationMs;
+    if (typeof m.estimatedCostUsd === "number") spentUsd += m.estimatedCostUsd;
+  }
+  return { elapsedMs, spentUsd };
 }

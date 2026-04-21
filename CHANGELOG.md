@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.35.0] (2026-04-21)
+## [0.35.0](https://github.com/ziyilam3999/forge-harness/compare/v0.34.0...v0.35.0) (2026-04-21)
 
 ### Features
 

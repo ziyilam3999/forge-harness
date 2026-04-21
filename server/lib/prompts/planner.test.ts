@@ -12,6 +12,13 @@ import {
   DEFAULT_MAX_CONTEXT_CHARS,
   type ContextEntry,
 } from "./planner.js";
+import {
+  AC_CWD_POLICY_MARKER,
+  AC_CWD_POLICY_BASENAME_TOKEN,
+  AC_CWD_POLICY_WRONG_EXAMPLE,
+  AC_CWD_POLICY_RIGHT_EXAMPLE,
+  AC_CWD_POLICY_PROVENANCE,
+} from "./shared/ac-subprocess-rules.js";
 
 describe("truncateContext", () => {
   it("returns all entries when within budget", () => {
@@ -214,29 +221,29 @@ describe("AC cwd-policy — prevents doubled-cd defect (monday-bot 2026-04-20)",
     (mode) => {
       const prompt = buildPlannerPrompt(mode);
       expect(prompt).toContain("Working directory");
-      expect(prompt).toContain("cwd is ALREADY the project root");
+      expect(prompt).toContain(AC_CWD_POLICY_MARKER);
       expect(prompt).toContain("projectPath");
     },
   );
 
   it.each(modes)(
-    "buildPlannerPrompt(%s) forbids `cd <project-basename> && ...` prefix",
+    "buildPlannerPrompt(%s) forbids the doubled-cd-into-basename prefix",
     (mode) => {
       const prompt = buildPlannerPrompt(mode);
-      expect(prompt).toContain("cd <project-basename>");
-      expect(prompt).toContain("cd my-project && npx tsc");
-      expect(prompt).toContain("RIGHT: `npx tsc --noEmit`");
+      expect(prompt).toContain(AC_CWD_POLICY_BASENAME_TOKEN);
+      expect(prompt).toContain(AC_CWD_POLICY_WRONG_EXAMPLE);
+      expect(prompt).toContain(AC_CWD_POLICY_RIGHT_EXAMPLE);
     },
   );
 
   it("the forbidden example names monday-bot so future readers see the provenance", () => {
     const prompt = buildPlannerPrompt("full-project");
-    expect(prompt).toContain("monday-bot/monday-bot/");
+    expect(prompt).toContain(AC_CWD_POLICY_PROVENANCE);
   });
 
   it("buildPhasePlannerPrompt inherits the cwd-policy from the base prompt", () => {
     const prompt = buildPhasePlannerPrompt("feature");
-    expect(prompt).toContain("cwd is ALREADY the project root");
-    expect(prompt).toContain("cd <project-basename>");
+    expect(prompt).toContain(AC_CWD_POLICY_MARKER);
+    expect(prompt).toContain(AC_CWD_POLICY_BASENAME_TOKEN);
   });
 });

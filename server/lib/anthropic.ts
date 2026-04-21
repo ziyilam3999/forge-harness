@@ -157,7 +157,14 @@ function isMaxTokensStop(stopReason: Anthropic.StopReason | null): boolean {
       // Compile-time exhaustiveness guard — a new SDK variant will surface
       // here as a TS2322 "Type 'X' is not assignable to type 'never'".
       const _exhaustive: never = stopReason;
-      return _exhaustive;
+      // Runtime fail-safe (#349): if SDK/runtime skew slips an unknown
+      // variant past TS (e.g. production runs against a newer SDK than the
+      // one the build was typed against), treat it as NOT the max_tokens
+      // variant. Returning the raw value would have been truthy on any
+      // non-empty string and would have misfired callClaude's truncation
+      // path, throwing `LLMOutputTruncatedError` for benign stops.
+      void _exhaustive;
+      return false;
     }
   }
 }

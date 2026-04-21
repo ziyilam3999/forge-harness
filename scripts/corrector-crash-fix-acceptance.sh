@@ -52,25 +52,26 @@ grep -q '"corrector-failed"' server/lib/run-record.ts && AC3=0 || AC3=1
 check "AC-3" "run-record.ts outcome union includes 'corrector-failed'" "$AC3"
 
 # AC-4: Truncation unit test passes
-npx vitest run server/lib/anthropic.test.ts > /tmp/ac4.log 2>&1 && AC4=0 || AC4=1
+npx vitest run server/lib/anthropic.test.ts > tmp/ac4.log 2>&1 && AC4=0 || AC4=1
 check "AC-4" "anthropic.test.ts (truncation) passes" "$AC4"
 
 # AC-5: corrector-failed unit tests pass (the 4 new tests in the v0.32.6 block)
-npx vitest run server/tools/plan.test.ts -t "corrector-failed" > /tmp/ac5.log 2>&1 && AC5=0 || AC5=1
+npx vitest run server/tools/plan.test.ts -t "corrector-failed" > tmp/ac5.log 2>&1 && AC5=0 || AC5=1
 check "AC-5" "plan.test.ts corrector-failed outcome tests pass" "$AC5"
 
-# AC-6: regression-positive — corrector success still yields outcome:success
-npx vitest run server/tools/plan.test.ts -t "corrector succeeds" > /tmp/ac6.log 2>&1 && AC6=0 || AC6=1
-check "AC-6" "plan.test.ts regression-positive (corrector success → outcome:success) passes" "$AC6"
+# AC-6: regression-positive -- corrector success still yields outcome:success
+npx vitest run server/tools/plan.test.ts -t "corrector succeeds" > tmp/ac6.log 2>&1 && AC6=0 || AC6=1
+check "AC-6" "plan.test.ts regression-positive (corrector success -> outcome:success) passes" "$AC6"
 
-# AC-7: full vitest suite clean — no test FAILURES. We ignore the non-zero exit
+# AC-7: full vitest suite clean -- no test FAILURES. We ignore the non-zero exit
 # when it comes from the pre-existing dashboard-renderer.test.ts teardown-rpc
 # race (Vitest 4.x EnvironmentTeardownError) because that flake is orthogonal
 # to the corrector fix. The authoritative signal is `numFailedTests == 0` in
 # vitest's structured JSON output (not stdout text, which is brittle across
-# vitest upgrades).
-npx vitest run --reporter=json --outputFile=tmp/ac7.json > /tmp/ac7.log 2>&1 || true
-if [ -s tmp/ac7.json ] && node -e 'const d=JSON.parse(require("fs").readFileSync("tmp/ac7.json","utf-8")); process.exit(d.numFailedTests > 0 ? 1 : 0)'; then
+# vitest upgrades). A `typeof === "number"` guard prevents schema drift from
+# vacuously passing (undefined > 0 is false in JS) -- #340.
+npx vitest run --reporter=json --outputFile=tmp/ac7.json > tmp/ac7.log 2>&1 || true
+if [ -s tmp/ac7.json ] && node -e 'const d=JSON.parse(require("fs").readFileSync("tmp/ac7.json","utf-8")); if (typeof d.numFailedTests !== "number") process.exit(2); process.exit(d.numFailedTests > 0 ? 1 : 0)'; then
   AC7=0
 else
   AC7=1
@@ -78,7 +79,7 @@ fi
 check "AC-7" "full vitest suite passes (no test failures; teardown-rpc flake ignored)" "$AC7"
 
 # AC-8: TypeScript build clean
-npm run build > /tmp/ac8.log 2>&1 && AC8=0 || AC8=1
+npm run build > tmp/ac8.log 2>&1 && AC8=0 || AC8=1
 check "AC-8" "npm run build compiles cleanly" "$AC8"
 
 # AC-9: wrapper script is executable
@@ -100,7 +101,7 @@ if [ "$FAIL" -gt 0 ]; then
     echo "  - $f"
   done
   echo
-  echo "Inspect logs under /tmp/ac*.log for failing ACs."
+  echo "Inspect logs under tmp/ac*.log for failing ACs."
   exit 1
 fi
 

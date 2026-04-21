@@ -14,6 +14,10 @@
 set -u
 export MSYS_NO_PATHCONV=1
 
+# Log files go to project-relative tmp/ so paths resolve identically under MSYS
+# bash and node.exe on Windows (#341). tmp/ is gitignored.
+mkdir -p tmp
+
 DECISION_FILE=".ai-workspace/audits/2026-04-15-c1-bootstrap-exemption-decision.md"
 PLAN_FILE=".ai-workspace/plans/2026-04-15-q1-cross-phase-grep-audit.md"
 
@@ -59,38 +63,38 @@ ok "skipped per ordering constraint (AC-3 XOR AC-4)"
 
 # ── AC-5 — ac-lint clean ─────────────────────────────────────────────────
 section "AC-5 — ac-lint test green"
-if npx vitest run server/validation/ac-lint.test.ts >/tmp/ac5.log 2>&1; then
+if npx vitest run server/validation/ac-lint.test.ts >tmp/ac5.log 2>&1; then
   ok "ac-lint.test.ts green"
 else
-  bad "ac-lint.test.ts failed (see /tmp/ac5.log)"
-  tail -15 /tmp/ac5.log
+  bad "ac-lint.test.ts failed (see tmp/ac5.log)"
+  tail -15 tmp/ac5.log
 fi
 
 # ── AC-6 — build green ───────────────────────────────────────────────────
 section "AC-6 — npm run build exits 0"
-if npm run build >/tmp/ac6.log 2>&1; then
+if npm run build >tmp/ac6.log 2>&1; then
   ok "build clean"
 else
-  bad "build failed (see /tmp/ac6.log)"
-  tail -15 /tmp/ac6.log
+  bad "build failed (see tmp/ac6.log)"
+  tail -15 tmp/ac6.log
 fi
 
 # ── AC-7 — lint green ────────────────────────────────────────────────────
 section "AC-7 — npm run lint exits 0"
-if npm run lint >/tmp/ac7.log 2>&1; then
+if npm run lint >tmp/ac7.log 2>&1; then
   ok "lint clean"
 else
-  bad "lint failed (see /tmp/ac7.log)"
-  tail -15 /tmp/ac7.log
+  bad "lint failed (see tmp/ac7.log)"
+  tail -15 tmp/ac7.log
 fi
 
 # ── AC-8 — npm test green ────────────────────────────────────────────────
 section "AC-8 — npm test exits 0"
-if npm test >/tmp/ac8.log 2>&1; then
+if npm test >tmp/ac8.log 2>&1; then
   ok "test suite clean"
 else
-  bad "test suite failed (see /tmp/ac8.log)"
-  tail -20 /tmp/ac8.log
+  bad "test suite failed (see tmp/ac8.log)"
+  tail -20 tmp/ac8.log
 fi
 
 # ── AC-9 — diff scope ────────────────────────────────────────────────────

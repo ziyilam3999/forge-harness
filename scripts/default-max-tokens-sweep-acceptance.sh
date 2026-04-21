@@ -45,18 +45,20 @@ check "AC-1" "DEFAULT_MAX_TOKENS literal is 32000 in anthropic.ts" "$AC1"
 check "AC-2" "no stale DEFAULT_MAX_TOKENS = 8192 literal" "$AC2"
 
 # AC-3: default-passed-through unit test passes
-npx vitest run server/lib/anthropic.test.ts -t "max_tokens=32000 to the SDK when caller does not pass maxTokens" > /tmp/ac3.log 2>&1 && AC3=0 || AC3=1
+npx vitest run server/lib/anthropic.test.ts -t "max_tokens=32000 to the SDK when caller does not pass maxTokens" > tmp/ac3.log 2>&1 && AC3=0 || AC3=1
 check "AC-3" "default-maxTokens-passed-through unit test passes" "$AC3"
 
 # AC-4: explicit override still wins
-npx vitest run server/lib/anthropic.test.ts -t "explicit maxTokens override still wins" > /tmp/ac4.log 2>&1 && AC4=0 || AC4=1
+npx vitest run server/lib/anthropic.test.ts -t "explicit maxTokens override still wins" > tmp/ac4.log 2>&1 && AC4=0 || AC4=1
 check "AC-4" "explicit maxTokens override still wins (regression positive)" "$AC4"
 
-# AC-5: full suite clean — no test FAILURES (ignore vitest teardown-rpc flake).
+# AC-5: full suite clean -- no test FAILURES (ignore vitest teardown-rpc flake).
 # Use vitest's structured JSON reporter so we parse numFailedTests rather than
-# stdout text, which is brittle across vitest upgrades.
-npx vitest run --reporter=json --outputFile=tmp/ac5.json > /tmp/ac5.log 2>&1 || true
-if [ -s tmp/ac5.json ] && node -e 'const d=JSON.parse(require("fs").readFileSync("tmp/ac5.json","utf-8")); process.exit(d.numFailedTests > 0 ? 1 : 0)'; then
+# stdout text, which is brittle across vitest upgrades. A `typeof === "number"`
+# guard prevents schema drift from vacuously passing (undefined > 0 is false in
+# JS) -- #340.
+npx vitest run --reporter=json --outputFile=tmp/ac5.json > tmp/ac5.log 2>&1 || true
+if [ -s tmp/ac5.json ] && node -e 'const d=JSON.parse(require("fs").readFileSync("tmp/ac5.json","utf-8")); if (typeof d.numFailedTests !== "number") process.exit(2); process.exit(d.numFailedTests > 0 ? 1 : 0)'; then
   AC5=0
 else
   AC5=1
@@ -64,7 +66,7 @@ fi
 check "AC-5" "full vitest suite passes (no test failures)" "$AC5"
 
 # AC-6: TypeScript build clean
-npm run build > /tmp/ac6.log 2>&1 && AC6=0 || AC6=1
+npm run build > tmp/ac6.log 2>&1 && AC6=0 || AC6=1
 check "AC-6" "npm run build compiles cleanly" "$AC6"
 
 # AC-7: setup.sh unchanged vs master
@@ -82,7 +84,7 @@ if [ "$FAIL" -gt 0 ]; then
     echo "  - $f"
   done
   echo
-  echo "Inspect logs under /tmp/ac*.log for failing ACs."
+  echo "Inspect logs under tmp/ac*.log for failing ACs."
   exit 1
 fi
 

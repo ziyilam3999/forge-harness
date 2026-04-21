@@ -120,6 +120,10 @@ check "AC-7" "CORRECTOR_MAX_TOKENS JSDoc documents module-load design (got=$COUN
 # ---------------------------------------------------------------------------
 # AC-8: full vitest suite clean -- numFailedTests === 0 and
 # numPassedTests >= 800 (master baseline 799 + at least 1 new test for #349).
+# The threshold is set a couple of tests below the real shipped count as an
+# intentional buffer for parallel-churn — concurrent slices landing between
+# plan-time and executor-time can add/remove one or two tests, and we don't
+# want that incidental noise to fail this historical release-pinned wrapper.
 # ---------------------------------------------------------------------------
 rm -f tmp/v034-4-full.json
 npx vitest run --reporter=json --outputFile=tmp/v034-4-full.json > tmp/v034-4-full.log 2>&1 || true

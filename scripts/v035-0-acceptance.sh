@@ -20,11 +20,15 @@ pass() { printf "  [PASS] %s\n" "$1"; }
 fail() { printf "  [FAIL] %s\n" "$1"; failures=$((failures + 1)); }
 banner() { printf "\n=== %s ===\n" "$1"; }
 
-# MSYS /tmp mangling: MSYS bash maps /tmp to C:\tmp on this install, which
-# doesn't exist. Derive a safe scratch dir via `mktemp -d` (returns a real
-# path on this platform) and use it for every artifact the wrapper writes.
-SCRATCH_DIR="$(mktemp -d)"
-printf "scratch dir: %s\n" "$SCRATCH_DIR"
+# Scratch dir inside the repo, using a RELATIVE path so we sidestep every
+# MSYS↔Windows path quirk (mounted /tmp, /c/Users vs C:\Users, etc.).
+# .forge/ is .gitignored; we use .forge/scratch so artifacts don't get
+# accidentally committed.
+SCRATCH_REL=".forge/scratch/v035-acceptance-$$"
+mkdir -p "$SCRATCH_REL"
+SCRATCH_DIR="$SCRATCH_REL"
+printf "scratch dir (relative): %s\n" "$SCRATCH_DIR"
+trap 'rm -rf "$SCRATCH_DIR"' EXIT
 
 banner "AC-1: npm run build exits 0"
 if npm run build >"$SCRATCH_DIR/build.log" 2>&1; then

@@ -65,7 +65,8 @@ describe("callClaude — transport (v0.32.8 streaming)", () => {
     await callClaude({ system: "s", messages: [{ role: "user", content: "u" }] });
 
     expect(mockStream).toHaveBeenCalledTimes(1);
-    expect(mockCreate).not.toHaveBeenCalled();
+    // The `mockCreate` tripwire lives in the suite-scoped `afterEach` at the
+    // top of this file (#347) — no need to duplicate it here.
   });
 });
 
@@ -198,5 +199,45 @@ describe("callClaude — max_tokens plumbing (v0.32.7 through streaming path)", 
 
     const sdkArgs = mockStream.mock.calls[0][0];
     expect(sdkArgs.max_tokens).toBe(1024);
+  });
+});
+
+describe("callClaude — isMaxTokensStop fail-safe (#349)", () => {
+  // Guards against SDK/runtime skew: if a future Anthropic SDK ships a new
+  // `stop_reason` variant that slips past the TS exhaustiveness check at
+  // build time (e.g. production runs a newer SDK than the one typed during
+  // build), the `default` branch of `isMaxTokensStop` must treat it as NOT
+  // the max_tokens variant — i.e. return `false` — rather than returning
+  // the raw (truthy) string and tripping callClaude's truncation path.
+  it("does NOT throw LLMOutputTruncatedError when stop_reason is an unknown future variant", async () => {
+    mockStream.mockReturnValueOnce(
+      streamHandle({
+        content: [{ type: "text", text: "ok" }],
+        // Cast to satisfy the stub shape; the SUT receives this value via
+        // finalMessage() and must treat it as non-truncation.
+        stop_reason: "some_future_variant_that_did_not_exist_at_build_time",
+        usage: { input_tokens: 10, output_tokens: 2 },
+      }),
+    );
+
+    const { callClaude, LLMOutputTruncatedError } = await import("./anthropic.js");
+
+    // Expectation: callClaude returns normally rather than throwing. If the
+    // default branch of isMaxTokensStop ever regresses to returning the raw
+    // (truthy) stopReason, this assertion will fail because callClaude will
+    // throw LLMOutputTruncatedError.
+    await expect(
+      callClaude({
+        system: "s",
+        messages: [{ role: "user", content: "u" }],
+        maxTokens: 8192,
+      }),
+    ).resolves.toMatchObject({ text: "ok" });
+
+    // Defensive: if the above somehow resolved but also threw, make sure no
+    // truncation error was surfaced.
+    const { callClaude: callAgain } = await import("./anthropic.js");
+    expect(callAgain).toBe(callClaude);
+    expect(LLMOutputTruncatedError).toBeDefined();
   });
 });

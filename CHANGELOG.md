@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.0](https://github.com/ziyilam3999/forge-harness/compare/v0.33.9...v0.34.0) (2026-04-21)
+
+### Features
+
+- **New MCP tools — `forge_status` + `forge_declare_story`** ([#404](https://github.com/ziyilam3999/forge-harness/pull/404)). Ships two new primitives in one minor bump, resolving four scenarios monday-bot reported from US-01/US-02/US-03 iteration:
+  - **`forge_status`** — read-only, side-effect-free status query. Unions `.forge/runs/*.json` disk records with live process-scoped declarations. Output kinds: `snapshot` / `differential` / `empty` / `corrupted`. Partial data on corruption rather than total-fail. Scope narrowing by `{planPath, storyId, phaseId}`. Safe to call in tight polling loops.
+  - **`forge_declare_story`** — agent-owned declaration primitive. An agent calls `forge_declare_story({ storyId, phaseId })` to say "I am implementing US-XX from now until I say otherwise." Writes to a module-level store on the MCP server process; does NOT persist to disk or across process restarts (by design — avoids stale state from crashed sessions).
+- MCP surface now exposes 8 tools (up from 6); smoke test asserts the expanded list. Purely additive — no existing tool's input/output contract changes.
+
+### Scenarios closed
+
+- **A** — 55ms init-window where dashboard had no active-story signal (now populated via `activeRun.storyId` after `forge_declare_story`).
+- **B** — liveness check on in-flight `forge_generate` during `/ship` retries (now observable via `activeRun.elapsedMs`).
+- **C** — cheap `{storyId, phaseId} → last verdict` lookup (now one `forge_status({ scope })` call instead of 3 manual scripting steps).
+- **D** — post-`/compact` state recovery (now one `forge_status({})` call instead of cross-referencing 4 sources).
+
+### Miscellaneous
+
+- New `scripts/v035-0-acceptance.sh` acceptance wrapper runs all 11 AC sequentially; exit 0 iff all pass.
+- Test count +23 (804 → 827); zero new failures; integration tests cover AC-5/6/7/8a/8b/11 behaviors.
+- 6 enhancement issues filed by the stateless reviewer for v0.34.x follow-up: [#405](https://github.com/ziyilam3999/forge-harness/issues/405) (wrapper log-path), [#406](https://github.com/ziyilam3999/forge-harness/issues/406) (state/lastVerdict divergence), [#407](https://github.com/ziyilam3999/forge-harness/issues/407) (scope filters unenforced), [#408](https://github.com/ziyilam3999/forge-harness/issues/408) (double-walk performance), [#409](https://github.com/ziyilam3999/forge-harness/issues/409) (multi-project singleton), [#410](https://github.com/ziyilam3999/forge-harness/issues/410) (scratch dir .gitignore).
+- Provenance: monday-bot's evidence-backed proposal delivered in thread `forge-status-proposal-2026-04-21`. User picked Option 2 (bundle both tools in one minor release) over Option 1 (ship `forge_status` alone, defer declaration) or Option 3 (add storyId field to existing tools).
+
 ## [0.33.9](https://github.com/ziyilam3999/forge-harness/compare/v0.33.8...v0.33.9) (2026-04-21)
 
 ### Miscellaneous

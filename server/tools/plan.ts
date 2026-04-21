@@ -318,14 +318,25 @@ async function runCritic(
  *
  * Runtime override: set `FORGE_CORRECTOR_MAX_TOKENS` to a positive integer to
  * raise (or lower) the ceiling without recompiling. Non-positive / unparseable
- * values fall back to the 32000 default. Exported so tests and external
- * callers can read the resolved value rather than re-parsing the env var.
+ * values fall back to the 32000 default (with a `console.error` warning so
+ * operator typos surface loudly rather than silently, #348). Exported so
+ * tests and external callers can read the resolved value rather than
+ * re-parsing the env var.
+ *
+ * Note (#350): the value is resolved at module load (IIFE reads process.env
+ * once). Runtime override requires a process restart — there is no runtime
+ * reconfig pathway. If a future caller needs live reconfiguration, refactor
+ * this constant into a getter; no churn is justified pre-emptively.
  */
 export const CORRECTOR_MAX_TOKENS: number = (() => {
   const raw = process.env.FORGE_CORRECTOR_MAX_TOKENS;
   if (raw === undefined || raw === "") return 32000;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    // Loud failure (#348) — matches the stderr-warning pattern used by
+    // getClient() and readOAuthToken(). Operator mistypes (`"abc"`, `"0"`,
+    // `"-500"`) no longer fall through silently to the 32000 default.
+    console.error(`forge_plan: invalid FORGE_CORRECTOR_MAX_TOKENS value '${raw}', using default 32000`);
     return 32000;
   }
   return parsed;

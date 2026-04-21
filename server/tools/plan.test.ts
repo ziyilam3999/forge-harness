@@ -1337,22 +1337,46 @@ describe("CORRECTOR_MAX_TOKENS env override (#317)", () => {
   });
 
   it("falls back to 32000 when FORGE_CORRECTOR_MAX_TOKENS is non-numeric", async () => {
-    process.env.FORGE_CORRECTOR_MAX_TOKENS = "not-a-number";
-    vi.resetModules();
-    const mod = await import("./plan.js");
-    expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
+    // #348: vi.spyOn console.error so we can assert the loud-fallback warning fires.
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      process.env.FORGE_CORRECTOR_MAX_TOKENS = "not-a-number";
+      vi.resetModules();
+      const mod = await import("./plan.js");
+      expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
+      // #348: fallback must warn loudly with the raw invalid value so
+      // operator typos surface rather than silently defaulting.
+      expect(errSpy).toHaveBeenCalled();
+      const msgs = errSpy.mock.calls.map((c) => c.join(" "));
+      expect(msgs.some((m) => m.includes("FORGE_CORRECTOR_MAX_TOKENS") && m.includes("not-a-number"))).toBe(true);
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it("falls back to 32000 when FORGE_CORRECTOR_MAX_TOKENS is zero or negative", async () => {
-    process.env.FORGE_CORRECTOR_MAX_TOKENS = "0";
-    vi.resetModules();
-    let mod = await import("./plan.js");
-    expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
+    // #348: vi.spyOn console.error so we can assert the loud-fallback warning fires.
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      process.env.FORGE_CORRECTOR_MAX_TOKENS = "0";
+      vi.resetModules();
+      let mod = await import("./plan.js");
+      expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
 
-    process.env.FORGE_CORRECTOR_MAX_TOKENS = "-500";
-    vi.resetModules();
-    mod = await import("./plan.js");
-    expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
+      process.env.FORGE_CORRECTOR_MAX_TOKENS = "-500";
+      vi.resetModules();
+      mod = await import("./plan.js");
+      expect(mod.CORRECTOR_MAX_TOKENS).toBe(32000);
+
+      // #348: fallback must warn loudly for BOTH non-positive values with
+      // the raw invalid value in the message.
+      expect(errSpy).toHaveBeenCalled();
+      const msgs = errSpy.mock.calls.map((c) => c.join(" "));
+      expect(msgs.some((m) => m.includes("FORGE_CORRECTOR_MAX_TOKENS") && m.includes("0"))).toBe(true);
+      expect(msgs.some((m) => m.includes("FORGE_CORRECTOR_MAX_TOKENS") && m.includes("-500"))).toBe(true);
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it("is exported (structural)", async () => {

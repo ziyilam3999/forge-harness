@@ -358,7 +358,11 @@ describe("renderDashboardHtml — audit feed count + ordering (AC-08)", () => {
     expect(matches.length).toBe(15);
 
     // Extract the timestamps of the first and last rendered feed entries.
-    const tsRe = /<span class="feed-time">(\d{2}:\d{2}:\d{2})<\/span>/g;
+    // v0.35.1 AC-5 widened `formatTimeOfDay` to emit `YYYY-MM-DD HH:MM:SS`
+    // (date prefix added so cross-day rows don't look chronologically
+    // scrambled). Regex updated to accept the new shape; the ordering
+    // assertion below is unchanged.
+    const tsRe = /<span class="feed-time">(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})<\/span>/g;
     const feedTimestamps: string[] = [];
     let m;
     while ((m = tsRe.exec(html)) !== null) feedTimestamps.push(m[1]);

@@ -38,6 +38,18 @@ export interface BudgetInfo {
   remainingUsd: number | null;
   incompleteData: boolean;
   warningLevel: BudgetWarningLevel;
+  /**
+   * v0.35.1 AC-6 — when the running MCP process resolved credentials via
+   * Claude OAuth (Max plan) rather than an `ANTHROPIC_API_KEY`, this flag
+   * is `true` so the dashboard's BUDGET widget can annotate the spent
+   * amount as "Max plan — $0 actual (API-equivalent)". When resolved via
+   * API key (or unknown), omit or set to `false`.
+   *
+   * Optional-additive: the pipe runs from `getCredentialSource()` →
+   * `RunContext.isOAuth` → the brief assembler. Existing callers that
+   * construct BudgetInfo literals (tests, shims) need no change.
+   */
+  isOAuth?: boolean;
 }
 
 export interface TimeBudgetInfo {

@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.1](https://github.com/ziyilam3999/forge-harness/compare/v0.35.0...v0.35.1) (2026-04-21)
+
+### Bug Fixes
+
+- **`activeRun` auto-clears on story ship.** After `forge_coordinate`'s `assessPhase` classifies a declared story as `done`, the in-memory declaration store is now cleared so the next `forge_status({})` returns `activeRun: null`. Previously, a PASS on a declared story left the `forge_declare_story` marker stuck, giving operators a misleading "still running" signal. Fix lives in `server/lib/coordinator.ts` at the end of `assessPhase`.
+- **`lastGitSha` populated for shipped stories.** `forge_evaluate` now captures `git rev-parse HEAD` at write time and stores it on the RunRecord as an optional `gitSha` field. `forge_status.rollUpStories` reads the most-recent PASS record's `gitSha` and surfaces it as `stories[i].lastGitSha`. Forward-only — historical records without the field remain valid and surface `null`.
+- **TIME widget reflects active-execution time.** Dashboard TIME stat now reads the idle-free `totals.elapsedMs` (sum of tool `metrics.durationMs` across `.forge/runs/`), not wall-clock `timeBudget.elapsedMs`. For monday-bot's v0.35.0 run, this rendered ~2495m wall-clock vs ~12m actual execution — a 200× mislead.
+- **TIME widget format scales past 24h.** New `formatElapsed` formatter emits `Dd Hh Mm Ss` when elapsed ≥ 24h, `Hh Mm Ss` ≥ 1h, `Mm Ss` otherwise. Replaces the previous `Mm Ss`-only form that produced values like `2500m 00s`.
+- **Activity list rows show dates.** `formatTimeOfDay` now emits `YYYY-MM-DD HH:MM:SS` (UTC) so cross-day feed entries are no longer chronologically scrambled. Previously all rows showed bare `HH:MM:SS`, indistinguishable across days.
+- **BUDGET widget signals OAuth vs API-key.** When `getClient()` resolved via Claude OAuth (Max plan), the brief's `budget.isOAuth` is set to `true` and the dashboard's BUDGET stat renders a "Max plan — $0 actual (API-equivalent)" marker. API-key users see the unchanged widget.
+- **Activity panel surfaces all non-silent tools.** New `readActivityFeed()` helper unions `.forge/audit/*.jsonl` (forge_plan + forge_generate) with `.forge/runs/*.json` (forge_evaluate + forge_coordinate) and the in-memory declaration store (forge_declare_story). `forge_status` stays silent by design.
+
+### Miscellaneous
+
+- New `scripts/v035-1-dash-acceptance.sh` wrapper runs AC-1..AC-8 sequentially + supports `--mode=allowlist-check` for AC-10. Exits 0 iff all pass.
+- Test count +13 (834 → 847); zero regressions.
+- Plan at `.ai-workspace/plans/2026-04-21-v0-35-1-dashboard-coordinator-polish.md`.
+
 ## [0.35.0](https://github.com/ziyilam3999/forge-harness/compare/v0.34.0...v0.35.0) (2026-04-21)
 
 ### Features

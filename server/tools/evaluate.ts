@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -199,6 +200,31 @@ function buildRunRecord(
   };
 }
 
+// ── git HEAD capture helper ───────────────────────────────
+
+/**
+ * Capture the 40-char hex SHA at HEAD of the given directory. Returns
+ * `undefined` if (a) `cwd` is not a git working copy, (b) the `git` binary
+ * is missing, or (c) the call fails for any other reason. Never throws — the
+ * caller treats absence the same as null.
+ *
+ * Added v0.35.1 for AC-2 (RunRecord.gitSha captured at PASS time, surfaced
+ * via `forge_status.stories[i].lastGitSha`).
+ */
+function captureGitSha(cwd: string): string | undefined {
+  try {
+    const out = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (/^[0-9a-f]{40}$/.test(out)) return out;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Story Mode Handler ────────────────────────────────────
 
 async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
@@ -232,11 +258,16 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
   // JSON output (NFR-C02 determinism, NFR-C10 golden-file byte-identity).
   if (input.projectPath) {
     const base = buildRunRecord(ctx, startTime, report.criteria.length);
+    // v0.35.1 AC-2: capture git HEAD sha so forge_status.lastGitSha is
+    // populated for shipped stories. Best-effort — missing repo / missing
+    // binary / non-PASS verdict all simply omit the field.
+    const gitSha = captureGitSha(input.projectPath);
     await writeRunRecord(input.projectPath, {
       ...base,
       storyId: input.storyId,
       evalVerdict: report.verdict,
       evalReport: canonicalizeEvalReport(report),
+      ...(gitSha ? { gitSha } : {}),
     });
   }
 

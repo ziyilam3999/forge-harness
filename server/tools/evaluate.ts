@@ -738,8 +738,14 @@ async function handleCriticEval(input: EvaluateInput): Promise<McpResponse> {
       0,
     );
     const base = buildRunRecord(ctx, startTime, findingsTotal);
+    const outcome = results.every((r) => r.error)
+      ? "failure"
+      : results.some((r) => r.error)
+        ? "partial"
+        : "success";
     await writeRunRecord(input.projectPath, {
       ...base,
+      outcome,
       criticReport: report,
     });
   }

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.2](https://github.com/ziyilam3999/forge-harness/compare/v0.35.1...v0.35.2) (2026-04-24)
+
+### Bug Fixes
+
+- **`handleCriticEval` RunRecord outcome derived from per-plan errors, not hardcoded.** `outcome` is now `"failure"` when every plan errored, `"partial"` when some errored, `"success"` when none. Previously always `"success"`, which misled downstream RunRecord analytics that cannot distinguish a clean sweep from a fully-failed one without re-parsing `criticReport.results[].error`. `RunRecord.outcome` union widened to include `"failure" | "partial"`; no existing consumer case-matches on the enum (only `typeof === "string"` checks in `run-reader`), so widening is non-breaking. (#189, #424)
+
 ## [0.35.1](https://github.com/ziyilam3999/forge-harness/compare/v0.35.0...v0.35.1) (2026-04-24)
 
 ### Bug Fixes

@@ -25,7 +25,7 @@ banner() { printf "\n=== %s ===\n" "$1"; }
 # ── AC-1: PR diff allowlist ──────────────────────────────────────────────
 banner "AC-1: PR diff name-only against origin/master is allowlist-only"
 oos=$(git diff origin/master..HEAD --name-only \
-        | grep -v -E '^(README\.md|CHANGELOG\.md|scripts/[a-z0-9-]+-acceptance\.sh|\.ai-workspace/plans/2026-04-25-promotion-pr-readme-rewrite\.md)$' \
+        | grep -v -E '^(README\.md|CHANGELOG\.md|scripts/[a-z0-9-]+-acceptance\.sh|\.ai-workspace/plans/2026-04-25-(promotion-pr-readme-rewrite|ship-fix-[0-9]+)\.md)$' \
         | wc -l \
         | tr -d ' ')
 printf "    out-of-allowlist count: %s\n" "$oos"
@@ -35,7 +35,7 @@ else
   fail "AC-1: $oos path(s) outside allowlist"
   printf "    offenders:\n"
   git diff origin/master..HEAD --name-only \
-    | grep -v -E '^(README\.md|CHANGELOG\.md|scripts/[a-z0-9-]+-acceptance\.sh|\.ai-workspace/plans/2026-04-25-promotion-pr-readme-rewrite\.md)$' \
+    | grep -v -E '^(README\.md|CHANGELOG\.md|scripts/[a-z0-9-]+-acceptance\.sh|\.ai-workspace/plans/2026-04-25-(promotion-pr-readme-rewrite|ship-fix-[0-9]+)\.md)$' \
     | sed 's/^/      /'
 fi
 

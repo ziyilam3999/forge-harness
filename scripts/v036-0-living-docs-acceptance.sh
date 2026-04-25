@@ -355,16 +355,140 @@ else
 fi
 
 # ════════════════════════════════════════════════════════════════════════
-# PHASE C — Architecture Decision Records (deferred to Phase C executor)
+# PHASE C — Architecture Decision Records (LIVE)
 # ════════════════════════════════════════════════════════════════════════
 
-banner "Phase C (deferred)"
-pass "AC-C1: deferred to Phase C"
-pass "AC-C2: deferred to Phase C"
-pass "AC-C3: deferred to Phase C"
-pass "AC-C4: deferred to Phase C"
-pass "AC-C5: deferred to Phase C"
-pass "AC-C6: deferred to Phase C"
+# Phase C canonicalises subagent-staged ADR stubs into `docs/decisions/`.
+# Like Phase B, we drive `processStory` directly with deterministic fixtures
+# rather than running a real `forge_evaluate` PASS — same code path, zero
+# LLM cost (the extractor is purely deterministic, no LLM).
+C_FIXTURE_DIR="$SCRATCH_DIR/adr-fixture"
+mkdir -p "$C_FIXTURE_DIR"
+
+banner "AC-C1+C4: ADR canonicalisation + idempotent re-run + no-decisions row dedup"
+node -e '
+const fs = require("fs");
+const path = require("path");
+const fixtureDir = process.argv[1];
+const stagingDir = path.join(fixtureDir, ".forge", "staging", "adr", "US-FIXTURE");
+fs.mkdirSync(stagingDir, { recursive: true });
+fs.writeFileSync(path.join(stagingDir, "stub-1.md"), [
+  "---",
+  "title: \"Adopt deterministic ADR canonicalisation\"",
+  "story: \"US-FIXTURE\"",
+  "context: \"Subagent stubs need canonical numbering and an INDEX rebuild.\"",
+  "decision: \"Number max+1, slug from title, regenerate INDEX from filesystem.\"",
+  "consequences: \"Idempotent across re-runs; no LLM cost.\"",
+  "alternatives: \"- Append-only INDEX (rejected: drift risk)\"",
+  "---",
+  "",
+  "stub body ignored",
+  "",
+].join("\n"));
+
+import("./dist/lib/adr-extractor.js").then((m) => {
+  // First call — creates ADR-0001 + INDEX.md row.
+  const r1 = m.processStory({ projectPath: fixtureDir, storyId: "US-FIXTURE", today: "2026-04-25" });
+  if (r1.newAdrPaths.length !== 1) { console.error("AC-C1: expected 1 new ADR, got", r1.newAdrPaths.length); process.exit(1); }
+
+  // Second call — staging is empty, story already has ADR — no-op.
+  const r2 = m.processStory({ projectPath: fixtureDir, storyId: "US-FIXTURE", today: "2026-04-25" });
+  if (r2.newAdrPaths.length !== 0) { console.error("AC-C4: re-run created duplicate ADR(s)"); process.exit(1); }
+
+  // No-decisions story — first call appends row.
+  const r3 = m.processStory({ projectPath: fixtureDir, storyId: "US-EMPTY", gitSha: "abcabcabcabcabcabcabcabcabcabcabcabcabca", today: "2026-04-25" });
+  if (!r3.appendedNoDecisionsRow) { console.error("AC-C1: expected no-decisions row appended"); process.exit(1); }
+
+  // No-decisions story re-run — must dedup (AC-C4 row dedup).
+  const r4 = m.processStory({ projectPath: fixtureDir, storyId: "US-EMPTY", gitSha: "abcabcabcabcabcabcabcabcabcabcabcabcabca", today: "2026-04-25" });
+  if (r4.appendedNoDecisionsRow) { console.error("AC-C4: no-decisions row appended a second time"); process.exit(1); }
+
+  const indexText = fs.readFileSync(r4.indexPath, "utf-8");
+  const noDecMatches = (indexText.match(/^\| US-EMPTY \| no new decisions \|/gm) || []).length;
+  if (noDecMatches !== 1) { console.error("AC-C4: no-decisions row count =", noDecMatches, "expected 1"); process.exit(1); }
+
+  console.log(JSON.stringify({ adrCount: r1.newAdrPaths.length, indexPath: r4.indexPath }));
+  process.exit(0);
+}).catch((err) => { console.error("AC-C1/C4 driver failure:", err); process.exit(2); });
+' "$C_FIXTURE_DIR" >"$SCRATCH_DIR/ac-c1.log" 2>&1
+C_C1_RC=$?
+if [ "$C_C1_RC" -eq 0 ]; then
+  pass "AC-C1: ADR + no-decisions row both produced"
+  pass "AC-C4: idempotent — no duplicate ADR or no-decisions row on re-run"
+else
+  fail "AC-C1/AC-C4 — see $SCRATCH_DIR/ac-c1.log"
+  cat "$SCRATCH_DIR/ac-c1.log"
+fi
+
+banner "AC-C2: every ADR file passes scripts/validate-adr.mjs"
+ADR_FILES=$(ls "$C_FIXTURE_DIR/docs/decisions/"ADR-*.md 2>/dev/null || true)
+if [ -z "$ADR_FILES" ]; then
+  fail "AC-C2: no ADR files generated (depends on AC-C1)"
+else
+  C2_FAILURES=0
+  for adr in $ADR_FILES; do
+    if ! node scripts/validate-adr.mjs "$adr" >>"$SCRATCH_DIR/ac-c2.log" 2>&1; then
+      C2_FAILURES=$((C2_FAILURES + 1))
+    fi
+  done
+  if [ "$C2_FAILURES" -eq 0 ]; then
+    pass "AC-C2: all ADR files validate against schema/adr.schema.json"
+  else
+    fail "AC-C2: $C2_FAILURES ADR file(s) failed validation — see $SCRATCH_DIR/ac-c2.log"
+    cat "$SCRATCH_DIR/ac-c2.log"
+  fi
+fi
+
+banner "AC-C3: INDEX.md ADR-row count matches docs/decisions/ADR-*.md count"
+ADR_FILE_COUNT=$(ls "$C_FIXTURE_DIR/docs/decisions/"ADR-*.md 2>/dev/null | wc -l | tr -d ' ')
+INDEX_PATH="$C_FIXTURE_DIR/docs/decisions/INDEX.md"
+if [ -f "$INDEX_PATH" ]; then
+  INDEX_ADR_ROWS=$(grep -c '^| ADR-' "$INDEX_PATH" || true)
+  if [ "$ADR_FILE_COUNT" -eq "$INDEX_ADR_ROWS" ]; then
+    pass "AC-C3: file count ($ADR_FILE_COUNT) == INDEX rows ($INDEX_ADR_ROWS)"
+  else
+    fail "AC-C3: file count ($ADR_FILE_COUNT) != INDEX rows ($INDEX_ADR_ROWS)"
+  fi
+else
+  fail "AC-C3: INDEX.md missing at $INDEX_PATH"
+fi
+
+banner "AC-C5: GenerationBrief carries adrCapture with the four canonical triggers"
+# AC-C5 verification grep: the tool surface must visibly carry the four
+# canonical trigger keywords + the field name `adrCapture`. Trigger phrases
+# are paraphrase-sensitive — the wrapper checks for the substring pattern
+# the master plan §AC-C5 mandates (line 78).
+GENERATE_TS="$ROOT/server/tools/generate.ts"
+if [ -f "$GENERATE_TS" ]; then
+  C5_FAILURES=0
+  for needle in \
+    "adrCapture" \
+    "new external dependency added to" \
+    "schema version bumped" \
+    "cross-module boundary introduced" \
+    "established pattern documented in"; do
+    if ! grep -q "$needle" "$GENERATE_TS"; then
+      printf "  [c5-miss] missing keyword: %s\n" "$needle"
+      C5_FAILURES=$((C5_FAILURES + 1))
+    fi
+  done
+  if [ "$C5_FAILURES" -eq 0 ]; then
+    pass "AC-C5: all four triggers + adrCapture field declared in $GENERATE_TS"
+  else
+    fail "AC-C5: $C5_FAILURES keyword(s) missing"
+  fi
+else
+  fail "AC-C5: server/tools/generate.ts not found"
+fi
+
+banner "AC-C6: vitest run server/lib/adr-extractor.test.ts (4 tests)"
+npx vitest run server/lib/adr-extractor.test.ts \
+  >"$SCRATCH_DIR/ac-c6.log" 2>&1
+if grep -q "Tests  4 passed" "$SCRATCH_DIR/ac-c6.log"; then
+  pass "AC-C6"
+else
+  fail "AC-C6 — '4 passed' expected; see $SCRATCH_DIR/ac-c6.log"
+fi
 
 # ════════════════════════════════════════════════════════════════════════
 # PHASE D — /project-index integration (deferred to Phase D executor)
@@ -409,16 +533,17 @@ else
   fail "AC-X2a: $NUM_FAILED test failures"
 fi
 
-# Phase A adds 3 tests (AC-A6). Baseline (master HEAD when this branch
-# diverged) is informational; we re-measure live. Per plan AC-X2:
-#   total >= master_baseline + 3 (Phase A only; B/C/D add 4+1 later).
-# Master baseline at branch divergence: 834 (from v0.35.1 wrapper note).
-# Phase A target: >= 837.
-PHASE_A_TARGET=837
-if [ "${NUM_TOTAL:-0}" -ge "$PHASE_A_TARGET" ]; then
-  pass "AC-X2b: count=$NUM_TOTAL >= $PHASE_A_TARGET (Phase A target)"
+# Cumulative test-count target as phases land:
+#   Phase A:  834 (master baseline) +  3 (AC-A6) = 837
+#   Phase B:  837 (Phase A target)  + 12 (PhB suite)= 850 (live: 850 at PhB ship)
+#   Phase C:  850 (PhB live)        +  4 (AC-C6) = 854 minimum
+# Per plan AC-X2: "delta-based, measure live". The conservative target is
+# baseline + Σ(per-phase deltas); we accept anything ≥ that floor.
+PHASE_C_TARGET=854
+if [ "${NUM_TOTAL:-0}" -ge "$PHASE_C_TARGET" ]; then
+  pass "AC-X2b: count=$NUM_TOTAL >= $PHASE_C_TARGET (Phase A+B+C floor)"
 else
-  fail "AC-X2b: count=$NUM_TOTAL < $PHASE_A_TARGET"
+  fail "AC-X2b: count=$NUM_TOTAL < $PHASE_C_TARGET"
 fi
 
 banner "AC-X3: touched-paths allowlist (sub-mode self-test on this branch's diff)"

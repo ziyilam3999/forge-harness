@@ -314,10 +314,17 @@ export async function assembleGenerateResult(
       phasePlanContent: input.phasePlanContent,
       contextFiles: input.contextFiles,
     });
-    return { ...base, action: "implement", brief };
+    // AC-A1 (v0.36.0): instruct caller to spawn a fresh subagent so main
+    // context stays bounded by the brief summary + verdict (G1, ≤ 2 KB).
+    return {
+      ...base,
+      action: "implement",
+      callerAction: "spawn-subagent-and-await",
+      brief,
+    };
   }
 
-  // PASS path
+  // PASS path — no work for the caller; do NOT emit callerAction (AC-A6 #3).
   if (input.evalReport.verdict === "PASS") {
     return { ...base, action: "pass" };
   }
@@ -342,10 +349,15 @@ export async function assembleGenerateResult(
     return { ...base, action: "escalate", escalation };
   }
 
-  // Fix path
+  // Fix path — same context-isolation rationale as implement (AC-A6 #2).
   const fixBrief = buildFixBrief(input.evalReport, plan, input.storyId);
 
-  const result: GenerateResult = { ...base, action: "fix", fixBrief };
+  const result: GenerateResult = {
+    ...base,
+    action: "fix",
+    callerAction: "spawn-subagent-and-await",
+    fixBrief,
+  };
 
   // Attach diff manifest on fix iterations (REQ-14)
   if (iteration > 0 && input.fileHashes && input.previousFileHashes) {

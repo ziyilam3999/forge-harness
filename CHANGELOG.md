@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.0](https://github.com/ziyilam3999/forge-harness/compare/v0.35.2...v0.36.0) (2026-04-25)
+
+### Features
+
+- **Phase A — subagent-first execution + `/forge-execute` skill.** `forge_generate` now emits `callerAction: "spawn-subagent-and-await"` at top-level when `action: "implement"`; the new `/forge-execute <storyId>` skill spawns a fresh `Agent` subagent for story implementation and captures only a ≤2 KB summary back to the calling session, so main-context byte growth is bounded regardless of story diff size. `forge_coordinate`'s `PhaseTransitionBrief` gains an optional `recommendedExecutionMode: "subagent" | "inline"` (set to `"subagent"` when a phase has ≥3 open stories). Backward-compatible: callers without the new skill fall through to legacy inline execution. (#434)
+- **Phase B — living technical specification.** Every `forge_evaluate` story-mode PASS now synchronously updates `docs/generated/TECHNICAL-SPEC.md` with that story's API contracts, data models, invariants, and test surface — schema-validated (`schema/technical-spec.schema.json`), idempotent across re-runs, agent-first (YAML front-matter + structured sections, no prose narrative). LLM cost recorded on `RunRecord.generatedDocs.genTokens` and aggregated into `metrics.estimatedCostUsd`; budget guard caps total at $0.80 per 13-story phase. New `scripts/validate-tech-spec.mjs` and `scripts/spec-contract-coverage.mjs` validators run from CI. (#435)
+- **Phase C — Architecture Decision Records.** Post-PASS, forge normalizes subagent-written ADR stubs from `.forge/staging/adr/<storyId>/*.md` into `docs/decisions/ADR-NNNN-*.md` files (Nygard-extended template) and rebuilds `docs/decisions/INDEX.md`. The `GenerationBrief` now carries an `adrCapture` section listing four canonical triggers (new external dependency, persisted-data/wire-format schema bump, new cross-module boundary in `server/`, override of a P-numbered proven pattern). Idempotent: re-running PASS on the same story does not duplicate ADR files or "no new decisions" rows. New `schema/adr.schema.json` + `scripts/validate-adr.mjs`. (#436)
+- **Phase D — `/project-index` API contracts.** Every `server/tools/*.ts` now exports `ToolInputSchemaShape` as a named symbol (single-source-of-truth contract convention; `server/tools/contract-convention.test.ts` enforces functional equivalence with the schema used at `server.registerTool`). The `/project-index` skill scaffolds `docs/generated/API-CONTRACTS.md` (one row per registered MCP tool) with an agent-first banner, detects drift between declared contracts and current Zod schemas, and writes `contract_drift_count` to `~/.claude/skills/project-index/runs/data.json`. The skill's PROJECT-INDEX.md output gains a "Understand MCP tool contracts" Quick Start row. (#437)
+
+### Miscellaneous
+
+- New `scripts/v036-0-living-docs-acceptance.sh` wrapper runs all 22 ACs (A1..A6 + B1..B6 + C1..C6 + D1..D6 + X1..X3) sequentially and supports `--mode=allowlist-check` for AC-X3. Exits 0 iff all pass.
+- Companion ship: `ai-brain` v0.23.0 (PR #542) lands the `/project-index` contract-harvester helper.
+- Plan at `.ai-workspace/plans/2026-04-24-forge-harness-agent-first-living-docs.md`.
+- Delivery shape: 4-phase integration-branch model on `feat/v036-living-docs`; cumulative master cut as a single minor release. First forge-harness arc to use this delivery model (enabled by ai-brain v0.21.6's integration-branch carve-out).
+
 ## [0.35.2](https://github.com/ziyilam3999/forge-harness/compare/v0.35.1...v0.35.2) (2026-04-24)
 
 ### Bug Fixes

@@ -12,11 +12,25 @@
  * production code in `handleStoryEval`.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+
+// v0.36.0 Phase B — spec-generator runs synchronously inside `handleStoryEval`
+// on PASS and would otherwise reach for the real Anthropic API in this
+// integration-style test (which has no mock for the SDK). Stub it with a
+// no-op deterministic synth so the gitSha capture path stays focused.
+vi.mock("../lib/spec-generator.js", () => ({
+  generateSpecForStory: vi.fn(async (input: { projectPath: string; storyId: string }) => ({
+    specPath: `${input.projectPath}/docs/generated/TECHNICAL-SPEC.md`,
+    genTimestamp: "2026-04-25T00:00:00.000Z",
+    genTokens: { inputTokens: 0, outputTokens: 0 },
+    contracts: [],
+    bodyChanged: true,
+  })),
+}));
 
 import { handleEvaluate } from "./evaluate.js";
 

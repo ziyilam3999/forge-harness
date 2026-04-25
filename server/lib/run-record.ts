@@ -56,6 +56,32 @@ export interface RunRecord {
    * lacking this field remain valid.
    */
   gitSha?: string;
+  /**
+   * v0.36.0 Phase B — auto-generated documentation artefacts produced as a
+   * side-effect of a story-mode PASS. Populated by `server/lib/spec-generator.ts`
+   * (and, in a later phase, the ADR extractor). Forward-only and additive-
+   * optional: pre-v0.36.0 records and any non-PASS records simply omit the
+   * field. Consumers should treat absence the same as `{}`.
+   *
+   * Fields:
+   *   - `specPath`     : absolute path to `docs/generated/TECHNICAL-SPEC.md`
+   *                      after the synchronous spec-generator wrote/updated it.
+   *   - `adrPaths`     : Phase C populates this; Phase B always emits `[]`.
+   *   - `genTimestamp` : ISO-8601 stamp at the moment the spec mutation landed.
+   *   - `genTokens`    : `{ inputTokens, outputTokens }` for the spec-gen LLM
+   *                      call alone (separate from the run-level `metrics`
+   *                      totals so per-doc cost can be audited independently).
+   *   - `contracts`    : MCP tool ids (e.g. `forge_evaluate`) that the
+   *                      spec-generator declared touched. Powers AC-B4's
+   *                      contract-coverage check (`spec-contract-coverage.mjs`).
+   */
+  generatedDocs?: {
+    specPath: string;
+    adrPaths: string[];
+    genTimestamp: string;
+    genTokens: { inputTokens: number; outputTokens: number };
+    contracts: string[];
+  };
   metrics: {
     inputTokens: number;
     outputTokens: number;

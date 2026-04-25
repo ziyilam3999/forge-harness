@@ -31,6 +31,9 @@ export const statusInputSchema = {
     .describe("Project root path (contains .forge/). Defaults to '.'"),
 };
 
+// v0.36.0 Phase D (AC-D5): canonical named export — see coordinate.ts for rationale.
+export const ToolInputSchemaShape = statusInputSchema;
+
 type StatusInput = {
   scope?: {
     planPath?: string;

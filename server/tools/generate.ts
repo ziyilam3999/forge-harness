@@ -1,9 +1,28 @@
 import { z } from "zod";
 import {
   assembleGenerateResultWithContext,
+  ADR_CAPTURE_TRIGGERS,
+  ADR_CAPTURE_INSTRUCTIONS,
   type AssembleInput,
 } from "../lib/generator.js";
 import type { EvalReport } from "../types/eval-report.js";
+
+// v0.36.0 Phase C (AC-C5): re-export the ADR capture contract so the tool
+// surface is the single import point for clients that want to inspect the
+// triggers without pulling in the assembler. Wrapper greps THIS file for
+// `adrCapture` + the four canonical trigger keywords (new external dependency,
+// schema version bumped, cross-module boundary, established pattern bypass).
+//
+// Triggers verbatim (do not paraphrase):
+//   1. new external dependency added to `package.json`
+//   2. any persisted-data or wire-format schema version bumped (`schema/*.json`,
+//      JSONL/JSON record shapes in `.forge/`, MCP-tool input/output Zod surface)
+//   3. new cross-module boundary introduced in `server/` (a module imported
+//      across a previously-isolated subtree)
+//   4. bypass or override of an existing established pattern documented in
+//      `hive-mind-persist/knowledge-base/01-proven-patterns.md` (P-numbered)
+export { ADR_CAPTURE_TRIGGERS, ADR_CAPTURE_INSTRUCTIONS };
+export type { AdrCaptureGuidance } from "../types/generate-result.js";
 
 // ── Input Schema ─────────────────────────────────
 
@@ -110,6 +129,9 @@ export const generateInputSchema = {
       "Array of absolute file paths whose contents are injected into the brief. Missing files are skipped with a warning.",
     ),
 };
+
+// v0.36.0 Phase D (AC-D5): canonical named export — see coordinate.ts for rationale.
+export const ToolInputSchemaShape = generateInputSchema;
 
 // ── Handler ──────────────────────────────────────
 

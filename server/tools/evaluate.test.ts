@@ -31,6 +31,30 @@ vi.mock("../lib/run-record.js", async () => {
   };
 });
 
+// v0.36.0 Phase B — mock spec-generator so PASS-mode tests don't try to
+// write to non-existent project paths (e.g. "/some/path"). The real
+// integration is exercised by `server/lib/spec-generator.test.ts`.
+vi.mock("../lib/spec-generator.js", () => ({
+  generateSpecForStory: vi.fn(async (input: { projectPath: string; storyId: string }) => ({
+    specPath: `${input.projectPath}/docs/generated/TECHNICAL-SPEC.md`,
+    genTimestamp: "2026-04-25T00:00:00.000Z",
+    genTokens: { inputTokens: 0, outputTokens: 0 },
+    contracts: [],
+    bodyChanged: true,
+  })),
+}));
+
+// v0.36.0 Phase C — mock adr-extractor for the same reason (no real disk
+// writes during evaluate.ts unit tests). Real integration tests live in
+// `server/lib/adr-extractor.test.ts`.
+vi.mock("../lib/adr-extractor.js", () => ({
+  processStory: vi.fn((input: { projectPath: string; storyId: string }) => ({
+    newAdrPaths: [],
+    appendedNoDecisionsRow: false,
+    indexPath: `${input.projectPath}/docs/decisions/INDEX.md`,
+  })),
+}));
+
 // Mock run-context — trackedCallClaude delegates to the mocked callClaude
 vi.mock("../lib/run-context.js", async () => {
   const { callClaude: mockedClaude } = await import("../lib/anthropic.js");
@@ -378,6 +402,86 @@ describe("handleStoryEval RunContext infra (PH01-US-00a)", () => {
       "AC-02",
       "AC-03",
     ]);
+  });
+});
+
+// ── v0.36.0 Phase B: spec-generator integration ───────────
+
+import { generateSpecForStory } from "../lib/spec-generator.js";
+const mockedGenerateSpec = vi.mocked(generateSpecForStory);
+
+describe("handleStoryEval — v0.36.0 Phase B spec-generator integration", () => {
+  it("invokes spec-generator on PASS and stamps generatedDocs into the RunRecord", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(mockedGenerateSpec).toHaveBeenCalledTimes(1);
+    const args = mockedGenerateSpec.mock.calls[0][0];
+    expect(args.projectPath).toBe("/some/path");
+    expect(args.storyId).toBe("US-01");
+    expect(args.evalReport.verdict).toBe("PASS");
+
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const record = mockedWriteRunRecord.mock.calls[0][1];
+    expect(record.generatedDocs).toBeDefined();
+    expect(record.generatedDocs!.specPath).toContain("TECHNICAL-SPEC.md");
+    expect(record.generatedDocs!.adrPaths).toEqual([]);
+    expect(record.generatedDocs!.genTimestamp).toBe("2026-04-25T00:00:00.000Z");
+  });
+
+  it("does NOT invoke spec-generator on FAIL verdict", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(
+      makeEvalReport({
+        verdict: "FAIL",
+        criteria: [{ id: "AC-01", status: "FAIL", evidence: "broken" }],
+      }),
+    );
+
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(mockedGenerateSpec).not.toHaveBeenCalled();
+    const record = mockedWriteRunRecord.mock.calls[0][1];
+    expect(record.generatedDocs).toBeUndefined();
+  });
+
+  it("does NOT invoke spec-generator when projectPath is missing (no RunRecord context)", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      // no projectPath
+    });
+
+    expect(mockedGenerateSpec).not.toHaveBeenCalled();
+  });
+
+  it("swallows spec-generator failure and still writes the RunRecord (verdict not masked)", async () => {
+    mockedGenerateSpec.mockRejectedValueOnce(new Error("synthetic spec-gen crash"));
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(mockedGenerateSpec).toHaveBeenCalledTimes(1);
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const record = mockedWriteRunRecord.mock.calls[0][1];
+    // verdict still surfaced, generatedDocs absent
+    expect(record.evalVerdict).toBe("PASS");
+    expect(record.generatedDocs).toBeUndefined();
   });
 });
 

@@ -162,6 +162,9 @@ export const planInputSchema = {
     ),
 };
 
+// v0.36.0 Phase D (AC-D5): canonical named export — see coordinate.ts for rationale.
+export const ToolInputSchemaShape = planInputSchema;
+
 /** Keywords that trigger bugfix mode auto-detection. */
 const BUGFIX_KEYWORDS = ["fix", "bug", "broken", "crash", "error"];
 

@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://forge-harness.dev/schema/adr.schema.json",
+  "title": "ADR",
+  "description": "Schema for forge-harness's auto-canonicalised Architecture Decision Records under `docs/decisions/ADR-NNNN-<slug>-<storyId>.md`. Each ADR file MUST begin with a YAML front-matter block matching `frontMatter`; the body MUST contain the four named sections in `bodySectionsRequired`. Validators (scripts/validate-adr.mjs) parse the Markdown into the shape described here.",
+  "type": "object",
+  "required": ["frontMatter", "bodySectionsRequired"],
+  "additionalProperties": false,
+  "properties": {
+    "frontMatter": {
+      "type": "object",
+      "required": ["adr", "status", "story", "date", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "adr": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Monotonic ADR number, zero-padded to 4 digits in the filename. Assigned by adr-extractor as max(existing) + 1."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Proposed", "Accepted", "Superseded", "Deprecated"],
+          "description": "Lifecycle state. New ADRs are written as `Accepted` post-PASS; later supersession promotes the older record to `Superseded`."
+        },
+        "story": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Story id (e.g. US-01) that owned the decision. Matches the suffix of the filename and the `story` column in INDEX.md."
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "ISO-8601 calendar date (YYYY-MM-DD) the decision was canonicalised."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One-line decision title. Used verbatim as the row hook in INDEX.md."
+        },
+        "supersedes": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "If set, the prior ADR number this one replaces. Optional."
+        },
+        "supersededBy": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "If set, the ADR number that replaces this one. Optional."
+        }
+      }
+    },
+    "bodySectionsRequired": {
+      "type": "array",
+      "description": "Required H2 sections under each ADR. The validator asserts each `## <name>` heading is present (case-sensitive, in any order).",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "enum": ["Context", "Decision", "Consequences", "Alternatives considered"]
+      },
+      "default": ["Context", "Decision", "Consequences", "Alternatives considered"]
+    }
+  }
+}

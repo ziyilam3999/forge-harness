@@ -4,6 +4,16 @@ import type { Story, StoryLineage } from "./execution-plan.js";
 
 export type GenerateAction = "implement" | "fix" | "pass" | "escalate";
 
+// ── Caller-action discriminator (v0.36.0 Phase A — AC-A1) ──
+//
+// Tells the calling skill (e.g. /forge-execute) HOW to run this brief:
+//   - "spawn-subagent-and-await" → fresh Agent subagent; main-context delta ≤ 2 KB.
+//   - "execute-inline"           → legacy path, main agent executes the brief.
+// Field is OPTIONAL on the wire; absent ↔ legacy "execute-inline" (G5
+// backward-compat invariant). Currently the assembler emits the field for
+// implement/fix actions and omits it for pass/escalate.
+export type CallerAction = "execute-inline" | "spawn-subagent-and-await";
+
 // ── Top-level result ─────────────────────────
 
 export interface GenerateResult {
@@ -11,6 +21,12 @@ export interface GenerateResult {
   storyId: string;
   iteration: number;
   maxIterations: number;
+  /**
+   * v0.36.0 Phase A (AC-A1): instructs the calling skill how to run the
+   * brief. Optional-additive — clients on legacy SKILL.md ignore the field
+   * and execute inline (G5).
+   */
+  callerAction?: CallerAction;
   brief?: GenerationBrief;
   fixBrief?: FixBrief;
   escalation?: Escalation;
@@ -28,6 +44,22 @@ export interface GenerationBrief {
   documentContext?: DocumentContext;
   injectedContext?: string[];
   lineage?: StoryLineage;
+  /**
+   * v0.36.0 Phase C (AC-C5): instructs the implementing subagent to record
+   * any architectural decision matching one of the four canonical triggers
+   * as a stub at `.forge/staging/adr/<storyId>/<short-slug>.md`. forge-harness's
+   * adr-extractor canonicalises the stubs on PASS. If the subagent makes no
+   * qualifying decisions, it writes nothing — that is a valid outcome and
+   * adr-extractor will record a "no new decisions" row instead.
+   */
+  adrCapture?: AdrCaptureGuidance;
+}
+
+export interface AdrCaptureGuidance {
+  /** The four canonical triggers — copied verbatim from the master plan §AC-C5. */
+  triggers: string[];
+  /** Plain-language instruction to the subagent describing the staging contract. */
+  instructions: string;
 }
 
 export interface DocumentContext {

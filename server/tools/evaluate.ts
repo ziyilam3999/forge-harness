@@ -31,6 +31,8 @@ import {
   type RunRecord,
   type CriticEvalReport,
 } from "../lib/run-record.js";
+import { generateSpecForStory } from "../lib/spec-generator.js";
+import { processStory as processAdrStory } from "../lib/adr-extractor.js";
 import {
   buildCriticPrompt,
   buildCriticUserMessage,
@@ -148,6 +150,9 @@ export const evaluateInputSchema = {
     ),
 };
 
+// v0.36.0 Phase D (AC-D5): canonical named export — see coordinate.ts for rationale.
+export const ToolInputSchemaShape = evaluateInputSchema;
+
 // ── Types ─────────────────────────────────────────────────
 
 type EvaluateInput = {
@@ -262,12 +267,79 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
     // populated for shipped stories. Best-effort — missing repo / missing
     // binary / non-PASS verdict all simply omit the field.
     const gitSha = captureGitSha(input.projectPath);
+
+    // v0.36.0 Phase B (AC-B1..B6): synchronously generate or update the
+    // story's section in `docs/generated/TECHNICAL-SPEC.md`. Mandated sync
+    // (plan §122) so the file exists by the time forge_evaluate returns.
+    // Failures are logged and swallowed — a doc-gen hiccup MUST NOT mask
+    // the underlying eval verdict (analogous to the dashboard hooks in
+    // `writeRunRecord`).
+    let generatedDocs: NonNullable<RunRecord["generatedDocs"]> | undefined;
+    if (report.verdict === "PASS") {
+      try {
+        const spec = await generateSpecForStory({
+          projectPath: input.projectPath,
+          storyId: input.storyId,
+          evalReport: report,
+          gitSha,
+          ctx,
+        });
+        generatedDocs = {
+          specPath: spec.specPath,
+          adrPaths: [], // populated below by Phase C's ADR extractor
+          genTimestamp: spec.genTimestamp,
+          genTokens: spec.genTokens,
+          contracts: spec.contracts,
+        };
+      } catch (err) {
+        console.error(
+          `forge_evaluate: spec-generator failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      // v0.36.0 Phase C (AC-C1..C6): canonicalise any subagent-staged ADR
+      // stubs into `docs/decisions/ADR-NNNN-*.md` and rebuild INDEX.md. Runs
+      // synchronously AFTER spec-generator and BEFORE writeRunRecord so the
+      // resulting `adrPaths` lands in the same RunRecord as `specPath`.
+      // Deterministic — no LLM call, no token cost. Failures are logged and
+      // swallowed (same posture as spec-generator).
+      try {
+        const adr = processAdrStory({
+          projectPath: input.projectPath,
+          storyId: input.storyId,
+          gitSha,
+        });
+        if (generatedDocs) {
+          generatedDocs.adrPaths = adr.newAdrPaths;
+        } else if (adr.newAdrPaths.length > 0) {
+          // spec-generator failed but ADR-extractor produced canonical files.
+          // Synthesise a minimal generatedDocs so the ADR work is still
+          // surfaced on the RunRecord. Empty adrPaths here means "nothing
+          // to record" — leave generatedDocs undefined so the existing
+          // contract holds (a spec-gen failure with no ADRs ⇒ no
+          // generatedDocs field).
+          generatedDocs = {
+            specPath: "",
+            adrPaths: adr.newAdrPaths,
+            genTimestamp: new Date().toISOString(),
+            genTokens: { inputTokens: 0, outputTokens: 0 },
+            contracts: [],
+          };
+        }
+      } catch (err) {
+        console.error(
+          `forge_evaluate: adr-extractor failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     await writeRunRecord(input.projectPath, {
       ...base,
       storyId: input.storyId,
       evalVerdict: report.verdict,
       evalReport: canonicalizeEvalReport(report),
       ...(gitSha ? { gitSha } : {}),
+      ...(generatedDocs ? { generatedDocs } : {}),
     });
   }
 

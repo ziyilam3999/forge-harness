@@ -66,6 +66,9 @@ export const reconcileInputSchema = {
     .describe("Map of phaseId → serialized phase plan JSON"),
 };
 
+// v0.36.0 Phase D (AC-D5): canonical named export — see coordinate.ts for rationale.
+export const ToolInputSchemaShape = reconcileInputSchema;
+
 interface ReconcileInput {
   projectPath: string;
   replanningNotes: ReplanningNote[];

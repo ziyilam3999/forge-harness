@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://forge-harness.dev/schema/technical-spec.schema.json",
+  "title": "TechnicalSpec",
+  "description": "Schema for forge-harness's living TECHNICAL-SPEC.md. The Markdown file MUST begin with a YAML front-matter block matching `frontMatter`; the body MUST contain one `## story: <id>` heading per entry in `frontMatter.stories[]`, each followed by the four named subsections in `bodySectionsRequired`. Validators parse the Markdown into the shape described here.",
+  "type": "object",
+  "required": ["frontMatter", "bodySectionsRequired"],
+  "additionalProperties": false,
+  "properties": {
+    "frontMatter": {
+      "type": "object",
+      "required": ["schemaVersion", "lastUpdated", "stories"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "1.0.0",
+          "description": "Pinned to 1.0.0 for v0.36.0; bumps require coordinated reader updates."
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp of the most recent spec mutation across all stories."
+        },
+        "stories": {
+          "type": "array",
+          "description": "Per-story registry. Order MUST match the order of `## story:` headings in the body. Each entry's `lastUpdated` is the per-story mutation stamp; the top-level `lastUpdated` is the max across all entries.",
+          "items": {
+            "type": "object",
+            "required": ["id", "lastUpdated", "lastGitSha"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Story identifier matching the body heading `## story: <id>`."
+              },
+              "lastUpdated": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "lastGitSha": {
+                "type": "string",
+                "description": "40-char hex SHA captured at the PASS that produced this section, or the literal string `unknown` when git was not available.",
+                "pattern": "^([0-9a-f]{40}|unknown)$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "bodySectionsRequired": {
+      "type": "array",
+      "description": "Required subsections under each `## story: <id>` heading. The validator asserts each `### <name>` heading is present (case-sensitive, in any order).",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "enum": ["api-contracts", "data-models", "invariants", "test-surface"]
+      },
+      "default": ["api-contracts", "data-models", "invariants", "test-surface"]
+    }
+  }
+}

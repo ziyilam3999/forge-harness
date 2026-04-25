@@ -134,6 +134,15 @@ export interface PhaseTransitionBrief {
    * Additive optional (P50).
    */
   deferredReplanningNotes?: number;
+  /**
+   * v0.36.0 AC-A5 — advisory hint to the orchestrating session about whether
+   * the upcoming wave of stories should be implemented in fresh subagents or
+   * inline. Set to "subagent" when the phase has ≥ 3 open stories (open =
+   * status NOT in {done, failed, dep-failed}); set to "inline" otherwise.
+   * Optional-additive: legacy callers ignore it, and forge_generate's own
+   * callerAction directive remains the per-story authority.
+   */
+  recommendedExecutionMode?: "subagent" | "inline";
 }
 
 // ── Coordinate mode ─────────────────────────────────────────

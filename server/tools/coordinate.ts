@@ -28,6 +28,13 @@ export const coordinateInputSchema = {
   // Reserved for v2: masterPlanPath, coordinateMode ("autonomous"), startTimeMs, prdContent
 };
 
+// v0.36.0 Phase D (AC-D5): canonical named export so the contract-harvester
+// can import each tool's input shape rather than AST-parsing source. Kept as
+// a parallel reference to the same object passed to `server.registerTool`
+// (NOT a copy), so the registration site and the harvester are guaranteed
+// to see identical Zod shapes — `safeParse` results match by construction.
+export const ToolInputSchemaShape = coordinateInputSchema;
+
 // Intentional omission per REQ-14 v1.1 + §7: retry cap (3) is
 // hardcoded in the coordinator, not exposed as a schema field.
 

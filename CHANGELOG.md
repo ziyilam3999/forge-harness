@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.1](https://github.com/ziyilam3999/forge-harness/compare/v0.36.0...v0.36.1) (2026-04-25)
+
+### Bug Fixes
+
+- **Dashboard "Forge Pulse" indicator replaces text-pill liveness banner.** The top-bar `.liveness-banner` is replaced with a 3-hex honeycomb cluster + ember dot whose motion shape encodes both working/idle and the three liveness sub-bands. Working states animate (smooth respiration in green; labored stutter in amber; frozen mid-cycle with a dying ember in red); idle is a static grey silhouette with no ember. Render-side only — reuses the existing `isToolRunning(activity)` and `classifyStaleness(elapsedMs)` signals; no schema or backend change. Reduced-motion accessibility preserved via `prefers-reduced-motion: reduce` (animation halts; working/idle binary remains via colour fill). Test count +4 on `server/lib/dashboard-renderer*.test.ts` (one per state class). (#439)
+
 ## [0.36.0](https://github.com/ziyilam3999/forge-harness/compare/v0.35.2...v0.36.0) (2026-04-25)
 
 ### Features

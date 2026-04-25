@@ -337,7 +337,7 @@ function renderForgePulse(
   const captionText =
     state === "idle"
       ? "idle"
-      : "live · " + Math.max(0, Math.round(elapsedMs / 1000)) + "s";
+      : "live · " + Math.round(elapsedMs / 1000) + "s";
 
   // Idle state intentionally omits the ember span — its absence is the
   // "cold forge" affordance (plan AC-3). Working states emit the ember as

@@ -44,6 +44,22 @@ export interface GenerationBrief {
   documentContext?: DocumentContext;
   injectedContext?: string[];
   lineage?: StoryLineage;
+  /**
+   * v0.36.0 Phase C (AC-C5): instructs the implementing subagent to record
+   * any architectural decision matching one of the four canonical triggers
+   * as a stub at `.forge/staging/adr/<storyId>/<short-slug>.md`. forge-harness's
+   * adr-extractor canonicalises the stubs on PASS. If the subagent makes no
+   * qualifying decisions, it writes nothing — that is a valid outcome and
+   * adr-extractor will record a "no new decisions" row instead.
+   */
+  adrCapture?: AdrCaptureGuidance;
+}
+
+export interface AdrCaptureGuidance {
+  /** The four canonical triggers — copied verbatim from the master plan §AC-C5. */
+  triggers: string[];
+  /** Plain-language instruction to the subagent describing the staging contract. */
+  instructions: string;
 }
 
 export interface DocumentContext {

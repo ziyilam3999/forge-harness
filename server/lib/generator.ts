@@ -17,6 +17,7 @@ import type {
   DiffManifest,
   DocumentContext,
   CostEstimate,
+  AdrCaptureGuidance,
 } from "../types/generate-result.js";
 
 // ── Constants ────────────────────────────────
@@ -24,6 +25,44 @@ import type {
 const DEFAULT_MAX_ITERATIONS = 3;
 const DEFAULT_BASELINE_CHECK = "npm run build && npm test";
 const STDERR_TRUNCATION_LIMIT = 2000;
+
+// ── v0.36.0 Phase C (AC-C5) — ADR capture brief contract ───
+//
+// Four canonical triggers, copied verbatim from the master plan
+// (.ai-workspace/plans/2026-04-24-forge-harness-agent-first-living-docs.md
+// §AC-C5). The implementing subagent records ONE stub per qualifying decision
+// at `.forge/staging/adr/<storyId>/<short-slug>.md`; forge-harness's
+// `adr-extractor` (server/lib/adr-extractor.ts) canonicalises stubs into
+// `docs/decisions/ADR-NNNN-*.md` on PASS and rebuilds INDEX.md.
+//
+// Triggers verbatim (do not paraphrase — wrapper greps for these substrings):
+//   1. new external dependency added to `package.json`
+//   2. any persisted-data or wire-format schema version bumped (`schema/*.json`,
+//      JSONL/JSON record shapes in `.forge/`, MCP-tool input/output Zod surface)
+//   3. new cross-module boundary introduced in `server/` (a module imported
+//      across a previously-isolated subtree)
+//   4. bypass or override of an existing established pattern documented in
+//      `hive-mind-persist/knowledge-base/01-proven-patterns.md` (P-numbered)
+export const ADR_CAPTURE_TRIGGERS: readonly string[] = [
+  "new external dependency added to `package.json`",
+  "any persisted-data or wire-format schema version bumped (`schema/*.json`, JSONL/JSON record shapes in `.forge/`, MCP-tool input/output Zod surface)",
+  "new cross-module boundary introduced in `server/` (a module imported across a previously-isolated subtree)",
+  "bypass or override of an existing established pattern documented in `hive-mind-persist/knowledge-base/01-proven-patterns.md` (P-numbered)",
+] as const;
+
+export const ADR_CAPTURE_INSTRUCTIONS =
+  "Before declaring story complete, for each architectural decision matching one of the 4 triggers below, " +
+  "write a stub at `.forge/staging/adr/<storyId>/<short-slug>.md` with front-matter " +
+  "{title, story, context, decision, consequences, alternatives}. " +
+  "forge-harness's adr-extractor will canonicalize them on PASS. " +
+  "If you made no qualifying decisions, write nothing — that is a valid outcome.";
+
+export function buildAdrCapture(): AdrCaptureGuidance {
+  return {
+    triggers: [...ADR_CAPTURE_TRIGGERS],
+    instructions: ADR_CAPTURE_INSTRUCTIONS,
+  };
+}
 
 /** Opus pricing per million tokens (USD). */
 const OPUS_INPUT_PER_MILLION = 15.0;
@@ -99,6 +138,9 @@ export async function buildBrief(
   if (injectedContext) {
     brief.injectedContext = injectedContext;
   }
+
+  // v0.36.0 Phase C (AC-C5): adrCapture guidance for the implementing subagent.
+  brief.adrCapture = buildAdrCapture();
 
   return brief;
 }

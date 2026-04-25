@@ -44,6 +44,17 @@ vi.mock("../lib/spec-generator.js", () => ({
   })),
 }));
 
+// v0.36.0 Phase C — mock adr-extractor for the same reason (no real disk
+// writes during evaluate.ts unit tests). Real integration tests live in
+// `server/lib/adr-extractor.test.ts`.
+vi.mock("../lib/adr-extractor.js", () => ({
+  processStory: vi.fn((input: { projectPath: string; storyId: string }) => ({
+    newAdrPaths: [],
+    appendedNoDecisionsRow: false,
+    indexPath: `${input.projectPath}/docs/decisions/INDEX.md`,
+  })),
+}));
+
 // Mock run-context — trackedCallClaude delegates to the mocked callClaude
 vi.mock("../lib/run-context.js", async () => {
   const { callClaude: mockedClaude } = await import("../lib/anthropic.js");

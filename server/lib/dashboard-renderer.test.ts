@@ -21,7 +21,7 @@ import { join } from "node:path";
 
 import {
   classifyStaleness,
-  chooseBannerCopy,
+  classifyForgePulse,
   renderDashboardHtml,
   renderDashboard,
   maybeAutoOpenBrowser,
@@ -131,6 +131,42 @@ function extractColumnContent(html: string, columnId: string): string {
   return html.slice(tagStart, i);
 }
 
+/**
+ * Extract the rendered `<div class="forge-pulse ...">` block from the
+ * dashboard HTML. The cluster lives inside `.top-bar-right` and is the
+ * only `forge-pulse`-classed wrapper on the page (plan AC-1).
+ *
+ * Walks div open/close tags from the matched opener until depth returns
+ * to zero — same pattern as `extractColumnContent`. Throws if absent so
+ * a malformed render fails loudly with a specific error message.
+ */
+function extractForgePulse(html: string): string {
+  const re = /<div class="forge-pulse[^"]*"[^>]*>/;
+  const match = re.exec(html);
+  if (!match) throw new Error("forge-pulse element not found in rendered HTML");
+  const tagStart = match.index;
+  const tagOpenEnd = tagStart + match[0].length - 1;
+  let depth = 1;
+  let i = tagOpenEnd + 1;
+  const openRe = /<div\b/g;
+  const closeRe = /<\/div>/g;
+  while (depth > 0 && i < html.length) {
+    openRe.lastIndex = i;
+    closeRe.lastIndex = i;
+    const nextOpen = openRe.exec(html);
+    const nextClose = closeRe.exec(html);
+    if (!nextClose) break;
+    if (nextOpen && nextOpen.index < nextClose.index) {
+      depth += 1;
+      i = nextOpen.index + 4;
+    } else {
+      depth -= 1;
+      i = nextClose.index + 6;
+    }
+  }
+  return html.slice(tagStart, i);
+}
+
 describe("classifyStaleness (AC-05)", () => {
   it("returns green below 60s", () => {
     expect(classifyStaleness(30_000)).toBe("green");
@@ -153,84 +189,70 @@ describe("classifyStaleness (AC-05)", () => {
   });
 });
 
-describe("chooseBannerCopy (#355) — runtime branch selection", () => {
-  // Pure-function coverage of the banner copy/class pair that the
-  // `updateBanner` IIFE renders inside the browser. Extracted as a
-  // top-level helper so the runtime branches are exercised directly
-  // instead of substring-matched against serialized HTML.
+describe("classifyForgePulse (Forge Pulse classifier) — pure branch selection", () => {
+  // Pure-function coverage of the new render-time classifier that drives
+  // the `.forge-pulse` cluster's state class. Replaces the previous
+  // banner-copy IIFE branch (issue 355) which was deleted alongside the
+  // text-pill liveness affordance. All branches are exercised directly
+  // rather than substring-matched against serialized HTML.
 
-  it("tool-not-running + amber level → neutral idle banner (idle, not hang)", () => {
-    const copy = chooseBannerCopy("amber", false, 90_000);
-    expect(copy.className).toBe("liveness-banner neutral");
-    expect(copy.textContent).toBe("Idle — no tool running");
+  it("tool-not-running + amber-level elapsed → idle (idle short-circuits staleness)", () => {
+    expect(classifyForgePulse(false, 90_000)).toBe("idle");
   });
 
-  it("tool-not-running + red level → neutral idle banner (idle, not hang)", () => {
-    const copy = chooseBannerCopy("red", false, 150_000);
-    expect(copy.className).toBe("liveness-banner neutral");
-    expect(copy.textContent).toBe("Idle — no tool running");
+  it("tool-not-running + red-level elapsed → idle (idle short-circuits staleness)", () => {
+    expect(classifyForgePulse(false, 150_000)).toBe("idle");
   });
 
-  it("tool-not-running + green level → green live-copy (idle downgrade skipped when level is green)", () => {
-    // When level is green the IIFE does not downgrade — the green copy
-    // reads naturally as "nothing stale yet" even without a running tool.
-    const copy = chooseBannerCopy("green", false, 10_000);
-    expect(copy.className).toBe("liveness-banner green");
-    expect(copy.textContent).toContain("Live — last update");
+  it("tool-not-running + green-level elapsed → idle (idle is idle regardless of elapsed)", () => {
+    // Plan G1: idle and working are visibly different. There is no "idle but
+    // fresh" sub-state — the cluster goes cold whenever no tool is running.
+    expect(classifyForgePulse(false, 10_000)).toBe("idle");
   });
 
-  it("tool-running + red level → red 'may be hung' copy (legitimate hang alarm)", () => {
-    const copy = chooseBannerCopy("red", true, 150_000);
-    expect(copy.className).toBe("liveness-banner red");
-    expect(copy.textContent).toBe("No update for 2+ min — may be hung");
+  it("tool-running + red-level elapsed → working-red (frozen / dying-ember alarm)", () => {
+    expect(classifyForgePulse(true, 150_000)).toBe("working-red");
   });
 
-  it("tool-running + amber level → amber 'over 1 min ago' copy", () => {
-    const copy = chooseBannerCopy("amber", true, 90_000);
-    expect(copy.className).toBe("liveness-banner amber");
-    expect(copy.textContent).toBe("Last update: over 1 min ago");
+  it("tool-running + amber-level elapsed → working-amber (labored stutter)", () => {
+    expect(classifyForgePulse(true, 90_000)).toBe("working-amber");
   });
 
-  it("tool-running + green level → green live-copy with seconds-since-update", () => {
-    const copy = chooseBannerCopy("green", true, 30_000);
-    expect(copy.className).toBe("liveness-banner green");
-    // Math.round(30000 / 1000) === 30
-    expect(copy.textContent).toBe("Live — last update 30s ago");
+  it("tool-running + green-level elapsed → working-green (smooth respiration)", () => {
+    expect(classifyForgePulse(true, 30_000)).toBe("working-green");
   });
 
-  it("elapsedMs only affects green live-copy text, not amber/red copy", () => {
-    // amber/red copies are fixed strings — they don't embed elapsedMs.
-    const amber = chooseBannerCopy("amber", true, 999_999);
-    expect(amber.textContent).toBe("Last update: over 1 min ago");
-    const red = chooseBannerCopy("red", true, 999_999);
-    expect(red.textContent).toBe("No update for 2+ min — may be hung");
+  it("idle short-circuits before classifyStaleness — toolRunning=false dominates elapsed", () => {
+    // Belt-and-braces: even at extreme elapsed values the not-running branch
+    // returns "idle" (no false hang alarms when nothing is running).
+    expect(classifyForgePulse(false, 999_999_999)).toBe("idle");
+    // And the working-red branch still fires at the same threshold for
+    // toolRunning=true, proving the two branches are independent.
+    expect(classifyForgePulse(true, 999_999_999)).toBe("working-red");
   });
 });
 
-describe("renderDashboardHtml — idle-banner branch (#331)", () => {
-  it("serializes TOOL_RUNNING=false and emits 'Idle — no tool running' branch when activity is null", () => {
+describe("renderDashboardHtml — forge-pulse idle branch (formerly #331)", () => {
+  // Migrated from the v0.36.0 `liveness-banner` idle-branch tests. The
+  // banner + setInterval IIFE were deleted in v0.36.1 (Forge Pulse swap).
+  // Idle classification is now a render-time decision encoded as
+  // `.forge-pulse.idle` markup; no in-browser branch logic to emit.
+
+  it("renders forge-pulse.idle when activity is null (no tool running)", () => {
     // Simulate the production path: readActivity() returns null when
-    // activity.json has {"tool": null} or is absent.
+    // activity.json has {"tool": null} or is absent. The renderer should
+    // emit `class="forge-pulse idle"` and omit the ember span.
     const html = renderDashboardHtml(baseInput());
-
-    // TOOL_RUNNING must be serialized in the client script block as `false`.
-    expect(html).toMatch(/var\s+TOOL_RUNNING\s*=\s*false\s*;/);
-
-    // The idle-banner copy must be present in the rendered script block
-    // so that updateBanner() can short-circuit the red-hang alarm for
-    // the legitimate idle case.
-    expect(html).toContain("Idle — no tool running");
-
-    // The neutral CSS class must exist so the banner styling matches the
-    // downgraded alarm level.
-    expect(html).toContain("liveness-banner.neutral");
-
-    // Regression guard: the legitimate "may be hung" red alarm copy must
-    // still be emitted for the TOOL_RUNNING === true + red branch.
-    expect(html).toContain("may be hung");
+    expect(html).toMatch(/class="forge-pulse idle"/);
+    // Ember is the working-state-only motion target; idle must not render
+    // it (plan AC-3).
+    const idleFragment = extractForgePulse(html);
+    expect(idleFragment).not.toContain("class=\"ember");
   });
 
-  it("serializes TOOL_RUNNING=true when an activity with a real tool is supplied", () => {
+  it("renders forge-pulse.working-green when an activity with a fresh tool is supplied", () => {
+    // Pick renderedAt and activity.lastUpdate so the elapsed delta is well
+    // under the 60s green threshold (5 seconds here).
     const html = renderDashboardHtml(
       baseInput(
         {},
@@ -239,18 +261,113 @@ describe("renderDashboardHtml — idle-banner branch (#331)", () => {
             tool: "forge_generate",
             storyId: "US-01",
             stage: "running",
-            startedAt: "2026-04-20T00:00:00.000Z",
-            lastUpdate: "2026-04-20T00:00:05.000Z",
+            startedAt: "2026-04-18T00:00:00.000Z",
+            lastUpdate: "2026-04-17T23:59:55.000Z",
           },
         },
       ),
     );
-    expect(html).toMatch(/var\s+TOOL_RUNNING\s*=\s*true\s*;/);
-    // Idle copy and may-be-hung copy are both present in the IIFE source
-    // text even when TOOL_RUNNING is true — the branching happens at
-    // runtime inside the browser. We only assert that emission doesn't
-    // regress the red-alarm copy.
-    expect(html).toContain("may be hung");
+    // baseInput uses renderedAt=2026-04-18T00:00:00Z; elapsed = 5s → green.
+    expect(html).toMatch(/class="forge-pulse working-green"/);
+    // Working state must include the ember as the fourth motion target.
+    const fragment = extractForgePulse(html);
+    expect(fragment).toContain("class=\"ember\"");
+  });
+});
+
+describe("renderDashboardHtml — forge-pulse state structure (plan AC-1..AC-4)", () => {
+  // Four new fixture-driven tests, one per state, asserting the rendered
+  // markup contract from outside the diff. Plan AC-7 requires test-count
+  // delta ≥ +4 across the dashboard-renderer suite; these are those four
+  // additions. Each test independently asserts:
+  //   (a) exactly one `.forge-pulse` element on the page (plan AC-1),
+  //   (b) the correct top-level class for the state (plan AC-2/AC-3/AC-4),
+  //   (c) the correct child motion-target shape (3 hex + ember-or-not).
+
+  function countMatches(html: string, re: RegExp): number {
+    return (html.match(re) ?? []).length;
+  }
+
+  it("idle state: exactly one forge-pulse element with class 'forge-pulse idle' and three .hex spans, no ember (AC-1, AC-3)", () => {
+    const html = renderDashboardHtml(baseInput());
+    // AC-1: exactly one forge-pulse element rendered.
+    expect(countMatches(html, /<div class="forge-pulse[^"]*"/g)).toBe(1);
+    // AC-3: top-level class is exactly "forge-pulse idle".
+    expect(html).toMatch(/<div class="forge-pulse idle"/);
+    const fragment = extractForgePulse(html);
+    // AC-3: three .hex spans, zero .ember spans.
+    expect(countMatches(fragment, /<span class="hex/g)).toBe(3);
+    expect(countMatches(fragment, /class="ember"/g)).toBe(0);
+  });
+
+  it("working-green state: forge-pulse working-green with three .hex + one .ember (AC-1, AC-2)", () => {
+    const html = renderDashboardHtml(
+      baseInput(
+        {},
+        {
+          activity: {
+            tool: "forge_generate",
+            storyId: "US-AC2",
+            stage: "running",
+            // 5s before renderedAt → green band.
+            startedAt: "2026-04-18T00:00:00.000Z",
+            lastUpdate: "2026-04-17T23:59:55.000Z",
+          },
+        },
+      ),
+    );
+    expect(countMatches(html, /<div class="forge-pulse[^"]*"/g)).toBe(1);
+    expect(html).toMatch(/<div class="forge-pulse working-green"/);
+    const fragment = extractForgePulse(html);
+    expect(countMatches(fragment, /<span class="hex/g)).toBe(3);
+    expect(countMatches(fragment, /class="ember"/g)).toBe(1);
+  });
+
+  it("working-amber state: forge-pulse working-amber when activity.lastUpdate elapsed is in 60-120s band (AC-1, AC-4)", () => {
+    // baseInput renderedAt = 2026-04-18T00:00:00.000Z. Set lastUpdate 90s
+    // earlier → amber band (classifyStaleness threshold: > 60s, ≤ 120s).
+    const html = renderDashboardHtml(
+      baseInput(
+        {},
+        {
+          activity: {
+            tool: "forge_evaluate",
+            storyId: "US-AC4-A",
+            stage: "running",
+            startedAt: "2026-04-17T23:58:30.000Z",
+            lastUpdate: "2026-04-17T23:58:30.000Z",
+          },
+        },
+      ),
+    );
+    expect(countMatches(html, /<div class="forge-pulse[^"]*"/g)).toBe(1);
+    expect(html).toMatch(/<div class="forge-pulse working-amber"/);
+    const fragment = extractForgePulse(html);
+    expect(countMatches(fragment, /<span class="hex/g)).toBe(3);
+    expect(countMatches(fragment, /class="ember"/g)).toBe(1);
+  });
+
+  it("working-red state: forge-pulse working-red when activity.lastUpdate elapsed exceeds 120s (AC-1, AC-4)", () => {
+    // 180s before renderedAt → red band (> 120s threshold).
+    const html = renderDashboardHtml(
+      baseInput(
+        {},
+        {
+          activity: {
+            tool: "forge_evaluate",
+            storyId: "US-AC4-R",
+            stage: "running",
+            startedAt: "2026-04-17T23:57:00.000Z",
+            lastUpdate: "2026-04-17T23:57:00.000Z",
+          },
+        },
+      ),
+    );
+    expect(countMatches(html, /<div class="forge-pulse[^"]*"/g)).toBe(1);
+    expect(html).toMatch(/<div class="forge-pulse working-red"/);
+    const fragment = extractForgePulse(html);
+    expect(countMatches(fragment, /<span class="hex/g)).toBe(3);
+    expect(countMatches(fragment, /class="ember"/g)).toBe(1);
   });
 });
 
@@ -656,9 +773,11 @@ describe("readActivity + renderBoard — empty-string tool (#276)", () => {
     const cardMatches = inProgress.match(/class="story-card/g) ?? [];
     expect(cardMatches.length).toBe(0);
 
-    // And TOOL_RUNNING serializes false — the idle branch should take
-    // over at runtime.
-    expect(html).toMatch(/var\s+TOOL_RUNNING\s*=\s*false\s*;/);
+    // And the forge-pulse renders idle — the empty-string tool must be
+    // treated identically to a null tool by the render-time classifier.
+    // (Pre-v0.36.1 this asserted on the now-removed `TOOL_RUNNING` IIFE
+    // variable; the contract is preserved via the rendered idle class.)
+    expect(html).toMatch(/class="forge-pulse idle"/);
   });
 
   it("renderDashboardHtml with activity.tool === '' renders no activity card in col-in-progress", () => {
@@ -682,9 +801,10 @@ describe("readActivity + renderBoard — empty-string tool (#276)", () => {
     const inProgress = extractColumnContent(html, "col-in-progress");
     // renderBoard should NOT emit an activity card for empty-string tool.
     expect(inProgress).not.toMatch(/class="story-card active"/);
-    // TOOL_RUNNING must be false even though the raw activity payload
-    // was supplied directly (bypassing readActivity).
-    expect(html).toMatch(/var\s+TOOL_RUNNING\s*=\s*false\s*;/);
+    // forge-pulse must be idle even though the raw activity payload was
+    // supplied directly (bypassing readActivity). isToolRunning rejects
+    // the empty-string tool, so classifyForgePulse short-circuits to idle.
+    expect(html).toMatch(/class="forge-pulse idle"/);
   });
 });
 

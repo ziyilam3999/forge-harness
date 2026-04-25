@@ -76,53 +76,45 @@ export function classifyStaleness(elapsedMs: number): "green" | "amber" | "red" 
   return "green";
 }
 
-// ── Banner-copy selector ───────────────────────────────────────────────────
+// ── Forge Pulse classifier (replaces banner-copy selector) ─────────────────
 
 /**
- * Pure function: (staleness level, tool-running flag, elapsedMs) → banner
- * (className + textContent) pair.
+ * Pure function: (activity-running flag, elapsedMs) → forge-pulse state class.
  *
- * Encodes the runtime branch selection that the `updateBanner` IIFE runs
- * inside the browser. Extracted as a top-level helper (mirroring
- * `classifyStaleness`) so unit tests can exercise each branch directly
- * without parsing HTML. Serialized verbatim into the HTML `<script>` block
- * via `${chooseBannerCopy.toString()}` so the browser runs the same logic.
+ * Returns one of four strings encoding the four visible states of the
+ * dashboard's liveness indicator:
  *
- * Branch semantics:
- *   - When no tool is running and the level is stale (amber/red), downgrade
- *     to a neutral "Idle — no tool running" banner. Being idle is not a hang.
- *   - When a tool is running (or level is green), render the level-appropriate
- *     copy — red for likely-hung, amber for slow-tick, green for live.
+ *   - `"idle"`           — no tool is running. Cluster renders cold/grey,
+ *                          no animation, no ember.
+ *   - `"working-green"`  — tool running, fresh tick (≤ 60s). Smooth wave +
+ *                          steady ember pulse.
+ *   - `"working-amber"`  — tool running, slow tick (60–120s). Stuttered wave
+ *                          + amber ember.
+ *   - `"working-red"`    — tool running, stale tick (> 120s). Frozen wave
+ *                          + dying ember.
  *
- * Issues: #331, #352, #355.
+ * The three working sub-bands compose `classifyStaleness(elapsedMs)` so the
+ * staleness thresholds stay defined in one place. Idle short-circuits: when
+ * no tool is running we render the cold state regardless of elapsed (because
+ * "idle for 5 minutes" is not a hang — it's just idle).
+ *
+ * Replaces the previous banner-copy runtime branch (issue 355) that drove
+ * the now-removed text-pill via setInterval. Forge Pulse is purely
+ * CSS-driven; no in-browser branch logic, no IIFE — render-time
+ * classification is sufficient because the dashboard auto-refreshes every 5s.
+ *
+ * Exported for unit testing; the renderer reads the result and emits the
+ * matching class on the `.forge-pulse` element.
  */
-export function chooseBannerCopy(
-  level: "green" | "amber" | "red",
+export function classifyForgePulse(
   toolRunning: boolean,
   elapsedMs: number,
-): { className: string; textContent: string } {
-  if (!toolRunning && level !== "green") {
-    return {
-      className: "liveness-banner neutral",
-      textContent: "Idle — no tool running",
-    };
-  }
-  if (level === "red") {
-    return {
-      className: "liveness-banner red",
-      textContent: "No update for 2+ min — may be hung",
-    };
-  }
-  if (level === "amber") {
-    return {
-      className: "liveness-banner amber",
-      textContent: "Last update: over 1 min ago",
-    };
-  }
-  return {
-    className: "liveness-banner green",
-    textContent: "Live — last update " + Math.round(elapsedMs / 1000) + "s ago",
-  };
+): "idle" | "working-green" | "working-amber" | "working-red" {
+  if (!toolRunning) return "idle";
+  const level = classifyStaleness(elapsedMs);
+  if (level === "red") return "working-red";
+  if (level === "amber") return "working-amber";
+  return "working-green";
 }
 
 // ── Column layout (status → column id) ────────────────────────────────────
@@ -313,12 +305,66 @@ function renderDeclarationPill(declaration: StoryDeclaration | null | undefined)
   return `<div class="declaration-pill" data-story-id="${escapeHtml(declaration.storyId)}"><span class="decl-label">Declared</span> <span class="decl-story-id">${escapeHtml(declaration.storyId)}</span>${phaseSuffix}</div>`;
 }
 
+/**
+ * Render the Forge Pulse cluster — the three-hex respiration indicator that
+ * replaces the v0.36.0 text-pill liveness affordance.
+ *
+ * Markup contract (assertable from outside the diff):
+ *   - Exactly one root `<div class="forge-pulse <state>">` per render.
+ *   - Idle state contains exactly three `.hex` spans (no `.ember`).
+ *   - Any working-* state contains exactly three `.hex` spans + one `.ember`.
+ *   - The mono caption (`.pulse-caption`) preserves the elapsed-time
+ *     readout the old banner carried, so operators don't lose the "last
+ *     update Ns ago" affordance during the visual upgrade.
+ *
+ * `role="status"` + `aria-label` keeps the component announceable to screen
+ * readers without making it a tab-stop (the cluster is a status indicator,
+ * not interactive — see plan Out-of-scope: "no keyboard / focus interaction").
+ */
+function renderForgePulse(
+  state: "idle" | "working-green" | "working-amber" | "working-red",
+  elapsedMs: number,
+): string {
+  const ariaLabel =
+    state === "idle"
+      ? "Forge idle — no tool running"
+      : state === "working-red"
+        ? "Forge working, last update over 2 minutes ago — may be hung"
+        : state === "working-amber"
+          ? "Forge working, last update over 1 minute ago"
+          : "Forge working, fresh tick";
+
+  const captionText =
+    state === "idle"
+      ? "idle"
+      : "live · " + Math.max(0, Math.round(elapsedMs / 1000)) + "s";
+
+  // Idle state intentionally omits the ember span — its absence is the
+  // "cold forge" affordance (plan AC-3). Working states emit the ember as
+  // the fourth motion target (plan AC-2).
+  const emberHtml =
+    state === "idle" ? "" : '<span class="ember" aria-hidden="true"></span>';
+
+  return `<div class="forge-pulse ${state}" role="status" aria-label="${escapeHtml(ariaLabel)}">
+    <div class="pulse-cluster" aria-hidden="true">
+      <span class="hex hex-1"></span>
+      <span class="hex hex-2"></span>
+      <span class="hex hex-3"></span>
+      ${emberHtml}
+    </div>
+    <span class="pulse-caption">${escapeHtml(captionText)}</span>
+  </div>`;
+}
+
 function renderHeader(
   brief: PhaseTransitionBrief | null,
   declaration: StoryDeclaration | null | undefined,
   totalsElapsedMs: number | null,
+  pulseState: "idle" | "working-green" | "working-amber" | "working-red",
+  pulseElapsedMs: number,
 ): string {
   const declarationHtml = renderDeclarationPill(declaration);
+  const pulseHtml = renderForgePulse(pulseState, pulseElapsedMs);
   if (!brief) {
     return `
 <div class="top-bar">
@@ -329,7 +375,7 @@ function renderHeader(
     ${declarationHtml}
   </div>
   <div class="top-bar-right">
-    <span class="liveness-banner green" id="liveness-banner">initializing...</span>
+    ${pulseHtml}
   </div>
 </div>`;
   }
@@ -382,7 +428,7 @@ function renderHeader(
     ${declarationHtml}
   </div>
   <div class="top-bar-right">
-    <span class="liveness-banner green" id="liveness-banner">initializing...</span>
+    ${pulseHtml}
   </div>
 </div>
 <div class="stats-row">
@@ -547,11 +593,54 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .declaration-pill .decl-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); font-weight: 700; }
 .declaration-pill .decl-story-id { font-family: var(--font-mono); font-weight: 700; }
 .declaration-pill .decl-phase { font-family: var(--font-mono); color: var(--text-secondary); font-weight: 500; }
-.liveness-banner { font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; }
-.liveness-banner.green { background: var(--green-bg); color: var(--green); }
-.liveness-banner.amber { background: var(--amber-bg); color: var(--amber); }
-.liveness-banner.red { background: var(--red-bg); color: var(--red); }
-.liveness-banner.neutral { background: var(--border-light); color: var(--text-secondary); }
+/* ── Forge Pulse — three-hex respiration cluster + ember ────────────────── */
+.forge-pulse { display: inline-flex; align-items: center; gap: 10px; padding: 4px 10px; border-radius: 8px; background: var(--off-white); border: 1px solid var(--border-light); }
+.forge-pulse .pulse-cluster { position: relative; display: inline-flex; align-items: center; gap: 2px; width: 44px; height: 20px; }
+.forge-pulse .hex { display: inline-block; width: 12px; height: 12px; clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0% 50%); background: var(--green); transform-origin: center; }
+.forge-pulse .ember { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 4px var(--green); transform: translate(-50%, -50%); }
+.forge-pulse .pulse-caption { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.04em; }
+
+/* Idle — cold silhouette, no animation, no ember. */
+.forge-pulse.idle { background: var(--border-light); border-color: var(--border); }
+.forge-pulse.idle .hex { background: var(--grey); opacity: 0.55; transform: scale(0.85); }
+.forge-pulse.idle .pulse-caption { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Working-green — smooth respiration wave + steady ember pulse. */
+.forge-pulse.working-green .hex { background: var(--green); animation: forge-respire 2.4s ease-in-out infinite; }
+.forge-pulse.working-green .hex-1 { animation-delay: 0s; }
+.forge-pulse.working-green .hex-2 { animation-delay: 0.2s; }
+.forge-pulse.working-green .hex-3 { animation-delay: 0.4s; }
+.forge-pulse.working-green .ember { background: var(--green); box-shadow: 0 0 6px var(--green); animation: forge-ember-green 1.2s ease-in-out infinite; }
+
+/* Working-amber — labored stutter + amber ember. */
+.forge-pulse.working-amber { border-color: var(--amber); background: var(--amber-bg); }
+.forge-pulse.working-amber .hex { background: var(--amber); animation: forge-respire-stutter 3.2s ease-in-out infinite; }
+.forge-pulse.working-amber .hex-1 { animation-delay: 0s; }
+.forge-pulse.working-amber .hex-2 { animation-delay: 0.4s; }
+.forge-pulse.working-amber .hex-3 { animation-delay: 0.8s; }
+.forge-pulse.working-amber .ember { background: var(--amber); box-shadow: 0 0 5px var(--amber); animation: forge-ember-amber 1.8s ease-in-out infinite; }
+.forge-pulse.working-amber .pulse-caption { color: var(--amber); }
+
+/* Working-red — frozen mid-cycle + dying ember. */
+.forge-pulse.working-red { border-color: var(--red); background: var(--red-bg); }
+.forge-pulse.working-red .hex { background: var(--red); transform: scale(0.92); opacity: 0.75; }
+.forge-pulse.working-red .ember { background: var(--red); box-shadow: 0 0 3px var(--red); animation: forge-ember-dying 3s ease-in-out infinite; }
+.forge-pulse.working-red .pulse-caption { color: var(--red); }
+
+@keyframes forge-respire { 0%, 100% { transform: scale(0.88); opacity: 0.7; } 50% { transform: scale(1.08); opacity: 1; } }
+@keyframes forge-respire-stutter { 0%, 18%, 100% { transform: scale(0.9); opacity: 0.7; } 32% { transform: scale(1.04); opacity: 0.95; } 38% { transform: scale(0.96); opacity: 0.85; } 60% { transform: scale(1.06); opacity: 1; } }
+@keyframes forge-ember-green { 0%, 100% { transform: translate(-50%, -50%) scale(0.85); opacity: 0.85; } 50% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; } }
+@keyframes forge-ember-amber { 0%, 100% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.7; } 40% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; } 60% { transform: translate(-50%, -50%) scale(0.95); opacity: 0.85; } }
+@keyframes forge-ember-dying { 0%, 100% { transform: translate(-50%, -50%) scale(0.7); opacity: 0.35; } 50% { transform: translate(-50%, -50%) scale(0.85); opacity: 0.6; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .forge-pulse .hex,
+  .forge-pulse .ember { animation: none !important; }
+  .forge-pulse.working-green .hex,
+  .forge-pulse.working-amber .hex,
+  .forge-pulse.working-red .hex { transform: scale(1); opacity: 1; }
+  .forge-pulse.idle .hex { transform: scale(0.85); opacity: 0.55; }
+}
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .stat-card { background: var(--white); border: 1px solid var(--border-light); border-radius: 10px; padding: 12px 16px; box-shadow: var(--shadow-sm); }
 .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 600; }
@@ -618,8 +707,6 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
       ? input.totals.elapsedMs
       : null;
 
-  const lastUpdate = activity?.lastUpdate ?? renderedAt;
-  const activityStarted = activity?.startedAt ?? renderedAt;
   // Derived idle-vs-running signal: when the activity.json file is absent or
   // contains {"tool": null}, readActivity() returns null here, so "no tool
   // is running" collapses to `activity == null`. The `activity?.tool != null`
@@ -627,10 +714,19 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
   // Activity literal. Issue #331.
   const toolRunning = isToolRunning(activity);
 
-  // Serialize the pure classifier + banner-copy selector into the browser's
-  // script block so the banner updates between meta-refreshes via setInterval.
-  const classifierSrc = classifyStaleness.toString();
-  const bannerCopySrc = chooseBannerCopy.toString();
+  // Forge Pulse classification: render-time only. The dashboard auto-refreshes
+  // every 5s via meta-refresh, so the snapshot taken now is good enough until
+  // the next reload — no in-browser setInterval needed.
+  //
+  // pulseElapsedMs = Date(renderedAt) - Date(activity.lastUpdate) when
+  // activity is present; 0 when idle. Negative values (clock skew between the
+  // process that wrote activity.json and the renderer) are clamped to 0 by
+  // `renderForgePulse` so the caption never reads e.g. `-3s`.
+  const lastUpdateIso = activity?.lastUpdate ?? renderedAt;
+  const pulseElapsedMs = toolRunning
+    ? Math.max(0, Date.parse(renderedAt) - Date.parse(lastUpdateIso))
+    : 0;
+  const pulseState = classifyForgePulse(toolRunning, pulseElapsedMs);
 
   const html = `<!DOCTYPE html>
 <html>
@@ -643,33 +739,11 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
 </head>
 <body>
 <div class="dashboard">
-${renderHeader(brief, declaration, totalsElapsedMs)}
+${renderHeader(brief, declaration, totalsElapsedMs, pulseState, pulseElapsedMs)}
 ${renderReplanningNotes(brief)}
 ${renderBoard(brief, activity)}
 ${renderFeed(auditEntries)}
 </div>
-<script>
-${classifierSrc}
-${bannerCopySrc}
-var LAST_UPDATE = ${JSON.stringify(lastUpdate)};
-var ACTIVITY_STARTED = ${JSON.stringify(activityStarted)};
-var TOOL_RUNNING = ${JSON.stringify(toolRunning)};
-function updateBanner() {
-  var banner = document.getElementById("liveness-banner");
-  if (!banner) return;
-  var elapsed = Date.now() - new Date(LAST_UPDATE).getTime();
-  var level = classifyStaleness(elapsed);
-  // Runtime branch selection lives in chooseBannerCopy (#355) so the unit
-  // tests can exercise each branch directly rather than substring-matching
-  // against the serialized HTML. Idle-vs-running downgrade logic and the
-  // level-specific copy are encoded there. Issues #331, #352, #355.
-  var copy = chooseBannerCopy(level, TOOL_RUNNING, elapsed);
-  banner.className = copy.className;
-  banner.textContent = copy.textContent;
-}
-updateBanner();
-setInterval(updateBanner, 1000);
-</script>
 </body>
 </html>`;
 

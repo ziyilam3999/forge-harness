@@ -4,6 +4,16 @@ import type { Story, StoryLineage } from "./execution-plan.js";
 
 export type GenerateAction = "implement" | "fix" | "pass" | "escalate";
 
+// ── Caller-action discriminator (v0.36.0 Phase A — AC-A1) ──
+//
+// Tells the calling skill (e.g. /forge-execute) HOW to run this brief:
+//   - "spawn-subagent-and-await" → fresh Agent subagent; main-context delta ≤ 2 KB.
+//   - "execute-inline"           → legacy path, main agent executes the brief.
+// Field is OPTIONAL on the wire; absent ↔ legacy "execute-inline" (G5
+// backward-compat invariant). Currently the assembler emits the field for
+// implement/fix actions and omits it for pass/escalate.
+export type CallerAction = "execute-inline" | "spawn-subagent-and-await";
+
 // ── Top-level result ─────────────────────────
 
 export interface GenerateResult {
@@ -11,6 +21,12 @@ export interface GenerateResult {
   storyId: string;
   iteration: number;
   maxIterations: number;
+  /**
+   * v0.36.0 Phase A (AC-A1): instructs the calling skill how to run the
+   * brief. Optional-additive — clients on legacy SKILL.md ignore the field
+   * and execute inline (G5).
+   */
+  callerAction?: CallerAction;
   brief?: GenerationBrief;
   fixBrief?: FixBrief;
   escalation?: Escalation;

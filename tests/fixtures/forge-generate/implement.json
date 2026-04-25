@@ -1,0 +1,5 @@
+{
+  "_comment": "Fixture for AC-A1 wrapper check (v0.36.0 Phase A). Drives forge_generate down the implement path: storyId is in the inline plan, no evalReport supplied, so the assembler returns action='implement' and callerAction='spawn-subagent-and-await'.",
+  "storyId": "US-FIXTURE",
+  "planJson": "{\"schemaVersion\":\"3.0.0\",\"stories\":[{\"id\":\"US-FIXTURE\",\"title\":\"Fixture story for caller-action AC\",\"acceptanceCriteria\":[{\"id\":\"AC-01\",\"description\":\"trivial AC\",\"command\":\"echo ok\"}]}]}"
+}

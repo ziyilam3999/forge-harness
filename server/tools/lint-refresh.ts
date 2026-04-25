@@ -60,6 +60,9 @@ export const lintRefreshInputSchema = {
     .describe("ISO-8601 override for 'current time' — test hook."),
 };
 
+// v0.36.0 Phase D (AC-D5): canonical named export — see coordinate.ts for rationale.
+export const ToolInputSchemaShape = lintRefreshInputSchema;
+
 export interface LintRefreshInput {
   planPath: string;
   force?: boolean;

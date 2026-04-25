@@ -3,10 +3,12 @@
  * `docs/generated/TECHNICAL-SPEC.md`.
  *
  * v0.36.0 Phase B (improvement #2). Called from `server/tools/evaluate.ts`
- * immediately after `writeRunRecord` on a story-mode PASS. Synchronous by
- * mandate (plan §122 / AC-B1): the spec MUST exist by the time
- * `forge_evaluate` returns to the caller; async would require an unspecified
- * poll window and break the contract that "PASS means docs are current."
+ * IMMEDIATELY BEFORE `writeRunRecord` on a story-mode PASS — the call is
+ * sequenced this way so `RunRecord.generatedDocs` can carry the result of
+ * this function rather than needing a second write. Synchronous by mandate
+ * (plan §122 / AC-B1): the spec MUST exist by the time `forge_evaluate`
+ * returns to the caller; async would require an unspecified poll window and
+ * break the contract that "PASS means docs are current."
  *
  * Cost: one `trackedCallClaude` round-trip per PASS (~$0.03–$0.10 for the
  * sizes we see). Plan AC-B6 caps total at $0.80 / 13-story phase.

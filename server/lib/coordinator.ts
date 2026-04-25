@@ -720,6 +720,21 @@ export async function assemblePhaseTransitionBrief(
     brief.deferredReplanningNotes = briefOptions.deferredReplanningNotes;
   }
 
+  // v0.36.0 AC-A5: hint the orchestrator on execution mode for the next
+  // wave of stories. "Open" = status NOT in {done, failed, dep-failed},
+  // i.e. anything still requiring caller work. ≥3 open stories implies
+  // enough parallelism / context-pressure to make subagent isolation
+  // worthwhile; below that, inline is cheaper. Field stays optional —
+  // legacy callers and tests without the field aren't broken.
+  const openCount = entries.filter(
+    (e) => e.status !== "done" && e.status !== "failed" && e.status !== "dep-failed",
+  ).length;
+  if (openCount >= 3) {
+    brief.recommendedExecutionMode = "subagent";
+  } else if (openCount > 0) {
+    brief.recommendedExecutionMode = "inline";
+  }
+
   return brief;
 }
 

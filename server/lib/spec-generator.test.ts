@@ -233,6 +233,63 @@ describe("spec-generator — idempotency (AC-B2)", () => {
   });
 });
 
+describe("spec-generator — section content evolves on re-run", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("re-running with different synth output replaces the section in place (no duplicate)", async () => {
+    const path1 = (await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: fakeSynth(["forge_evaluate"]),
+    })).specPath;
+    const before = readFileSync(path1, "utf-8");
+    expect(before).toContain("forge_evaluate");
+
+    // Different synth this time — different contracts, different bullets.
+    const altSynth = async (): Promise<SynthesisResponse> => ({
+      contracts: ["forge_generate", "forge_coordinate"],
+      sections: {
+        "api-contracts": "- `forge_generate.callerAction`: new\n- `forge_coordinate.recommendedExecutionMode`: new",
+        "data-models": "- updated model bullet",
+        invariants: "- updated invariant bullet",
+        "test-surface": "- updated test bullet",
+      },
+      tokens: { inputTokens: 10, outputTokens: 5 },
+    });
+
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: altSynth,
+    });
+
+    const after = readFileSync(path1, "utf-8");
+    // Heading still appears exactly once (idempotency).
+    expect((after.match(/^## story: US-01$/gm) || []).length).toBe(1);
+    // The new content is now present; the old single-bullet api-contracts is gone.
+    expect(after).toContain("forge_generate.callerAction");
+    expect(after).toContain("forge_coordinate.recommendedExecutionMode");
+    expect(after).toContain("updated model bullet");
+    // Old bullet must have been replaced — assert text is materially different.
+    expect(after).not.toBe(before);
+    // Validator still passes.
+    expect(validatorPasses(path1).ok).toBe(true);
+  });
+});
+
 describe("spec-generator — corrupt-file recovery", () => {
   let tmp: string;
   let ctx: RunContext;

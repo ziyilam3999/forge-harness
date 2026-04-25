@@ -15,6 +15,9 @@ export const declareStoryInputSchema = {
     .describe("Phase identifier, e.g. 'PH-02'. Optional."),
 };
 
+// v0.36.0 Phase D (AC-D5): canonical named export — see coordinate.ts for rationale.
+export const ToolInputSchemaShape = declareStoryInputSchema;
+
 type DeclareStoryInput = {
   storyId: string;
   phaseId?: string;

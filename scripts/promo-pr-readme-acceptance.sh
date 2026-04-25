@@ -122,38 +122,40 @@ else
   pass "AC-8 (no mermaid present)"
 fi
 
-# ── AC-9: privacy — no employer-brand strings in README diff ─────────────
-banner "AC-9: privacy grep — no employer-brand tokens in README diff"
+# ── AC-9: privacy — no employer-brand strings anywhere in PR diff ────────
+# Per CLAUDE.md privacy hard-rule, regulated tokens may only appear in rule-spec
+# files (the privacy card + per-project memory files). This script intentionally
+# contains NO regulated literals — extraction is prefix-agnostic. Fail closed if
+# the privacy card is missing or yields no extractable tokens.
+banner "AC-9: privacy grep — no employer-brand tokens in PR diff"
 PRIVACY_CARD="$HOME/.claude/agent-working-memory/tier-b/topics/privacy/no-employer-brand.md"
 if [ ! -f "$PRIVACY_CARD" ]; then
-  printf "    privacy card not found at %s — falling back to manual checkpoint\n" "$PRIVACY_CARD"
-  printf "    AC-9: human-verify the privacy grep manually — this wrapper does not automate\n"
-  pass "AC-9 (manual checkpoint — card missing)"
+  printf "    privacy card not found at %s — failing closed\n" "$PRIVACY_CARD" >&2
+  fail "AC-9: privacy card missing (failing closed; rule-spec must be present)"
 else
-  # Tokens are listed in the Decision section using the literal pattern
-  # "`UOB`" / "`UOB Bank`" / etc. We extract any `UOB...` backticked token,
-  # plus the bare "UOB" string itself. This is a best-effort fixed-string
-  # check; reviewer also runs a manual pass per the plan.
-  tokens=$(grep -oE '`UOB[^`]*`' "$PRIVACY_CARD" | tr -d '`' | sort -u)
+  # Generic extraction: capitalized backticked tokens from the rule-spec card.
+  # No regulated prefix is named here.
+  tokens=$(grep -oE '`[A-Z][^`]*`' "$PRIVACY_CARD" | tr -d '`' | sort -u)
   if [ -z "$tokens" ]; then
-    tokens="UOB"
-  fi
-  ac9_failures=0
-  while IFS= read -r token; do
-    [ -z "$token" ] && continue
-    # Use process substitution to avoid SIGPIPE from grep on no-match.
-    diff_out=$(git diff HEAD -- README.md 2>/dev/null || true)
-    if printf "%s\n" "$diff_out" | grep -i -F -e "$token" >/dev/null 2>&1; then
-      printf "    [token: %s] MATCH FOUND in diff\n" "$token"
-      ac9_failures=$((ac9_failures + 1))
-    else
-      printf "    [token: %s] no match\n" "$token"
-    fi
-  done <<<"$tokens"
-  if [ "$ac9_failures" -eq 0 ]; then
-    pass "AC-9: no employer-brand tokens in README diff"
+    printf "    privacy card has no extractable backticked tokens — failing closed\n" >&2
+    fail "AC-9: privacy card has no extractable tokens (failing closed)"
   else
-    fail "AC-9: $ac9_failures token(s) matched in README diff"
+    ac9_failures=0
+    diff_out=$(git diff origin/master..HEAD 2>/dev/null || true)
+    while IFS= read -r token; do
+      [ -z "$token" ] && continue
+      if printf "%s\n" "$diff_out" | grep -i -F -e "$token" >/dev/null 2>&1; then
+        printf "    [token: redacted] MATCH FOUND in PR diff\n"
+        ac9_failures=$((ac9_failures + 1))
+      else
+        printf "    [token: redacted] no match\n"
+      fi
+    done <<<"$tokens"
+    if [ "$ac9_failures" -eq 0 ]; then
+      pass "AC-9: no employer-brand tokens in PR diff"
+    else
+      fail "AC-9: $ac9_failures token(s) matched in PR diff"
+    fi
   fi
 fi
 

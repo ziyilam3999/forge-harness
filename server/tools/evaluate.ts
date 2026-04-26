@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { platform } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { resolveWindowsBashPath } from "../lib/executor.js";
 
 /**
  * Compute a deterministic `reverseFindings[].id` from its identifying fields.
@@ -310,7 +312,13 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
     const shared = detectSharedBuildPrefix(acCommands);
     if (shared) {
       try {
-        execFileSync("sh", ["-c", shared.prefixCommand], {
+        // v0.38.x — On Windows, `sh` is not on PATH; resolve Git-Bash absolute
+        // path the same way executor.ts does for per-AC commands. Without this,
+        // the up-front build throws ENOENT, falls through to per-AC builds, and
+        // B3's intended N→1 build savings is silently lost on Windows ships.
+        const shellPath =
+          platform() === "win32" ? resolveWindowsBashPath() : "sh";
+        execFileSync(shellPath, ["-c", shared.prefixCommand], {
           cwd: input.projectPath,
           stdio: ["ignore", "pipe", "pipe"],
         });

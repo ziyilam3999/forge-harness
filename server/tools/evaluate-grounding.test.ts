@@ -87,26 +87,6 @@ import { writeRunRecord } from "../lib/run-record.js";
 const mockedEvaluate = vi.mocked(evaluateStory);
 const mockedWriteRunRecord = vi.mocked(writeRunRecord);
 
-function planJsonWithBuildPrefixACs(): string {
-  // Story whose ACs all share the `npm run build &&` prefix.
-  return JSON.stringify({
-    schemaVersion: "3.0.0",
-    stories: [
-      {
-        id: "US-01",
-        title: "build-dedup story",
-        affectedPaths: ["server/"],
-        acceptanceCriteria: [
-          { id: "AC-01", description: "first", command: "npm run build && node -e 'console.log(1)'" },
-          { id: "AC-02", description: "second", command: "npm run build && node -e 'console.log(2)'" },
-          { id: "AC-03", description: "third", command: "npm run build && node -e 'console.log(3)'" },
-          { id: "AC-04", description: "fourth", command: "npm run build && node -e 'console.log(4)'" },
-        ],
-      },
-    ],
-  });
-}
-
 function planJsonNoBuildPrefix(): string {
   return JSON.stringify({
     schemaVersion: "3.0.0",

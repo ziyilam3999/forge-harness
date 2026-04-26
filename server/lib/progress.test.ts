@@ -176,6 +176,13 @@ describe("ProgressReporter", () => {
       for (let i = 0; i < 4; i += 1) {
         await new Promise((r) => setImmediate(r));
       }
+
+      // Direct invariant: after every begin has a matching complete, the
+      // private field must be null. Asserting it via the test-only accessor
+      // is wall-clock-independent (slow CI runners cannot make Date.now()
+      // collide across the second begin).
+      expect(reporter.getActivityStartedAtForTesting()).toBeNull();
+
       // Wait a tangible amount so a fresh Date.now() on the second
       // begin() yields a visibly-different ISO timestamp.
       await new Promise((r) => setTimeout(r, 15));

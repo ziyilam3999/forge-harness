@@ -595,10 +595,10 @@ const DASHBOARD_CSS = `
      luminance that read as flat fills on the dark base. Lift the spread so
      the embers feel incandescent rather than stickered.
      The :root prefix is load-bearing: same-selector rules appear LATER
-     in this file at specificity (0,2,0)/(0,2,1). @media blocks do not
+     in this file at specificity (0,2,0)/(0,3,0). @media blocks do not
      bump specificity, so without the :root prefix these overrides would
      be shadowed by source order. The prefix raises specificity to
-     (0,3,0)/(0,3,1) so the dark cascade actually wins. */
+     (0,3,0)/(0,4,0) so the dark cascade actually wins. */
   :root .forge-pulse .ember { box-shadow: 0 0 6px var(--green); }
   :root .forge-pulse.working-green .ember { box-shadow: 0 0 10px var(--green); }
   :root .forge-pulse.working-amber .ember { box-shadow: 0 0 9px var(--amber); }

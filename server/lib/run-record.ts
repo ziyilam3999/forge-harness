@@ -39,6 +39,15 @@ export interface RunRecord {
   tier: "quick" | "standard" | "thorough" | null;
   storyId?: string;
   evalVerdict?: "PASS" | "FAIL" | "INCONCLUSIVE";
+  /**
+   * v0.38.0 B2 — top-level alias of `evalVerdict`. Additive forward-compatible
+   * so consumers that probe for `verdict` (the more natural name) don't have
+   * to know about the historical `evalVerdict` field. Always written when
+   * `evalVerdict` is present; the two fields stay byte-identical (string
+   * compare) on every record. Pre-v0.38.0 records lack this field — readers
+   * should fall back to `evalVerdict` when missing.
+   */
+  verdict?: "PASS" | "FAIL" | "INCONCLUSIVE";
   escalationReason?: string;
   evalReport?: EvalReport;
   /**
@@ -104,7 +113,25 @@ export interface RunRecord {
     validationRetries: number;
     durationMs: number;
     estimatedCostUsd?: number | null;
+    /**
+     * v0.38.0 B3 — count of `npm run build` invocations the evaluator ran for
+     * this story. When all ACs share an identical `npm run build &&` prefix,
+     * the evaluator runs build ONCE and rewrites each AC's command to drop the
+     * shared prefix, so this field reads `1` instead of N. When ACs do not
+     * share a common build prefix, the field is omitted (legacy behavior).
+     */
+    buildInvocationCount?: number;
   };
+  /**
+   * v0.38.0 B5 — rolled-up cost across the run-level cost tracker AND any
+   * sub-LLM calls captured separately on `generatedDocs.genTokens`. Computed
+   * as `metrics.estimatedCostUsd + (genTokens.inputTokens * inputPerMillion +
+   * genTokens.outputTokens * outputPerMillion) / 1_000_000` where the per-million
+   * rates match `server/lib/cost.ts`'s default model (claude-sonnet-4-6).
+   * Omitted when `metrics.estimatedCostUsd` is null or no spec-gen call ran.
+   * Forward-only: pre-v0.38.0 records lack this field.
+   */
+  totalCostUsd?: number | null;
   outcome:
     | "success"
     | "failure"
@@ -168,6 +195,36 @@ export const GeneratedDocsSchema = z.object({
   contracts: z.array(z.string()),
   warnings: z.array(SpecGeneratorWarningSchema).default([]),
 });
+
+/**
+ * v0.38.0 B5 — token-rate constants for the spec-generator's default model.
+ * Mirrors the `claude-sonnet-4-6` row of `server/lib/cost.ts`'s PRICING table
+ * (the spec-gen call uses the default model — no explicit `model:` is passed
+ * in `defaultSynthesize`). Re-declared here to avoid a circular import; if
+ * the central PRICING table ever drifts, this constant must move with it.
+ */
+const SPEC_GEN_INPUT_PER_MILLION = 3.0;
+const SPEC_GEN_OUTPUT_PER_MILLION = 15.0;
+
+/**
+ * Compute the spec-gen sub-LLM cost in USD from a `genTokens` snapshot.
+ * Uses the same per-million rates as `server/lib/cost.ts` for the default
+ * spec-gen model. Returns 0 when both token counts are zero (e.g. ADR-only
+ * fallback path that synthesises generatedDocs without an LLM call).
+ *
+ * Exported so AC-10's verification expression can reuse the same math the
+ * production writer uses — guarantees byte-identical equality on disk vs
+ * spec.
+ */
+export function computeSpecGenCostUsd(
+  genTokens: { inputTokens: number; outputTokens: number } | undefined,
+): number {
+  if (!genTokens) return 0;
+  return (
+    (genTokens.inputTokens / 1_000_000) * SPEC_GEN_INPUT_PER_MILLION +
+    (genTokens.outputTokens / 1_000_000) * SPEC_GEN_OUTPUT_PER_MILLION
+  );
+}
 
 /**
  * Canonicalize an EvalReport for deterministic serialization (REQ-01 v1.1).

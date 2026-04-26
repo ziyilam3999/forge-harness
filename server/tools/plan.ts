@@ -23,6 +23,7 @@ import type { LintRefreshReport } from "../types/lint-audit.js";
 import { RunContext, trackedCallClaude } from "../lib/run-context.js";
 import type { ExecutionPlan } from "../types/execution-plan.js";
 import type { MasterPlan } from "../types/master-plan.js";
+import { validateAffectedPaths } from "../lib/affected-paths-validator.js";
 
 /**
  * Regex patterns that indicate an AC inspects source code rather than
@@ -909,6 +910,10 @@ async function handlePhasePlan(options: HandlePlanOptions) {
     );
   }
 
+  // v0.38.0 B1 — server-side affectedPaths validation (phase tier).
+  const pathValidation = validateAffectedPaths(plan, projectPath);
+  plan = pathValidation.plan;
+
   // Build output
   const sections: string[] = [
     `=== PHASE PLAN (${phaseId}) ===`,
@@ -943,9 +948,29 @@ async function handlePhasePlan(options: HandlePlanOptions) {
     projectPath, startTime, "phase", effectiveMode, effectiveTier, critiqueRounds, validationRetries, ctx, anyCorrectorFailed,
   );
 
+  // v0.38.0 B1 — surface validation findings.
+  if (pathValidation.pathCorrections.length > 0) {
+    sections.push([
+      `=== PATH CORRECTIONS (${pathValidation.pathCorrections.length}) ===`,
+      ...pathValidation.pathCorrections.map(
+        (c) => `${c.storyId}: "${c.from}" → "${c.to}"`,
+      ),
+    ].join("\n"));
+  }
+  if (pathValidation.pathUnresolvable.length > 0) {
+    sections.push([
+      `=== UNRESOLVABLE AFFECTED PATHS (${pathValidation.pathUnresolvable.length}) ===`,
+      ...pathValidation.pathUnresolvable.map(
+        (u) => `${u.storyId}: "${u.path}"`,
+      ),
+    ].join("\n"));
+  }
+
   return {
     content: [{ type: "text" as const, text: sections.join("\n\n") }],
     lintReport,
+    pathCorrections: pathValidation.pathCorrections,
+    pathUnresolvable: pathValidation.pathUnresolvable,
   };
 }
 
@@ -1012,6 +1037,10 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
     );
   }
 
+  // v0.38.0 B1 — server-side affectedPaths validation (update tier).
+  const pathValidation = validateAffectedPaths(plan, projectPath);
+  plan = pathValidation.plan;
+
   // Build output
   const sections: string[] = [
     "=== UPDATED PLAN ===",
@@ -1068,12 +1097,32 @@ async function handleUpdatePlan(options: HandlePlanOptions) {
     }
   }
 
+  // v0.38.0 B1 — surface validation findings.
+  if (pathValidation.pathCorrections.length > 0) {
+    sections.push([
+      `=== PATH CORRECTIONS (${pathValidation.pathCorrections.length}) ===`,
+      ...pathValidation.pathCorrections.map(
+        (c) => `${c.storyId}: "${c.from}" → "${c.to}"`,
+      ),
+    ].join("\n"));
+  }
+  if (pathValidation.pathUnresolvable.length > 0) {
+    sections.push([
+      `=== UNRESOLVABLE AFFECTED PATHS (${pathValidation.pathUnresolvable.length}) ===`,
+      ...pathValidation.pathUnresolvable.map(
+        (u) => `${u.storyId}: "${u.path}"`,
+      ),
+    ].join("\n"));
+  }
+
   return {
     content: [{ type: "text" as const, text: sections.join("\n\n") }],
     updatedPlan: plan,
     critiqueRounds: critiqueRounds.length > 0 ? critiqueRounds : null,
     lintReport,
     lintRefresh,
+    pathCorrections: pathValidation.pathCorrections,
+    pathUnresolvable: pathValidation.pathUnresolvable,
   };
 }
 
@@ -1141,6 +1190,14 @@ async function handleDefaultPlan(options: HandlePlanOptions) {
     );
   }
 
+  // v0.38.0 B1 — server-side affectedPaths validation. Auto-strips a leading
+  // project-name prefix when the stripped form resolves; surfaces the
+  // correction as a top-level `pathCorrections` field on the response.
+  // Unresolvable paths are surfaced via `pathUnresolvable`. No-op when
+  // projectPath is unset.
+  const pathValidation = validateAffectedPaths(plan, projectPath);
+  plan = pathValidation.plan;
+
   // Build output
   const sections: string[] = [
     "=== EXECUTION PLAN ===",
@@ -1175,9 +1232,31 @@ async function handleDefaultPlan(options: HandlePlanOptions) {
     projectPath, startTime, null, effectiveMode, effectiveTier, critiqueRounds, validationRetries, ctx, anyCorrectorFailed,
   );
 
+  // v0.38.0 B1 — surface affectedPaths validation as top-level fields. Empty
+  // arrays (no corrections / no unresolvables) ship verbatim so consumers can
+  // distinguish "validator ran clean" from "validator did not run".
+  if (pathValidation.pathCorrections.length > 0) {
+    sections.push([
+      `=== PATH CORRECTIONS (${pathValidation.pathCorrections.length}) ===`,
+      ...pathValidation.pathCorrections.map(
+        (c) => `${c.storyId}: "${c.from}" → "${c.to}"`,
+      ),
+    ].join("\n"));
+  }
+  if (pathValidation.pathUnresolvable.length > 0) {
+    sections.push([
+      `=== UNRESOLVABLE AFFECTED PATHS (${pathValidation.pathUnresolvable.length}) ===`,
+      ...pathValidation.pathUnresolvable.map(
+        (u) => `${u.storyId}: "${u.path}"`,
+      ),
+    ].join("\n"));
+  }
+
   return {
     content: [{ type: "text" as const, text: sections.join("\n\n") }],
     lintReport,
+    pathCorrections: pathValidation.pathCorrections,
+    pathUnresolvable: pathValidation.pathUnresolvable,
   };
 }
 

@@ -28,8 +28,10 @@ import { RunContext, trackedCallClaude } from "../lib/run-context.js";
 import {
   writeRunRecord,
   canonicalizeEvalReport,
+  computeSpecGenCostUsd,
   type RunRecord,
   type CriticEvalReport,
+  type SpecGeneratorWarning,
 } from "../lib/run-record.js";
 import { generateSpecForStory } from "../lib/spec-generator.js";
 import { processStory as processAdrStory } from "../lib/adr-extractor.js";
@@ -173,6 +175,12 @@ type EvaluateInput = {
 type McpResponse = {
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
+  /**
+   * v0.38.0 I3 — top-level spec-generator warnings on story-mode responses.
+   * Byte-identical to the on-disk run record's `generatedDocs.warnings`.
+   * Empty array when no warnings; absent on non-story modes.
+   */
+  specGenWarnings?: SpecGeneratorWarning[];
 };
 
 // ── Shared helpers ────────────────────────────────────────
@@ -203,6 +211,43 @@ function buildRunRecord(
     },
     outcome: "success",
   };
+}
+
+// ── Build-dedup helper (v0.38.0 B3) ───────────────────────
+
+/**
+ * Detect the longest leading `<setup-cmd> &&` prefix shared verbatim by ALL
+ * acceptance criteria commands in the story. Currently only matches the
+ * exact form `npm run build &&` (with optional surrounding whitespace) — the
+ * audit's case (US-06) was 4 ACs each prefixed `npm run build && <cmd>`. The
+ * plan keeps the scope narrow: "all-share case" only; partial-share is out
+ * of scope.
+ *
+ * Returns:
+ *   - `{ prefix, prefixCommand }` when every AC starts with the same
+ *     `npm run build &&` prefix (`prefix` = the prefix to strip including
+ *     trailing whitespace; `prefixCommand` = the bare command to run once
+ *     up-front, e.g. `npm run build`).
+ *   - `null` when no shared prefix exists (e.g., one AC is `node foo.js`
+ *     while the others are `npm run build && node foo.js`).
+ *
+ * Exported so tests can verify the detection rule directly without going
+ * through the full evaluate pipeline.
+ */
+export function detectSharedBuildPrefix(
+  acCommands: ReadonlyArray<string>,
+): { prefix: string; prefixCommand: string } | null {
+  if (acCommands.length < 2) return null;
+  // Match `<setup-cmd> &&<whitespace>` where setup-cmd is `npm run build`.
+  // Lock the regex to `npm run build` for now to keep the slice narrow.
+  const PREFIX_RE = /^(\s*npm\s+run\s+build\s*&&\s*)/;
+  const firstMatch = acCommands[0].match(PREFIX_RE);
+  if (!firstMatch) return null;
+  const prefix = firstMatch[1];
+  for (const cmd of acCommands) {
+    if (!cmd.startsWith(prefix)) return null;
+  }
+  return { prefix, prefixCommand: "npm run build" };
 }
 
 // ── git HEAD capture helper ───────────────────────────────
@@ -252,10 +297,59 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
   const startTime = Date.now();
 
   const plan = loadPlan(input.planPath, input.planJson);
-  const report = await evaluateStory(plan, input.storyId, {
+
+  // v0.38.0 B3 — build-dedup: when ALL ACs of the story share an identical
+  // `npm run build &&` prefix, run `npm run build` once up-front and strip
+  // the prefix from each AC's command. Partial-share is out of scope per
+  // the plan; mixed-prefix scenarios fall through to the per-AC behavior.
+  let buildInvocationCount: number | undefined;
+  let evaluatedPlan = plan;
+  const targetStory = plan.stories.find((s) => s.id === input.storyId);
+  if (targetStory && targetStory.acceptanceCriteria.length >= 2) {
+    const acCommands = targetStory.acceptanceCriteria.map((ac) => ac.command);
+    const shared = detectSharedBuildPrefix(acCommands);
+    if (shared) {
+      try {
+        execFileSync("sh", ["-c", shared.prefixCommand], {
+          cwd: input.projectPath,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        buildInvocationCount = 1;
+      } catch (err) {
+        // If the up-front build fails, leave the prefixes intact so each AC
+        // sees its own build failure (preserves observable behavior — a
+        // failing build still surfaces as a per-AC FAIL rather than a
+        // single hidden setup error).
+        console.error(
+          `forge_evaluate: shared-prefix build failed (falling back to per-AC build): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (buildInvocationCount === 1) {
+        // Rewrite the plan in-memory: drop the shared prefix from each AC of
+        // the target story. New plan object — the original `plan` ref stays
+        // unchanged so callers (and the run record) see the original commands.
+        const rewrittenStories = plan.stories.map((s) => {
+          if (s.id !== input.storyId) return s;
+          return {
+            ...s,
+            acceptanceCriteria: s.acceptanceCriteria.map((ac) => ({
+              ...ac,
+              command: ac.command.slice(shared.prefix.length),
+            })),
+          };
+        });
+        evaluatedPlan = { ...plan, stories: rewrittenStories };
+      }
+    }
+  }
+
+  const report = await evaluateStory(evaluatedPlan, input.storyId, {
     timeoutMs: input.timeoutMs,
     cwd: input.projectPath,
   });
+
+  // v0.38.0 I3 — captured for the top-level MCP response field.
+  let storyEvalSpecGenWarnings: SpecGeneratorWarning[] | undefined;
 
   // Write run record with the four REQ-01 v1.1 additive fields populated.
   // canonicalizeEvalReport sorts criteria by (id, evidence) so two runs
@@ -297,6 +391,10 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
           contracts: spec.contracts,
           warnings: spec.warnings ?? [],
         };
+        // v0.38.0 I3: capture warnings reference for the top-level response.
+        // Same array as `generatedDocs.warnings` so the MCP top-level field
+        // is byte-identical to the on-disk record.
+        storyEvalSpecGenWarnings = generatedDocs.warnings;
       } catch (err) {
         console.error(
           `forge_evaluate: spec-generator failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
@@ -340,18 +438,56 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
       }
     }
 
+    // v0.38.0 B3 — buildInvocationCount lands on metrics when build-dedup
+    // fired. The plan only specifies the field for the all-share case; we
+    // omit it in mixed-prefix scenarios so legacy consumers that probe
+    // `metrics.buildInvocationCount === undefined` still treat that as
+    // "no dedup happened".
+    if (buildInvocationCount !== undefined) {
+      base.metrics.buildInvocationCount = buildInvocationCount;
+    }
+
+    // v0.38.0 B5 — totalCostUsd rolled-up: run-level estimatedCostUsd
+    // (captured BEFORE spec-gen ran) + spec-gen sub-LLM cost (computed from
+    // generatedDocs.genTokens). Omit when run-level cost is null (consumers
+    // can't meaningfully sum unknown). When generatedDocs is absent, the
+    // spec-gen contribution is 0 and totalCostUsd = estimatedCostUsd.
+    let totalCostUsd: number | null | undefined;
+    if (base.metrics.estimatedCostUsd !== null && base.metrics.estimatedCostUsd !== undefined) {
+      totalCostUsd =
+        base.metrics.estimatedCostUsd +
+        computeSpecGenCostUsd(generatedDocs?.genTokens);
+    } else {
+      totalCostUsd = base.metrics.estimatedCostUsd ?? null;
+    }
+
     await writeRunRecord(input.projectPath, {
       ...base,
       storyId: input.storyId,
       evalVerdict: report.verdict,
+      // v0.38.0 B2 — top-level `verdict` alias of `evalVerdict`. Same string,
+      // additive.
+      verdict: report.verdict,
       evalReport: canonicalizeEvalReport(report),
       ...(gitSha ? { gitSha } : {}),
       ...(generatedDocs ? { generatedDocs } : {}),
+      ...(totalCostUsd !== undefined ? { totalCostUsd } : {}),
     });
   }
 
+  // v0.38.0 I3 — surface spec-generator warnings at the top level of the
+  // forge_evaluate MCP response. Byte-identical to the on-disk run record's
+  // `generatedDocs.warnings` (same array reference at this point — array
+  // copy here just to avoid downstream mutation).
+  // The `specGenWarnings` field is also set on records that omit
+  // `generatedDocs` entirely (non-PASS verdicts, spec-gen failure) — empty
+  // array in that case so consumers can rely on field presence.
+  const specGenWarnings: SpecGeneratorWarning[] =
+    storyEvalSpecGenWarnings ?? [];
+
   return {
     content: [{ type: "text", text: JSON.stringify(report, null, 2) }],
+    specGenWarnings,
   };
 }
 

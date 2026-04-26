@@ -38,6 +38,7 @@ import type {
 } from "../types/coordinate-result.js";
 import type { Activity } from "./activity.js";
 import { getDeclaration, type StoryDeclaration } from "./declaration-store.js";
+import { readShippedStoriesFromMaster } from "./git-master-stories.js";
 
 // ── Activity liveness helper ──────────────────────────────────────────────
 
@@ -1154,6 +1155,87 @@ export async function readActivityFeed(
   return merged.slice(0, 20);
 }
 
+/**
+ * Pure mapper — given a brief and the result of
+ * `readShippedStoriesFromMaster`, return a NEW brief whose `stories[].status`
+ * is upgraded to `"done"` for every story whose ID appears in the master
+ * shipped-set AND whose current status is one of the non-terminal kanban
+ * states (`pending`, `ready`, `ready-for-retry`, `failed`, `dep-failed`).
+ *
+ * Upward-only by design (plan AC-3): an existing `"done"` is never demoted
+ * even if the story is absent from the shipped-set. This protects against
+ * (a) the stale-fetch case where the operator hasn't pulled the merge yet,
+ * and (b) revert scenarios where the kanban shouldn't oscillate.
+ *
+ * Also bumps `brief.completedCount` so the STORIES x/y widget stays in
+ * sync with the kanban it labels (plan AC-1's grep checks `STORIES 5/13`
+ * style strings, not just column placement).
+ *
+ * Returns a new object — never mutates `brief`. The renderer test fixtures
+ * pass synthesized brief literals; mutating them would create cross-test
+ * leakage.
+ */
+function reconcileBriefStatusesWithMaster(
+  brief: PhaseTransitionBrief,
+  master: { shippedStoryIds: Set<string>; warning: string | null },
+): PhaseTransitionBrief {
+  // Empty result set + warning is the graceful-fallback path: the brief
+  // passes through verbatim. Surface the warning to stderr so operators
+  // can diagnose why reconciliation degraded (plan AC-4).
+  if (master.warning !== null) {
+    console.error(
+      `forge: dashboard master-reconciliation degraded — ${master.warning}`,
+    );
+  }
+  if (master.shippedStoryIds.size === 0) {
+    return brief;
+  }
+
+  // Status states from which an upgrade to `"done"` is permitted. `"done"`
+  // is excluded so we never re-write a terminal status (no-op + future-proof
+  // against demotion bugs); the value is held in a Set for O(1) lookup.
+  const upgradable = new Set<StoryStatus>([
+    "pending",
+    "ready",
+    "ready-for-retry",
+    "failed",
+    "dep-failed",
+  ]);
+
+  let upgrades = 0;
+  const stories = brief.stories.map((entry) => {
+    if (
+      master.shippedStoryIds.has(entry.storyId) &&
+      upgradable.has(entry.status)
+    ) {
+      upgrades += 1;
+      return { ...entry, status: "done" as StoryStatus };
+    }
+    return entry;
+  });
+
+  if (upgrades === 0) {
+    // Nothing changed — return original to keep object identity stable
+    // for any caller doing reference equality checks.
+    return brief;
+  }
+
+  return {
+    ...brief,
+    stories,
+    completedCount: brief.completedCount + upgrades,
+  };
+}
+
+/**
+ * Test seam: re-export the pure reconciliation mapper so unit tests can
+ * verify behaviour without spinning up a full renderer + temp-repo
+ * fixture. The renderer test file uses this directly to cover AC-1..AC-3
+ * and AC-7.
+ */
+export const __reconcileBriefStatusesWithMasterForTests =
+  reconcileBriefStatusesWithMaster;
+
 export async function renderDashboard(
   projectPath: string,
   io: DashboardIo = DEFAULT_IO,
@@ -1177,8 +1259,22 @@ export async function renderDashboard(
     // execution time, not wall-clock. Same semantics as forge_status.totals.
     const totals = await readTotalsFromRuns(projectPath);
 
+    // Self-reconciliation against `origin/master` — closes the post-merge
+    // staleness window where `coordinate-brief.json` lags behind a freshly
+    // landed PR. The helper runs ONE `git log` invocation, extracts story
+    // IDs from commit subjects via `/\b(US-\d+)\b/gi`, and returns a set
+    // the renderer can use to mark stories `done` upward-only. Failure
+    // returns an empty set + a warning string; the renderer falls back to
+    // the brief's verbatim status. Plan AC-1..AC-8.
+    const reconciled = brief
+      ? reconcileBriefStatusesWithMaster(
+          brief,
+          await readShippedStoriesFromMaster(projectPath),
+        )
+      : brief;
+
     const html = renderDashboardHtml({
-      brief,
+      brief: reconciled,
       activity,
       auditEntries,
       renderedAt: new Date().toISOString(),

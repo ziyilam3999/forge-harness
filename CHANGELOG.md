@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- **Spec-generator hallucination guard (Phase B follow-up).** `forge_evaluate` PASS no longer accepts spec sections that name identifiers absent from the story's source. The spec-generator now (1) extracts a real source vocabulary from each story's `affectedPaths` via the TypeScript Compiler API (classes + public methods, interfaces / types + fields, functions, consts, enums, default exports, re-exports, `.mjs`), (2) renders a "Real symbols available" section into the user prompt with a 2000-byte cap, and (3) post-validates the LLM's output by stripping any backtick-quoted bullet whose identifier isn't in the vocabulary (allowlist for `Promise`/`Array`/`Map`/utility types/`forge_*` tool ids). Strip events surface on `RunRecord.generatedDocs.warnings` (additive Zod schema, defaults to `[]` on legacy records). Mode flag `FORGE_SPEC_VALIDATOR_MODE=warn` skips strip while still recording. Pinned regression: replay of the 2026-04-26 US-05 hallucination produces a spec naming only `KnowledgeService.{query,indexFile,getStatus}` plus `QueryResult`/`ServiceStatus` — `KnowledgeService.search`/`KnowledgeService.delete`/`KnowledgeDocument`/`KnowledgeResult` are stripped. `typescript` moved to `dependencies` for runtime Compiler API access.
+
 ## [0.36.1](https://github.com/ziyilam3999/forge-harness/compare/v0.36.0...v0.36.1) (2026-04-25)
 
 ### Bug Fixes

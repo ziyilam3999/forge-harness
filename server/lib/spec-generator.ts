@@ -339,6 +339,39 @@ async function defaultSynthesize(
 // ── Post-validator (Strategy 2: strip unknown identifiers) ────────────────
 
 /**
+ * Allowlist of built-in TypeScript / JavaScript globals + standard library
+ * symbols. These names are legitimate environment references (return types,
+ * generic constraints, exception types) and MUST NOT be stripped even when
+ * the project source vocabulary doesn't contain them. Keep terse — when in
+ * doubt, omit; the validator is permissive about test-name strings and
+ * forge_* tool ids elsewhere.
+ */
+const TS_BUILTINS = new Set<string>([
+  // Promise & async surface
+  "Promise", "PromiseLike", "Awaited", "AsyncIterable", "AsyncIterator", "AsyncGenerator",
+  // Collections + iteration
+  "Array", "ReadonlyArray", "Map", "ReadonlyMap", "Set", "ReadonlySet", "WeakMap", "WeakSet",
+  "Iterable", "Iterator", "Generator", "ArrayLike", "Record", "Tuple",
+  // Primitives + boxed
+  "String", "Number", "Boolean", "Symbol", "BigInt", "Object", "Function",
+  // Errors
+  "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "URIError", "EvalError", "AggregateError",
+  // Utility types
+  "Partial", "Required", "Readonly", "Pick", "Omit", "Exclude", "Extract", "NonNullable",
+  "Parameters", "ReturnType", "InstanceType", "ThisType", "Uppercase", "Lowercase", "Capitalize", "Uncapitalize",
+  // Date/regex/JSON/Math
+  "Date", "RegExp", "JSON", "Math",
+  // Buffers + binary
+  "Buffer", "ArrayBuffer", "SharedArrayBuffer", "DataView",
+  "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array",
+  "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array",
+  // DOM-ish (might appear in mixed code)
+  "URL", "URLSearchParams", "Blob", "File", "FormData",
+  // Misc
+  "Proxy", "Reflect", "WeakRef", "FinalizationRegistry",
+]);
+
+/**
  * Mode is `strip` by default. Set `FORGE_SPEC_VALIDATOR_MODE=warn` to keep
  * bullets in the file but still record `warnings` (AC-11). Any other value
  * (or unset) means "strip".
@@ -381,21 +414,46 @@ export function validateAgainstVocabulary(
       const isBullet = /^\s*-\s/.test(line);
       if (!isBullet) { keptLines.push(line); continue; }
 
-      // Extract every backtick-quoted token from this bullet.
-      const idents: string[] = [];
-      const re = /`([^`]+)`/g;
+      // Extract every backtick-quoted token from this bullet, then for each
+      // span pull out programming-symbol-shaped identifiers from inside it.
+      // The LLM emits bullets like:
+      //   - `KnowledgeService.search(query: string): Promise<KnowledgeResult[]>`
+      //   - `KnowledgeDocument`: persisted shape with `id`, `content`
+      // so the entire backtick span isn't a clean identifier — we have to
+      // harvest each capitalised symbol-ish token from within the span.
+      const symbolLike: string[] = [];
+      const spanRe = /`([^`]+)`/g;
       let m: RegExpExecArray | null;
-      while ((m = re.exec(line)) !== null) idents.push(m[1]);
-
-      // Only validate identifiers that look like programming symbols
-      // (e.g. `Foo`, `Foo.bar`, `Foo.bar.baz`). Skip tokens with spaces or
-      // path separators or that look like prose strings.
-      const symbolLike = idents.filter((id) => /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(id));
+      while ((m = spanRe.exec(line)) !== null) {
+        const span = m[1];
+        // Strip generic angle-bracket arguments (`Foo<Bar>` → `Foo`) and
+        // array brackets so they don't fragment the identifier.
+        const simplified = span.replace(/<[^>]*>/g, "").replace(/\[\]/g, "");
+        const tokenRe = /\b([A-Z][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)\b/g;
+        let tm: RegExpExecArray | null;
+        while ((tm = tokenRe.exec(simplified)) !== null) symbolLike.push(tm[1]);
+      }
+      // Strings inside test-surface ("test name") are quoted with double quotes,
+      // not asterisks, so they survive this pass — they don't begin with a capital
+      // unless the LLM happened to write a Title Case test name. We let the
+      // test-name match handle that path.
+      // Also harvest backtick-wrapped quoted strings as test-name candidates.
+      // Pattern: `"some string"` — preserve the inner string for test-name match.
+      const quotedTestRe = /`"([^"]+)"`/g;
+      let qm: RegExpExecArray | null;
+      while ((qm = quotedTestRe.exec(line)) !== null) symbolLike.push(qm[1]);
 
       let bulletKept = true;
       for (const id of symbolLike) {
         // Allow MCP tool ids by string-prefix convention (forge_evaluate, forge_generate, ...).
         if (/^forge_[a-z_]+$/.test(id) || /^forge_[a-z_]+\.[A-Za-z0-9_$]+$/.test(id)) continue;
+        // Allow common TypeScript built-ins / globals — these are environment
+        // names the LLM legitimately references in signatures and don't need
+        // to live in a project source vocabulary.
+        if (TS_BUILTINS.has(id)) continue;
+        // Top-level segment of a dotted path: if the head is a builtin, skip.
+        const head = id.split(".")[0];
+        if (TS_BUILTINS.has(head)) continue;
         // Two-segment check: `Foo.bar` validates against full string OR the owner being a known class/type.
         const okFull = vocabularyContains(vocab, id);
         if (okFull) continue;

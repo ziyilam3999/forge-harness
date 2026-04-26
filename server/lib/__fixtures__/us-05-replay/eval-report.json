@@ -1,0 +1,26 @@
+{
+  "storyId": "US-05",
+  "verdict": "PASS",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "status": "PASS",
+      "evidence": "PASS service interface correct"
+    },
+    {
+      "id": "AC-02",
+      "status": "PASS",
+      "evidence": "PASS answer references indexed content"
+    },
+    {
+      "id": "AC-03",
+      "status": "PASS",
+      "evidence": "PASS status: {\"documentCount\":0,\"watcherAlive\":false,\"uptimeSeconds\":0}"
+    },
+    {
+      "id": "AC-04",
+      "status": "PASS",
+      "evidence": "PASS tests/knowledge.test.ts: KnowledgeService.query without indexed documents/indexFile + query end-to-end/getStatus/query type guards (9 tests passed)"
+    }
+  ]
+}

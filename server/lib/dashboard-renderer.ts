@@ -575,6 +575,30 @@ const DASHBOARD_CSS = `
   --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   --shadow-sm: 0 1px 3px rgba(60,55,45,0.10);
 }
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* "Forge at Night" — iron base, ember-copper accents, glow not fill.
+       Variable names mirror the light-theme :root above so all selectors
+       flow through unchanged. WCAG AA verified by hex luminance: --text on
+       --off-white ~14.5:1, --text-dim ~4.6:1, accent colors all ≥6:1. */
+    --white: #161d24; --off-white: #0e1419; --light-green: #172821;
+    --border: #2a3340; --border-light: #1f2731;
+    --text: #e6e8eb; --text-secondary: #a8b0bc; --text-dim: #7a8290;
+    --green: #5eb88a; --green-bg: #16291f;
+    --amber: #e89770; --amber-bg: #2a1d12;
+    --red: #e88078; --red-bg: #3a1818;
+    --grey: #7a8290;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.45);
+  }
+  /* Targeted overrides — the variable redefinitions above carry the bulk
+     of the theming; these few selectors had glow shapes baked at light-base
+     luminance that read as flat fills on the dark base. Lift the spread so
+     the embers feel incandescent rather than stickered. */
+  .forge-pulse .ember { box-shadow: 0 0 6px var(--green); }
+  .forge-pulse.working-green .ember { box-shadow: 0 0 10px var(--green); }
+  .forge-pulse.working-amber .ember { box-shadow: 0 0 9px var(--amber); }
+  .forge-pulse.working-red .ember { box-shadow: 0 0 6px var(--red); }
+}
 html { font-size: 15px; }
 body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-white); color: var(--text); min-height: 100vh; }
 .dashboard { max-width: 1400px; margin: 0 auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }

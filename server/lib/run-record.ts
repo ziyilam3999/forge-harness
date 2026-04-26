@@ -1,6 +1,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
+import { z } from "zod";
 import type { EvalReport, CriterionResult } from "../types/eval-report.js";
 import { writeActivity } from "./activity.js";
 import { renderDashboard } from "./dashboard-renderer.js";
@@ -81,6 +82,17 @@ export interface RunRecord {
     genTimestamp: string;
     genTokens: { inputTokens: number; outputTokens: number };
     contracts: string[];
+    /**
+     * Soft-failure log emitted by spec-generator's grounding validator.
+     * Currently populated with `{ kind: "stripped-unknown-identifier", ... }`
+     * entries when the post-validator removes a backtick-quoted identifier
+     * not found in the source vocabulary. ALWAYS emitted (empty array if
+     * no strips happened) so consumers can rely on the field's presence.
+     *
+     * Forward-only: pre-2026-04-26 RunRecords lack this field; the Zod
+     * schema below uses `.default([])` so historical records still parse.
+     */
+    warnings: SpecGeneratorWarning[];
   };
   metrics: {
     inputTokens: number;
@@ -102,6 +114,60 @@ export interface RunRecord {
     | "timeout"
     | "corrector-failed";
 }
+
+/**
+ * Spec-generator warning entry — emitted by the post-hoc validator.
+ * Discriminated union by `kind`:
+ *   - "stripped-unknown-identifier": a backtick-quoted identifier in a spec
+ *     bullet was not found in the source vocabulary, so the bullet was
+ *     removed (strict mode) or flagged (warn mode).
+ *   - "no-vocabulary": grounding was lenient because no source vocabulary
+ *     could be built (empty/unparseable affectedPaths). The spec was written
+ *     verbatim without strips.
+ */
+export type SpecGeneratorWarning =
+  | {
+      kind: "stripped-unknown-identifier";
+      identifier: string;
+      section: string;
+      filesScanned: number;
+    }
+  | {
+      kind: "no-vocabulary";
+      filesScanned: number;
+    };
+
+/**
+ * Zod schema for `RunRecord.generatedDocs` — gives runtime validation for
+ * AC-10 (warnings is a typed array, default `[]`). Pairs with the static
+ * TypeScript interface above; the two MUST stay in sync. Designed
+ * additive-only: a real run-record JSON missing the `warnings` field still
+ * parses cleanly because of `.default([])`.
+ */
+export const SpecGeneratorWarningSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("stripped-unknown-identifier"),
+    identifier: z.string(),
+    section: z.string(),
+    filesScanned: z.number().int().nonnegative(),
+  }),
+  z.object({
+    kind: z.literal("no-vocabulary"),
+    filesScanned: z.number().int().nonnegative(),
+  }),
+]);
+
+export const GeneratedDocsSchema = z.object({
+  specPath: z.string(),
+  adrPaths: z.array(z.string()),
+  genTimestamp: z.string(),
+  genTokens: z.object({
+    inputTokens: z.number(),
+    outputTokens: z.number(),
+  }),
+  contracts: z.array(z.string()),
+  warnings: z.array(SpecGeneratorWarningSchema).default([]),
+});
 
 /**
  * Canonicalize an EvalReport for deterministic serialization (REQ-01 v1.1).

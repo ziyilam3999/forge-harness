@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { writeRunRecord, type RunRecord } from "./run-record.js";
+import {
+  writeRunRecord,
+  type RunRecord,
+  GeneratedDocsSchema,
+  SpecGeneratorWarningSchema,
+} from "./run-record.js";
 
 let tempDir: string;
 
@@ -121,5 +126,65 @@ describe("writeRunRecord", () => {
     const runsDir = join(tempDir, ".forge", "runs");
     const files = await readdir(runsDir);
     expect(files[0]).not.toContain(":");
+  });
+});
+
+describe("GeneratedDocsSchema (AC-10) — warnings is a typed array, default []", () => {
+  it("parses a generatedDocs object lacking 'warnings' and defaults it to []", () => {
+    // Forward-compat: pre-2026-04-26 records that omit `warnings` must still parse.
+    const legacy = {
+      specPath: "/abs/docs/generated/TECHNICAL-SPEC.md",
+      adrPaths: [],
+      genTimestamp: "2026-04-20T05:00:00.000Z",
+      genTokens: { inputTokens: 100, outputTokens: 50 },
+      contracts: ["forge_evaluate"],
+    };
+    const parsed = GeneratedDocsSchema.parse(legacy);
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("parses a generatedDocs object with explicit empty warnings array", () => {
+    const fresh = {
+      specPath: "/abs/docs/generated/TECHNICAL-SPEC.md",
+      adrPaths: [],
+      genTimestamp: "2026-04-26T05:00:00.000Z",
+      genTokens: { inputTokens: 100, outputTokens: 50 },
+      contracts: [],
+      warnings: [],
+    };
+    const parsed = GeneratedDocsSchema.parse(fresh);
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("parses a generatedDocs object with a populated warnings array", () => {
+    const withStrips = {
+      specPath: "/abs/docs/generated/TECHNICAL-SPEC.md",
+      adrPaths: [],
+      genTimestamp: "2026-04-26T05:00:00.000Z",
+      genTokens: { inputTokens: 100, outputTokens: 50 },
+      contracts: [],
+      warnings: [
+        {
+          kind: "stripped-unknown-identifier",
+          identifier: "Foo.qux",
+          section: "api-contracts",
+          filesScanned: 3,
+        },
+      ],
+    };
+    const parsed = GeneratedDocsSchema.parse(withStrips);
+    expect(parsed.warnings).toHaveLength(1);
+    expect(parsed.warnings[0].kind).toBe("stripped-unknown-identifier");
+    expect(parsed.warnings[0].identifier).toBe("Foo.qux");
+  });
+
+  it("rejects a warning whose kind is unknown", () => {
+    const bogus = {
+      kind: "completely-different-shape",
+      identifier: "Foo",
+      section: "api-contracts",
+      filesScanned: 1,
+    };
+    expect(() => SpecGeneratorWarningSchema.parse(bogus)).toThrow();
   });
 });

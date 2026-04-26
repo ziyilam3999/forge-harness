@@ -290,6 +290,7 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
           genTimestamp: spec.genTimestamp,
           genTokens: spec.genTokens,
           contracts: spec.contracts,
+          warnings: spec.warnings ?? [],
         };
       } catch (err) {
         console.error(
@@ -324,6 +325,7 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
             genTimestamp: new Date().toISOString(),
             genTokens: { inputTokens: 0, outputTokens: 0 },
             contracts: [],
+            warnings: [],
           };
         }
       } catch (err) {

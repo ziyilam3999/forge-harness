@@ -1,14 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   buildSourceVocabulary,
   renderVocabularyForPrompt,
   vocabularyContains,
 } from "./spec-source-vocabulary.js";
 
-const FIXTURE_ROOT = resolve(__dirname, "__fixtures__", "spec-vocabulary");
 const PROJECT_ROOT = resolve(__dirname, "..", "..");
-// Path of FIXTURE_ROOT relative to PROJECT_ROOT, in POSIX form for affectedPaths.
+// FIXTURE_REL is relative to PROJECT_ROOT, POSIX-form (Windows resolves both).
 const FIXTURE_REL = "server/lib/__fixtures__/spec-vocabulary";
 
 describe("spec-source-vocabulary — AC-1 basic class + interface", () => {

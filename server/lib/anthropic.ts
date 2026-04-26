@@ -71,7 +71,15 @@ export function resetClient(): void {
 }
 
 export function getClient(): Anthropic {
-  // Evict cache if the OAuth token is expiring within 5 minutes
+  // Two-layer 5-minute expiry guard (intentional duplication):
+  //   (1) Cache eviction below: proactively clear a cached client whose
+  //       OAuth token is within 5 minutes of expiry, so the next call
+  //       falls through to readOAuthToken() and re-reads fresh creds.
+  //   (2) readOAuthToken() rejects any token with < 5 minutes remaining
+  //       (line 52). This guards the cold-start path where `client` is
+  //       null and the cache eviction never fires.
+  // Both guards use the same 5-minute threshold so the live-token window
+  // is consistent regardless of whether the request hits warm or cold cache.
   if (client && clientExpiresAt !== null && Date.now() >= clientExpiresAt - 5 * 60 * 1000) {
     client = null;
     clientExpiresAt = null;

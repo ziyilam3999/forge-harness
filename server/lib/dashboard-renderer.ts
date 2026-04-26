@@ -39,6 +39,8 @@ import type {
 import type { Activity } from "./activity.js";
 import { getDeclaration, type StoryDeclaration } from "./declaration-store.js";
 import { readShippedStoriesFromMaster } from "./git-master-stories.js";
+import { pathExistsInRepo } from "./path-resolver.js";
+import type { SpecGeneratorWarning } from "./run-record.js";
 
 // ── Activity liveness helper ──────────────────────────────────────────────
 
@@ -180,6 +182,139 @@ function toolNameFromFilename(filename: string): string {
   return match ? match[1] : base;
 }
 
+// ── v0.38.0 grounding signals (I1+I2+I3+I7) ───────────────────────────────
+
+/**
+ * Per-story grounding observability snapshot extracted from the latest
+ * `.forge/runs/*.json` record carrying that storyId. The dashboard's story
+ * card consumes this struct to surface:
+ *   - Affected-path existence indicators (✓/✗ per path) — I2.
+ *   - Warning chips for spec-gen warnings (no-vocabulary, stripped-unknown-
+ *     identifier) — I1.
+ *
+ * `latestRunTimestamp` is held so the Recommendation drift line (I7) can
+ * compute "≥ 1 story shipped with X warning" by joining over warnings.
+ */
+export interface StoryGroundingSignal {
+  storyId: string;
+  affectedPaths: string[];
+  warnings: SpecGeneratorWarning[];
+  latestRunTimestamp: string;
+}
+
+/**
+ * Walk `.forge/runs/*.json`, group records by storyId, return the latest
+ * record per storyId paired with its `affectedPaths` and
+ * `generatedDocs.warnings`. Records that lack a storyId are skipped.
+ *
+ * Failure-tolerant: missing dir / unreadable files / corrupt JSON are
+ * logged-once and skipped (mirrors `readTotalsFromRuns`'s degradation
+ * pattern). Worst case: empty Map, dashboard renders without grounding
+ * signals — no false-positive warning chips on cards.
+ */
+export async function readStoryGroundingSignals(
+  projectPath: string,
+): Promise<Map<string, StoryGroundingSignal>> {
+  const runsDir = join(projectPath, ".forge", "runs");
+  const out = new Map<string, StoryGroundingSignal>();
+
+  let files: string[];
+  try {
+    files = await readdir(runsDir);
+  } catch {
+    return out;
+  }
+
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    let content: string;
+    try {
+      content = await readFile(join(runsDir, file), "utf-8");
+    } catch {
+      continue;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(content) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const storyId =
+      typeof parsed.storyId === "string" ? parsed.storyId : null;
+    if (!storyId) continue;
+    const ts =
+      typeof parsed.timestamp === "string" ? parsed.timestamp : "";
+    if (!ts) continue;
+    const existing = out.get(storyId);
+    if (existing && existing.latestRunTimestamp >= ts) continue;
+    const affectedPaths = Array.isArray(parsed.affectedPaths)
+      ? (parsed.affectedPaths as unknown[]).filter(
+          (p): p is string => typeof p === "string",
+        )
+      : [];
+    const generatedDocs = parsed.generatedDocs as
+      | { warnings?: unknown }
+      | undefined;
+    const warnings: SpecGeneratorWarning[] =
+      generatedDocs && Array.isArray(generatedDocs.warnings)
+        ? (generatedDocs.warnings as SpecGeneratorWarning[])
+        : [];
+    out.set(storyId, {
+      storyId,
+      affectedPaths,
+      warnings,
+      latestRunTimestamp: ts,
+    });
+  }
+  return out;
+}
+
+/**
+ * Render the per-path ✓/✗ existence indicator block. Empty array → "".
+ * Each path is wrapped in a span with `data-path-exists="true|false"` so the
+ * AC can grep for either value plus the path text.
+ */
+function renderAffectedPathsBlock(
+  projectPath: string | null,
+  affectedPaths: string[],
+): string {
+  if (affectedPaths.length === 0) return "";
+  const items = affectedPaths
+    .map((p) => {
+      const exists = projectPath ? pathExistsInRepo(projectPath, p) : false;
+      const indicator = exists ? "✓" : "✗";
+      const cls = exists ? "path-ok" : "path-missing";
+      return `<span class="card-path ${cls}" data-path-exists="${exists ? "true" : "false"}"><span class="path-indicator">${indicator}</span> ${escapeHtml(p)}</span>`;
+    })
+    .join("");
+  return `<div class="card-paths">${items}</div>`;
+}
+
+/**
+ * Render warning chips for spec-gen warnings. Each chip carries
+ * `data-warning="<kind>"` and `data-severity="warning|error"` per the AC
+ * contract. Empty array → "".
+ */
+function renderWarningChips(warnings: SpecGeneratorWarning[]): string {
+  if (warnings.length === 0) return "";
+  // Dedup by kind so a story with N stripped-identifier warnings renders one
+  // red chip rather than N. (Cardinality is preserved as a count badge.)
+  const counts = new Map<string, number>();
+  for (const w of warnings) {
+    counts.set(w.kind, (counts.get(w.kind) ?? 0) + 1);
+  }
+  const chips: string[] = [];
+  for (const [kind, count] of counts) {
+    const severity = kind === "stripped-unknown-identifier" ? "error" : "warning";
+    const label = kind === "no-vocabulary" ? "no vocabulary" : kind === "stripped-unknown-identifier" ? "unknown identifier" : kind;
+    const countLabel = count > 1 ? ` ×${count}` : "";
+    chips.push(
+      `<span class="card-warning-chip ${severity}" data-warning="${escapeHtml(kind)}" data-severity="${severity}">${escapeHtml(label)}${escapeHtml(countLabel)}</span>`,
+    );
+  }
+  return `<div class="card-warnings">${chips.join("")}</div>`;
+}
+
 // ── Render input ──────────────────────────────────────────────────────────
 
 export interface DashboardRenderInput {
@@ -218,6 +353,22 @@ export interface DashboardRenderInput {
     elapsedMs: number;
     spentUsd?: number;
   };
+  /**
+   * v0.38.0 (I1+I2+I3+I7) — per-story grounding signals keyed by storyId.
+   * Source: walk of `.forge/runs/*.json` records.
+   *
+   * Optional-with-default-empty so existing renderer tests that build
+   * DashboardRenderInput literals continue to work. When absent or a story is
+   * missing, the card renders without grounding signals (no chips, no path
+   * block) — never a false positive.
+   */
+  groundingSignals?: ReadonlyMap<string, StoryGroundingSignal>;
+  /**
+   * v0.38.0 I2 — `projectPath` so the renderer can probe each affectedPath's
+   * existence. Optional: when omitted, the renderer falls back to "✗ unknown"
+   * for every path.
+   */
+  projectPath?: string;
 }
 
 // ── Format helpers ────────────────────────────────────────────────────────
@@ -357,12 +508,60 @@ function renderForgePulse(
   </div>`;
 }
 
+/**
+ * v0.38.0 I7 — compute the grounding-drift summary line for the
+ * Recommendation card. Counts stories that shipped (status === "done") with
+ * at least one warning of each kind, and emits a one-line summary per kind.
+ *
+ * Returns "" when no shipped story has a warning of either kind — the
+ * Recommendation card stays clean for projects that aren't drifting.
+ */
+function buildGroundingDriftSummary(
+  brief: PhaseTransitionBrief | null,
+  groundingSignals: ReadonlyMap<string, StoryGroundingSignal>,
+): string {
+  if (!brief) return "";
+  const shippedIds = new Set(
+    brief.stories.filter((s) => s.status === "done").map((s) => s.storyId),
+  );
+  if (shippedIds.size === 0) return "";
+  let noVocabCount = 0;
+  let strippedCount = 0;
+  for (const id of shippedIds) {
+    const sig = groundingSignals.get(id);
+    if (!sig) continue;
+    let hasNoVocab = false;
+    let hasStripped = false;
+    for (const w of sig.warnings) {
+      if (w.kind === "no-vocabulary") hasNoVocab = true;
+      else if (w.kind === "stripped-unknown-identifier") hasStripped = true;
+    }
+    if (hasNoVocab) noVocabCount += 1;
+    if (hasStripped) strippedCount += 1;
+  }
+  const lines: string[] = [];
+  if (noVocabCount > 0) {
+    const noun = noVocabCount === 1 ? "story" : "stories";
+    lines.push(
+      `<div class="drift-line">⚠ ${noVocabCount} ${noun} shipped with no-vocabulary warning</div>`,
+    );
+  }
+  if (strippedCount > 0) {
+    const noun = strippedCount === 1 ? "story" : "stories";
+    lines.push(
+      `<div class="drift-line">⚠ ${strippedCount} ${noun} shipped with stripped-unknown-identifier warning</div>`,
+    );
+  }
+  return lines.join("");
+}
+
 function renderHeader(
   brief: PhaseTransitionBrief | null,
   declaration: StoryDeclaration | null | undefined,
   totalsElapsedMs: number | null,
   pulseState: "idle" | "working-green" | "working-amber" | "working-red",
   pulseElapsedMs: number,
+  groundingSignals: ReadonlyMap<string, StoryGroundingSignal>,
 ): string {
   const declarationHtml = renderDeclarationPill(declaration);
   const pulseHtml = renderForgePulse(pulseState, pulseElapsedMs);
@@ -418,7 +617,10 @@ function renderHeader(
     : 0;
 
   const storiesHtml = `<div class="stat-card"><div class="stat-label">Stories</div><div class="stat-value">${brief.completedCount}/${brief.totalCount}</div><div class="stat-bar"><div class="stat-bar-fill green" style="width: ${progressPct}%"></div></div></div>`;
-  const recHtml = `<div class="stat-card"><div class="stat-label">Recommendation</div><div class="stat-value-sm">${escapeHtml(brief.recommendation || "-")}</div></div>`;
+  // v0.38.0 I7 — embed grounding-drift line in the Recommendation card when
+  // ≥ 1 shipped story carries a warning. Absence produces no line at all.
+  const driftHtml = buildGroundingDriftSummary(brief, groundingSignals);
+  const recHtml = `<div class="stat-card"><div class="stat-label">Recommendation</div><div class="stat-value-sm">${escapeHtml(brief.recommendation || "-")}</div>${driftHtml}</div>`;
 
   return `
 <div class="top-bar">
@@ -451,14 +653,25 @@ function renderReplanningNotes(brief: PhaseTransitionBrief | null): string {
   ).join("")}</div>`;
 }
 
-function renderStoryCard(entry: StoryStatusEntry): string {
+function renderStoryCard(
+  entry: StoryStatusEntry,
+  signal: StoryGroundingSignal | undefined,
+  projectPath: string | null,
+): string {
   const retryBadge = entry.retryCount > 0
     ? `<span class="retry-badge">${entry.retryCount}/3 retries</span>`
     : "";
   const evidence = entry.evidence
     ? `<div class="card-evidence">${escapeHtml(entry.evidence)}</div>`
     : "";
-  return `<div class="story-card ${escapeHtml(entry.status)}"><div class="card-id">${escapeHtml(entry.storyId)}</div>${retryBadge}${evidence}</div>`;
+  // v0.38.0 I1+I2 — surface grounding signals on the card. Both blocks emit
+  // "" when absent so the legacy markup stays byte-stable for stories that
+  // lack a run record yet.
+  const warningsBlock = signal ? renderWarningChips(signal.warnings) : "";
+  const pathsBlock = signal
+    ? renderAffectedPathsBlock(projectPath, signal.affectedPaths)
+    : "";
+  return `<div class="story-card ${escapeHtml(entry.status)}" data-story-id="${escapeHtml(entry.storyId)}"><div class="card-id">${escapeHtml(entry.storyId)}</div>${retryBadge}${warningsBlock}${pathsBlock}${evidence}</div>`;
 }
 
 function renderActivityCard(activity: Activity): string {
@@ -474,7 +687,12 @@ function renderActivityCard(activity: Activity): string {
   </div>`;
 }
 
-function renderBoard(brief: PhaseTransitionBrief | null, activity: Activity | null): string {
+function renderBoard(
+  brief: PhaseTransitionBrief | null,
+  activity: Activity | null,
+  groundingSignals: ReadonlyMap<string, StoryGroundingSignal>,
+  projectPath: string | null,
+): string {
   const entries = brief?.stories ?? [];
 
   const byColumn: Record<string, StoryStatusEntry[]> = {
@@ -510,7 +728,11 @@ function renderBoard(brief: PhaseTransitionBrief | null, activity: Activity | nu
 
   const renderColumn = (id: string, title: string, accent: string) => {
     const items = byColumn[id];
-    const cards = items.map(renderStoryCard).join("");
+    const cards = items
+      .map((entry) =>
+        renderStoryCard(entry, groundingSignals.get(entry.storyId), projectPath),
+      )
+      .join("");
     const extra = id === COLUMN_IDS.inProgress ? activityHtml : "";
     const count = items.length + (id === COLUMN_IDS.inProgress && activityHtml ? 1 : 0);
     const emptyState = count === 0
@@ -704,6 +926,16 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .story-card .card-label { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
 .story-card .card-evidence { color: var(--text-dim); font-size: 11px; margin-top: 6px; font-style: italic; }
 .story-card .card-live { color: var(--amber); font-size: 11px; margin-top: 6px; }
+/* v0.38.0 I1+I2 grounding observability — chips + per-path indicators. */
+.story-card .card-warnings { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.story-card .card-warning-chip { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); }
+.story-card .card-warning-chip.warning { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber); }
+.story-card .card-warning-chip.error { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+.story-card .card-paths { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.story-card .card-path { font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary); display: inline-block; }
+.story-card .card-path.path-ok .path-indicator { color: var(--green); font-weight: 700; }
+.story-card .card-path.path-missing .path-indicator { color: var(--red); font-weight: 700; }
+.stat-card .drift-line { font-size: 11px; color: var(--amber); margin-top: 4px; font-weight: 600; }
 .retry-badge { display: inline-block; font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--amber); background: var(--amber-bg); padding: 2px 6px; border-radius: 4px; margin-top: 4px; }
 .empty-state { display: flex; justify-content: center; align-items: center; padding: 20px 0; }
 .empty-hex { width: 32px; height: 32px; background: var(--border-light); clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0% 50%); }
@@ -725,6 +957,9 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 
 export function renderDashboardHtml(input: DashboardRenderInput): string {
   const { brief, activity, auditEntries, renderedAt } = input;
+  const groundingSignals: ReadonlyMap<string, StoryGroundingSignal> =
+    input.groundingSignals ?? new Map();
+  const projectPath = input.projectPath ?? null;
   // Declaration is optional on the input (default null) so the wide universe
   // of renderer tests that build `DashboardRenderInput` literals keep working
   // untouched. When absent, `renderDeclarationPill` emits "" — no false
@@ -769,9 +1004,9 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
 </head>
 <body>
 <div class="dashboard">
-${renderHeader(brief, declaration, totalsElapsedMs, pulseState, pulseElapsedMs)}
+${renderHeader(brief, declaration, totalsElapsedMs, pulseState, pulseElapsedMs, groundingSignals)}
 ${renderReplanningNotes(brief)}
-${renderBoard(brief, activity)}
+${renderBoard(brief, activity, groundingSignals, projectPath)}
 ${renderFeed(auditEntries)}
 </div>
 </body>
@@ -1270,10 +1505,11 @@ export async function renderDashboard(
   io: DashboardIo = DEFAULT_IO,
 ): Promise<void> {
   try {
-    const [brief, activity, auditEntries] = await Promise.all([
+    const [brief, activity, auditEntries, groundingSignals] = await Promise.all([
       readCoordinateBrief(projectPath),
       readActivity(projectPath),
       readActivityFeed(projectPath),
+      readStoryGroundingSignals(projectPath),
     ]);
     // Declaration is a synchronous in-memory read — deliberately NOT bundled
     // into the Promise.all above because there's no I/O to overlap. Reading
@@ -1309,6 +1545,8 @@ export async function renderDashboard(
       renderedAt: new Date().toISOString(),
       declaration,
       totals,
+      groundingSignals,
+      projectPath,
     });
     await writeDashboardHtml(projectPath, html, io);
     await maybeAutoOpenBrowser(projectPath);

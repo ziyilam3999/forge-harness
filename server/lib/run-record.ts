@@ -132,6 +132,13 @@ export interface RunRecord {
    * Forward-only: pre-v0.38.0 records lack this field.
    */
   totalCostUsd?: number | null;
+  /**
+   * v0.38.0 I2 — snapshot of the story's `affectedPaths` at evaluate time so
+   * the dashboard can render per-path ✓/✗ existence indicators without having
+   * to re-load the original plan file. Forward-only optional; omitted by
+   * non-evaluate writers.
+   */
+  affectedPaths?: string[];
   outcome:
     | "success"
     | "failure"

@@ -461,6 +461,10 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
       totalCostUsd = base.metrics.estimatedCostUsd ?? null;
     }
 
+    // v0.38.0 I2 — capture `affectedPaths` snapshot so the dashboard can
+    // render per-path ✓/✗ existence indicators without re-parsing the plan.
+    const affectedPathsSnapshot = targetStory?.affectedPaths;
+
     await writeRunRecord(input.projectPath, {
       ...base,
       storyId: input.storyId,
@@ -472,6 +476,9 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
       ...(gitSha ? { gitSha } : {}),
       ...(generatedDocs ? { generatedDocs } : {}),
       ...(totalCostUsd !== undefined ? { totalCostUsd } : {}),
+      ...(affectedPathsSnapshot && affectedPathsSnapshot.length > 0
+        ? { affectedPaths: affectedPathsSnapshot }
+        : {}),
     });
   }
 

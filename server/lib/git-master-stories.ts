@@ -92,6 +92,7 @@ export interface ReadShippedStoriesResult {
  */
 type GitFailureKind =
   | "git-missing"
+  | "project-path-missing"
   | "ref-missing"
   | "no-remotes"
   | "detached-head"
@@ -120,8 +121,15 @@ function runGit(
         }
         const stderrStr: string = typeof stderr === "string" ? stderr : "";
         const errnoCode = (err as NodeJS.ErrnoException).code;
-        // ENOENT on the spawn itself → git binary not on PATH.
+        // ENOENT can mean either the git binary is missing OR the cwd
+        // path no longer exists. Node sets `err.path` to the missing
+        // entity, so when it matches the cwd the project path is stale.
         if (errnoCode === "ENOENT") {
+          const errPath = (err as NodeJS.ErrnoException).path;
+          if (errPath && (errPath === cwd || errPath.includes(cwd))) {
+            reject({ kind: "project-path-missing", message: `project path not found: ${cwd}` } satisfies GitFailure);
+            return;
+          }
           reject({ kind: "git-missing", message: "git binary not found on PATH" } satisfies GitFailure);
           return;
         }

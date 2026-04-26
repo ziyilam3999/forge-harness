@@ -262,7 +262,7 @@ export async function readStoryGroundingSignals(
     out.set(storyId, {
       storyId,
       affectedPaths,
-      warnings,
+      warnings: [...warnings],
       latestRunTimestamp: ts,
     });
   }

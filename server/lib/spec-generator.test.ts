@@ -1,11 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { execSync } from "node:child_process";
-import { generateSpecForStory, type SynthesisResponse } from "./spec-generator.js";
+import {
+  generateSpecForStory,
+  buildUserPrompt,
+  validateAgainstVocabulary,
+  type SynthesisResponse,
+  type SynthesisRequest,
+} from "./spec-generator.js";
 import { RunContext } from "./run-context.js";
+import { buildSourceVocabulary, renderVocabularyForPrompt } from "./spec-source-vocabulary.js";
 import type { EvalReport } from "../types/eval-report.js";
+
+const FIXTURE_REL = "server/lib/__fixtures__/spec-vocabulary";
+const PROJECT_ROOT = resolve(__dirname, "..", "..");
 
 // Run the validator script against the generated file. Each test asserts the
 // output passes schema validation (AC-B3 surface) — the validator is the
@@ -317,5 +327,279 @@ describe("spec-generator — corrupt-file recovery", () => {
     expect(validatorPasses(result.specPath).ok).toBe(true);
     const text = readFileSync(result.specPath, "utf-8");
     expect((text.match(/^## story: US-01$/gm) || []).length).toBe(1);
+  });
+});
+
+// ── AC-3 / AC-4 / AC-8: prompt grounding (content + cap + fallback) ──────
+
+describe("buildUserPrompt — AC-3 grounding content", () => {
+  it("includes the 'Real symbols available' section verbatim", () => {
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [`${FIXTURE_REL}/basic.ts`]);
+    const vocabularyPrompt = renderVocabularyForPrompt(vocab);
+    const req: SynthesisRequest = {
+      storyId: "US-XX",
+      evalReport: {
+        storyId: "US-XX",
+        verdict: "PASS",
+        criteria: [{ id: "AC-01", status: "PASS", evidence: "fixture" }],
+      },
+      diffSummary: "(unavailable)",
+      vocabularyPrompt,
+    };
+    const out = buildUserPrompt(req);
+    expect(out).toContain("## Real symbols available");
+    expect(out).toContain("Foo");
+    expect(out).toContain("bar");
+    expect(out).toContain("Baz");
+    expect(out).toContain("id");
+  });
+});
+
+describe("buildUserPrompt — AC-4 token cap (≤2000 bytes for vocabulary section)", () => {
+  it("renders the vocabulary block within the 2000-byte cap", () => {
+    const big = {
+      identifiers: new Set<string>(),
+      methods: new Set<string>(),
+      fields: new Set<string>(),
+      testNames: new Set<string>(),
+      filesScanned: [],
+      warnings: [],
+    };
+    for (let i = 0; i < 500; i++) {
+      big.identifiers.add(`SymbolWithAReasonablyLongName_${i}`);
+    }
+    const block = renderVocabularyForPrompt(big, 2000);
+    expect(Buffer.byteLength(block, "utf8")).toBeLessThanOrEqual(2000);
+    expect(block).toMatch(/…\(\d+ more\)/);
+  });
+});
+
+describe("buildUserPrompt — AC-8 no-vocabulary fallback", () => {
+  it("emits 'No source vocabulary available' when affectedPaths is empty", () => {
+    const empty = buildSourceVocabulary(PROJECT_ROOT, []);
+    const vocabularyPrompt = renderVocabularyForPrompt(empty);
+    const req: SynthesisRequest = {
+      storyId: "US-DOC-ONLY",
+      evalReport: {
+        storyId: "US-DOC-ONLY",
+        verdict: "PASS",
+        criteria: [{ id: "AC-01", status: "PASS", evidence: "docs only" }],
+      },
+      diffSummary: "(unavailable)",
+      vocabularyPrompt,
+    };
+    const out = buildUserPrompt(req);
+    expect(out).toContain("No source vocabulary available");
+    expect(out).toMatch(/emit `\(none\)`/);
+  });
+});
+
+// ── AC-5 / AC-6 / AC-11: post-validator strip + false-positive + mode flag ──
+
+describe("validateAgainstVocabulary — AC-5 strip path", () => {
+  it("strips a bullet naming an unknown identifier and records a warning", () => {
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [`${FIXTURE_REL}/basic.ts`]);
+    const sections: Record<"api-contracts" | "data-models" | "invariants" | "test-surface", string> = {
+      "api-contracts": "- `Foo.bar`: known method\n- `Foo.qux`: hallucinated method",
+      "data-models": "- `Baz.id`: known field",
+      invariants: "(none)",
+      "test-surface": "(none)",
+    };
+    const result = validateAgainstVocabulary(sections, vocab, { filesScanned: 1 });
+    expect(result.sections["api-contracts"]).toContain("Foo.bar");
+    expect(result.sections["api-contracts"]).not.toContain("Foo.qux");
+    expect(result.sections["data-models"]).toContain("Baz.id");
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatchObject({
+      kind: "stripped-unknown-identifier",
+      identifier: "Foo.qux",
+      section: "api-contracts",
+    });
+  });
+
+  it("replaces the section with '(none)' when every bullet is stripped", () => {
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [`${FIXTURE_REL}/basic.ts`]);
+    const sections: Record<"api-contracts" | "data-models" | "invariants" | "test-surface", string> = {
+      "api-contracts": "- `KnowledgeService.search`: invented\n- `KnowledgeService.delete`: invented",
+      "data-models": "(none)",
+      invariants: "(none)",
+      "test-surface": "(none)",
+    };
+    const result = validateAgainstVocabulary(sections, vocab, { filesScanned: 1 });
+    expect(result.sections["api-contracts"]).toBe("(none)");
+    expect(result.warnings.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("validateAgainstVocabulary — AC-6 false-positive prevention", () => {
+  it("does NOT strip bullets naming default-export, generic, enum, or re-exported symbols", () => {
+    // Build vocabulary across the full edge-case fixture set
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [FIXTURE_REL]);
+    const sections: Record<"api-contracts" | "data-models" | "invariants" | "test-surface", string> = {
+      "api-contracts": [
+        "- `DefaultClass.hello`: default-export class method",
+        "- `genericFunc`: generic function",
+        "- `GenericBox.unwrap`: generic class method",
+        "- `Color.RED`: enum member",
+        "- `MjsClass.greet`: .mjs file class method",
+        "- `renamedFunc`: re-exported alias",
+      ].join("\n"),
+      "data-models": "- `Settings.host`: type alias field\n- `Color.GREEN`: enum member",
+      invariants: "(none)",
+      "test-surface": '- `"sample feature"`: harvested test name',
+    };
+    const result = validateAgainstVocabulary(sections, vocab, { filesScanned: vocab.filesScanned.length });
+    expect(result.warnings).toHaveLength(0);
+    // Every original bullet must survive
+    expect(result.sections["api-contracts"]).toContain("DefaultClass.hello");
+    expect(result.sections["api-contracts"]).toContain("genericFunc");
+    expect(result.sections["api-contracts"]).toContain("GenericBox.unwrap");
+    expect(result.sections["api-contracts"]).toContain("Color.RED");
+    expect(result.sections["api-contracts"]).toContain("MjsClass.greet");
+    expect(result.sections["api-contracts"]).toContain("renamedFunc");
+    expect(result.sections["data-models"]).toContain("Settings.host");
+    expect(result.sections["data-models"]).toContain("Color.GREEN");
+  });
+});
+
+describe("validateAgainstVocabulary — AC-11 mode flag", () => {
+  const ORIGINAL = process.env.FORGE_SPEC_VALIDATOR_MODE;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.FORGE_SPEC_VALIDATOR_MODE;
+    else process.env.FORGE_SPEC_VALIDATOR_MODE = ORIGINAL;
+  });
+
+  it("FORGE_SPEC_VALIDATOR_MODE=warn → does not strip, but still records warnings", () => {
+    process.env.FORGE_SPEC_VALIDATOR_MODE = "warn";
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [`${FIXTURE_REL}/basic.ts`]);
+    const sections: Record<"api-contracts" | "data-models" | "invariants" | "test-surface", string> = {
+      "api-contracts": "- `Foo.bar`: known\n- `Foo.qux`: hallucinated",
+      "data-models": "(none)",
+      invariants: "(none)",
+      "test-surface": "(none)",
+    };
+    const result = validateAgainstVocabulary(sections, vocab, { filesScanned: 1 });
+    // Bullet retained
+    expect(result.sections["api-contracts"]).toContain("Foo.qux");
+    expect(result.sections["api-contracts"]).toContain("Foo.bar");
+    // Warning still recorded
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].identifier).toBe("Foo.qux");
+  });
+
+  it("default (mode unset) strips the bullet", () => {
+    delete process.env.FORGE_SPEC_VALIDATOR_MODE;
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [`${FIXTURE_REL}/basic.ts`]);
+    const sections: Record<"api-contracts" | "data-models" | "invariants" | "test-surface", string> = {
+      "api-contracts": "- `Foo.bar`: known\n- `Foo.qux`: hallucinated",
+      "data-models": "(none)",
+      invariants: "(none)",
+      "test-surface": "(none)",
+    };
+    const result = validateAgainstVocabulary(sections, vocab, { filesScanned: 1 });
+    expect(result.sections["api-contracts"]).not.toContain("Foo.qux");
+    expect(result.sections["api-contracts"]).toContain("Foo.bar");
+    expect(result.warnings).toHaveLength(1);
+  });
+});
+
+// ── AC-3 end-to-end via generateSpecForStory ──────────────────────────────
+
+describe("generateSpecForStory — affectedPaths integration", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-grounding-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("captures the synthesizer's request — vocabularyPrompt contains real symbol names from affectedPaths", async () => {
+    // Mirror a fixture file into the temp project
+    mkdirSync(join(tmp, "src"), { recursive: true });
+    writeFileSync(
+      join(tmp, "src", "module.ts"),
+      "export class Foo {\n  bar(x: string): string { return x; }\n}\nexport interface Baz { id: string }\n",
+      "utf-8",
+    );
+
+    let captured: SynthesisRequest | null = null;
+    const synthSpy = async (req: SynthesisRequest): Promise<SynthesisResponse> => {
+      captured = req;
+      return {
+        contracts: [],
+        sections: {
+          "api-contracts": "- `Foo.bar`: real method",
+          "data-models": "- `Baz.id`: real field",
+          invariants: "(none)",
+          "test-surface": "(none)",
+        },
+        tokens: { inputTokens: 1, outputTokens: 1 },
+      };
+    };
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-X",
+      evalReport: {
+        storyId: "US-X",
+        verdict: "PASS",
+        criteria: [{ id: "AC-01", status: "PASS", evidence: "ok" }],
+      },
+      affectedPaths: ["src/module.ts"],
+      ctx,
+      synthesize: synthSpy,
+    });
+
+    expect(captured).not.toBeNull();
+    expect(captured!.vocabularyPrompt).toContain("Foo");
+    expect(captured!.vocabularyPrompt).toContain("bar");
+    expect(captured!.vocabularyPrompt).toContain("Baz");
+    expect(captured!.vocabularyPrompt).toContain("id");
+    // Validator did not strip these because they're in vocab
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("strips invented identifiers via validator end-to-end", async () => {
+    mkdirSync(join(tmp, "src"), { recursive: true });
+    writeFileSync(
+      join(tmp, "src", "module.ts"),
+      "export class Foo {\n  bar(): void {}\n}\n",
+      "utf-8",
+    );
+
+    const synthHallucinator = async (): Promise<SynthesisResponse> => ({
+      contracts: [],
+      sections: {
+        "api-contracts": "- `Foo.bar`: real\n- `Foo.qux`: invented",
+        "data-models": "(none)",
+        invariants: "(none)",
+        "test-surface": "(none)",
+      },
+      tokens: { inputTokens: 1, outputTokens: 1 },
+    });
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-Y",
+      evalReport: {
+        storyId: "US-Y",
+        verdict: "PASS",
+        criteria: [{ id: "AC-01", status: "PASS", evidence: "ok" }],
+      },
+      affectedPaths: ["src/module.ts"],
+      ctx,
+      synthesize: synthHallucinator,
+    });
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].identifier).toBe("Foo.qux");
+
+    const text = readFileSync(result.specPath, "utf-8");
+    expect(text).toContain("Foo.bar");
+    expect(text).not.toContain("Foo.qux");
   });
 });

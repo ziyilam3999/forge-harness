@@ -277,10 +277,15 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
     let generatedDocs: NonNullable<RunRecord["generatedDocs"]> | undefined;
     if (report.verdict === "PASS") {
       try {
+        // v0.36.x grounding: surface the story's affectedPaths to the
+        // spec-generator so it can extract a source-vocabulary and ground
+        // the LLM. Empty/missing → spec-generator falls back to "(none)".
+        const story = plan.stories.find((s) => s.id === input.storyId);
         const spec = await generateSpecForStory({
           projectPath: input.projectPath,
           storyId: input.storyId,
           evalReport: report,
+          affectedPaths: story?.affectedPaths,
           gitSha,
           ctx,
         });

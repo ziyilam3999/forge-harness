@@ -24,6 +24,13 @@ import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import type { EvalReport } from "../types/eval-report.js";
 import { RunContext, trackedCallClaude } from "./run-context.js";
+import {
+  buildSourceVocabulary,
+  renderVocabularyForPrompt,
+  vocabularyContains,
+  type SourceVocabulary,
+} from "./spec-source-vocabulary.js";
+import type { SpecGeneratorWarning } from "./run-record.js";
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -42,6 +49,13 @@ export interface SpecGeneratorInput {
   storyId: string;
   /** The PASS-verdict eval report, used as primary structured evidence. */
   evalReport: EvalReport;
+  /**
+   * Story's affectedPaths (directory prefixes or file paths, relative to
+   * `projectPath`). Drives the source-vocabulary extractor. Empty / omitted
+   * paths produce a "No source vocabulary available" prompt and instruct the
+   * LLM to emit `(none)` for api-contracts and data-models.
+   */
+  affectedPaths?: string[];
   /** Optional 40-char hex git SHA captured at PASS time. `"unknown"` if absent. */
   gitSha?: string;
   /** RunContext for cost/audit tracking; spec-generator participates in the run's $$$ totals. */
@@ -56,12 +70,25 @@ export interface SpecGeneratorResult {
   genTokens: { inputTokens: number; outputTokens: number };
   contracts: string[];
   bodyChanged: boolean;
+  /**
+   * Strip events from the post-validator. Empty array if no bullets were
+   * stripped (or if validator mode is "warn"). The caller stamps this onto
+   * `RunRecord.generatedDocs.warnings` (AC-10).
+   */
+  warnings: SpecGeneratorWarning[];
 }
 
 export interface SynthesisRequest {
   storyId: string;
   evalReport: EvalReport;
   diffSummary: string;
+  /**
+   * Pre-rendered "Real symbols available" Markdown block for the user
+   * prompt. Either a real vocabulary listing or the "No source vocabulary
+   * available" fallback. The default synthesizer's `buildUserPrompt`
+   * inserts this verbatim before the AC list.
+   */
+  vocabularyPrompt: string;
 }
 
 export interface SynthesisResponse {
@@ -258,15 +285,17 @@ Rules:
 - If a subsection genuinely has nothing to record, return the literal string "(none)".
 - Be terse. Each bullet should be one line, ideally under 120 chars.
 - The "contracts" array is the canonical list of MCP tool identifiers (top-level tool names only, no method paths) that the diff TOUCHES, regardless of whether each tool has a dedicated bullet under api-contracts.
-- Do NOT invent contracts. If you can't see a tool change in the evidence, do not list it.`;
+- Do NOT invent contracts. If you can't see a tool change in the evidence, do not list it.
+- Every backtick-quoted identifier you emit MUST appear in the "Real symbols available" section of the user prompt. If a needed symbol isn't there, emit "(none)" for that section.`;
 
-function buildUserPrompt(req: SynthesisRequest): string {
+export function buildUserPrompt(req: SynthesisRequest): string {
   const acLines = req.evalReport.criteria
     .map((c) => `- ${c.id} [${c.status}]: ${c.evidence.slice(0, 200)}`)
     .join("\n");
   return [
     `## Story\n${req.storyId}\n`,
     `## Eval verdict\n${req.evalReport.verdict}\n`,
+    `${req.vocabularyPrompt}\n`,
     `## Acceptance criteria results\n${acLines || "(none)"}\n`,
     `## Diff summary\n${req.diffSummary || "(unavailable)"}\n`,
     "Emit the JSON object now.",
@@ -307,6 +336,95 @@ async function defaultSynthesize(
   };
 }
 
+// ── Post-validator (Strategy 2: strip unknown identifiers) ────────────────
+
+/**
+ * Mode is `strip` by default. Set `FORGE_SPEC_VALIDATOR_MODE=warn` to keep
+ * bullets in the file but still record `warnings` (AC-11). Any other value
+ * (or unset) means "strip".
+ */
+function validatorMode(): "strip" | "warn" {
+  const v = process.env.FORGE_SPEC_VALIDATOR_MODE;
+  return v === "warn" ? "warn" : "strip";
+}
+
+/**
+ * Walk every backtick-quoted identifier in each section's bullets. For each
+ * identifier not present in `vocab`, either:
+ *   - mode=strip: drop the entire bullet line (and emit a warning)
+ *   - mode=warn:  leave the bullet (still emit a warning)
+ *
+ * If a section ends up empty after strips, it is replaced with "(none)".
+ *
+ * Identifier extraction: any token inside a backtick pair on a bullet line.
+ * Bullets are lines that start with `-` (after optional leading whitespace).
+ * Identifiers may take the forms `Foo`, `Foo.bar`, `Foo.bar.baz` (only the
+ * first two segments are checked — deeper navigation is treated as
+ * recognised so long as the prefix matches).
+ */
+export function validateAgainstVocabulary(
+  sections: Record<SectionName, string>,
+  vocab: SourceVocabulary,
+  storyContext: { filesScanned: number },
+): { sections: Record<SectionName, string>; warnings: SpecGeneratorWarning[] } {
+  const mode = validatorMode();
+  const out: Record<SectionName, string> = { ...sections };
+  const warnings: SpecGeneratorWarning[] = [];
+
+  for (const sectionName of REQUIRED_SECTIONS) {
+    const text = sections[sectionName];
+    if (!text || text.trim() === "" || text.trim() === "(none)") continue;
+
+    const lines = text.split("\n");
+    const keptLines: string[] = [];
+    for (const line of lines) {
+      const isBullet = /^\s*-\s/.test(line);
+      if (!isBullet) { keptLines.push(line); continue; }
+
+      // Extract every backtick-quoted token from this bullet.
+      const idents: string[] = [];
+      const re = /`([^`]+)`/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(line)) !== null) idents.push(m[1]);
+
+      // Only validate identifiers that look like programming symbols
+      // (e.g. `Foo`, `Foo.bar`, `Foo.bar.baz`). Skip tokens with spaces or
+      // path separators or that look like prose strings.
+      const symbolLike = idents.filter((id) => /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(id));
+
+      let bulletKept = true;
+      for (const id of symbolLike) {
+        // Allow MCP tool ids by string-prefix convention (forge_evaluate, forge_generate, ...).
+        if (/^forge_[a-z_]+$/.test(id) || /^forge_[a-z_]+\.[A-Za-z0-9_$]+$/.test(id)) continue;
+        // Two-segment check: `Foo.bar` validates against full string OR the owner being a known class/type.
+        const okFull = vocabularyContains(vocab, id);
+        if (okFull) continue;
+        // Deeper paths: `Foo.bar.baz` — accept if the two-segment prefix is in vocab.
+        if (id.indexOf(".") !== -1) {
+          const twoSeg = id.split(".").slice(0, 2).join(".");
+          if (vocabularyContains(vocab, twoSeg)) continue;
+        }
+        // Unknown identifier: log warning and (if strip mode) drop bullet.
+        warnings.push({
+          kind: "stripped-unknown-identifier",
+          identifier: id,
+          section: sectionName,
+          filesScanned: storyContext.filesScanned,
+        });
+        if (mode === "strip") bulletKept = false;
+      }
+
+      if (bulletKept) keptLines.push(line);
+    }
+
+    let rebuilt = keptLines.join("\n").trim();
+    if (rebuilt === "" || /^[\s-]+$/.test(rebuilt)) rebuilt = "(none)";
+    out[sectionName] = rebuilt;
+  }
+
+  return { sections: out, warnings };
+}
+
 // ── Main entry ───────────────────────────────────────────────────────────
 
 /**
@@ -344,6 +462,14 @@ export async function generateSpecForStory(
     parsed = emptySpec(now);
   }
 
+  // Build source vocabulary from the story's affectedPaths. Empty/omitted
+  // paths fall back to the "No source vocabulary available" prompt.
+  const vocab = buildSourceVocabulary(
+    input.projectPath,
+    input.affectedPaths ?? [],
+  );
+  const vocabularyPrompt = renderVocabularyForPrompt(vocab);
+
   // Synthesise the new section.
   const synth = input.synthesize ?? ((req) => defaultSynthesize(input.ctx, req));
   const diffSummary = captureDiffSummary(input.projectPath);
@@ -351,7 +477,26 @@ export async function generateSpecForStory(
     storyId: input.storyId,
     evalReport: input.evalReport,
     diffSummary,
+    vocabularyPrompt,
   });
+
+  // Strategy 2: post-validate against the vocabulary. Strips bullets whose
+  // backtick-quoted identifiers are not present in vocab (mode=strip), or
+  // logs warnings without stripping (mode=warn). Skip entirely when the
+  // vocabulary is empty (no source files to ground on) — every bullet would
+  // be a false positive.
+  let validatedSections = synthResult.sections;
+  let warnings: SpecGeneratorWarning[] = [];
+  const hasVocab = vocab.identifiers.size > 0 || vocab.testNames.size > 0;
+  if (hasVocab) {
+    const validated = validateAgainstVocabulary(
+      synthResult.sections,
+      vocab,
+      { filesScanned: vocab.filesScanned.length },
+    );
+    validatedSections = validated.sections;
+    warnings = validated.warnings;
+  }
 
   // Merge into front-matter `stories[]` by id.
   const idx = parsed.frontMatter.stories.findIndex((s) => s.id === input.storyId);
@@ -365,7 +510,7 @@ export async function generateSpecForStory(
 
   // Rebuild body: replace any existing `## story: <id>` block, otherwise
   // append. The current body may contain multiple sections; we walk them.
-  const newSection = renderStorySection(input.storyId, synthResult.sections);
+  const newSection = renderStorySection(input.storyId, validatedSections);
   const bodyChanged = mergeStorySectionInBody(parsed, input.storyId, newSection);
 
   // Write atomically.
@@ -379,6 +524,7 @@ export async function generateSpecForStory(
     genTokens: synthResult.tokens,
     contracts: synthResult.contracts,
     bodyChanged,
+    warnings,
   };
 }
 

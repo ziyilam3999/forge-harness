@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.38.0](https://github.com/ziyilam3999/forge-harness/compare/v0.37.0...v0.38.0) (2026-04-26)
+
+### Features
+
+- **Server-side `affectedPaths` validator in `forge_plan`.** The planner now validates each `affectedPaths` entry against the target repo before persisting the plan. When a path doesn't resolve, the validator tries stripping a leading project-name prefix (`<projectName>/<rest>`); if the stripped form resolves, it auto-corrects and surfaces `pathCorrections: [{from, to}]` on the response. If no strip resolves, it surfaces `pathUnresolvable` with the offending path. Closes the gap that PR #451's runtime `no-vocabulary` warning only mitigated post-spec-gen — every monday-bot story (US-01..US-13) had carried a `monday-bot/src/...` prefix baked at plan-time. Shared helper at `server/lib/path-resolver.ts` is now the single source of truth for path-existence checks across the validator and the dashboard renderer, closing the divergence-risk pattern that produced the bug in the first place. New file `server/lib/affected-paths-validator.ts`. (#464)
+- **Dashboard grounding-quality signals on every story card.** Story cards now carry per-`affectedPaths` ✓/✗ existence indicators (using the shared `path-resolver.ts` helper), warning chips for grounding hazards (yellow `data-warning="no-vocabulary"`/`data-severity="warning"`, red `data-warning="stripped-unknown-identifier"`/`data-severity="error"`), and a "Recommendation" drift summary line (`⚠ N stories shipped with <warning-kind> warning`) that surfaces when ≥1 story has shipped under either warning. Stable `data-warning` / `data-severity` attributes are the contract; CSS classes are presentation. Light + dark themes both styled. (#464)
+- **`forge_evaluate` MCP response includes `specGenWarnings` at top level.** Programmatic consumers can now read grounding warnings without parsing the on-disk run record. `specGenWarnings` is byte-identical to `record.generatedDocs.warnings` (empty `[]` on spec-gen failure paths). (#464)
+- **Top-level `verdict` alias of `evalVerdict` on run records.** Tooling that read `record.verdict` (the natural guess) was getting `null`; the answer was hiding under `evalVerdict`. Additive — no breaking rename of `evalVerdict`; both fields stay byte-identical. (#464)
+- **Build-dedup in `forge_evaluate`.** When all ACs of a story share a `npm run build &&` prefix, the build runs once at the start of the evaluate instead of once per AC. `metrics.buildInvocationCount: 1` records the dedup; field is omitted when no shared prefix exists (backward compat). Saves ~9s per evaluate on a typical 4-AC story. Known limitation tracked in #465 — falls back to per-AC behavior on Windows because of `sh`-vs-Git-Bash resolution. (#464)
+- **Top-level `totalCostUsd` rolled-up cost on run records.** `totalCostUsd = metrics.estimatedCostUsd + computeSpecGenCostUsd(generatedDocs.genTokens)` — consumers no longer need to hand-add the two cost shapes. New `computeSpecGenCostUsd` helper + `SPEC_GEN_INPUT/OUTPUT_PER_MILLION` rate constants. (#464)
+
 ## [0.37.0](https://github.com/ziyilam3999/forge-harness/compare/v0.36.1...v0.37.0) (2026-04-26)
 
 ### Features

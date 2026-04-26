@@ -116,17 +116,26 @@ export interface RunRecord {
 }
 
 /**
- * Spec-generator warning entry — emitted when the post-hoc validator strips
- * a bullet whose backtick-quoted identifier is not present in the source
- * vocabulary. Discriminated union so future kinds can extend without
- * breaking back-compat (today only "stripped-unknown-identifier" exists).
+ * Spec-generator warning entry — emitted by the post-hoc validator.
+ * Discriminated union by `kind`:
+ *   - "stripped-unknown-identifier": a backtick-quoted identifier in a spec
+ *     bullet was not found in the source vocabulary, so the bullet was
+ *     removed (strict mode) or flagged (warn mode).
+ *   - "no-vocabulary": grounding was lenient because no source vocabulary
+ *     could be built (empty/unparseable affectedPaths). The spec was written
+ *     verbatim without strips.
  */
-export interface SpecGeneratorWarning {
-  kind: "stripped-unknown-identifier";
-  identifier: string;
-  section: string;
-  filesScanned: number;
-}
+export type SpecGeneratorWarning =
+  | {
+      kind: "stripped-unknown-identifier";
+      identifier: string;
+      section: string;
+      filesScanned: number;
+    }
+  | {
+      kind: "no-vocabulary";
+      filesScanned: number;
+    };
 
 /**
  * Zod schema for `RunRecord.generatedDocs` — gives runtime validation for
@@ -135,12 +144,18 @@ export interface SpecGeneratorWarning {
  * additive-only: a real run-record JSON missing the `warnings` field still
  * parses cleanly because of `.default([])`.
  */
-export const SpecGeneratorWarningSchema = z.object({
-  kind: z.literal("stripped-unknown-identifier"),
-  identifier: z.string(),
-  section: z.string(),
-  filesScanned: z.number().int().nonnegative(),
-});
+export const SpecGeneratorWarningSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("stripped-unknown-identifier"),
+    identifier: z.string(),
+    section: z.string(),
+    filesScanned: z.number().int().nonnegative(),
+  }),
+  z.object({
+    kind: z.literal("no-vocabulary"),
+    filesScanned: z.number().int().nonnegative(),
+  }),
+]);
 
 export const GeneratedDocsSchema = z.object({
   specPath: z.string(),

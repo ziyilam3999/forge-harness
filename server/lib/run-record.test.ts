@@ -174,8 +174,11 @@ describe("GeneratedDocsSchema (AC-10) — warnings is a typed array, default []"
     };
     const parsed = GeneratedDocsSchema.parse(withStrips);
     expect(parsed.warnings).toHaveLength(1);
-    expect(parsed.warnings[0].kind).toBe("stripped-unknown-identifier");
-    expect(parsed.warnings[0].identifier).toBe("Foo.qux");
+    const w = parsed.warnings[0];
+    expect(w.kind).toBe("stripped-unknown-identifier");
+    if (w.kind === "stripped-unknown-identifier") {
+      expect(w.identifier).toBe("Foo.qux");
+    }
   });
 
   it("rejects a warning whose kind is unknown", () => {
@@ -186,5 +189,26 @@ describe("GeneratedDocsSchema (AC-10) — warnings is a typed array, default []"
       filesScanned: 1,
     };
     expect(() => SpecGeneratorWarningSchema.parse(bogus)).toThrow();
+  });
+
+  it("parses a 'no-vocabulary' warning (AC-8 lenient-mode signal)", () => {
+    const noVocab = { kind: "no-vocabulary", filesScanned: 0 };
+    const parsed = SpecGeneratorWarningSchema.parse(noVocab);
+    expect(parsed.kind).toBe("no-vocabulary");
+    expect(parsed.filesScanned).toBe(0);
+  });
+
+  it("parses a generatedDocs whose warnings array carries a 'no-vocabulary' entry", () => {
+    const lenient = {
+      specPath: "/abs/docs/generated/TECHNICAL-SPEC.md",
+      adrPaths: [],
+      genTimestamp: "2026-04-26T08:00:00.000Z",
+      genTokens: { inputTokens: 100, outputTokens: 50 },
+      contracts: [],
+      warnings: [{ kind: "no-vocabulary", filesScanned: 0 }],
+    };
+    const parsed = GeneratedDocsSchema.parse(lenient);
+    expect(parsed.warnings).toHaveLength(1);
+    expect(parsed.warnings[0].kind).toBe("no-vocabulary");
   });
 });

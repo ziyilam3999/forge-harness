@@ -399,10 +399,13 @@ export function validateAgainstVocabulary(
   sections: Record<SectionName, string>,
   vocab: SourceVocabulary,
   storyContext: { filesScanned: number },
-): { sections: Record<SectionName, string>; warnings: SpecGeneratorWarning[] } {
+): {
+  sections: Record<SectionName, string>;
+  warnings: Array<Extract<SpecGeneratorWarning, { kind: "stripped-unknown-identifier" }>>;
+} {
   const mode = validatorMode();
   const out: Record<SectionName, string> = { ...sections };
-  const warnings: SpecGeneratorWarning[] = [];
+  const warnings: Array<Extract<SpecGeneratorWarning, { kind: "stripped-unknown-identifier" }>> = [];
 
   for (const sectionName of REQUIRED_SECTIONS) {
     const text = sections[sectionName];
@@ -554,6 +557,11 @@ export async function generateSpecForStory(
     );
     validatedSections = validated.sections;
     warnings = validated.warnings;
+  } else {
+    // AC-8 lenient mode: no source vocabulary to ground on. Spec writes
+    // verbatim (no strips). Emit one informational warning so consumers can
+    // tell "validator skipped" apart from "validator ran clean".
+    warnings = [{ kind: "no-vocabulary", filesScanned: vocab.filesScanned.length }];
   }
 
   // Merge into front-matter `stories[]` by id.

@@ -121,7 +121,10 @@ describe("AC-7 — US-05 regression replay", () => {
     expect(text).not.toMatch(/`KnowledgeResult`/);
 
     // ── Warnings recorded ─────────────────────────────────────
-    const stripped = result.warnings.map((w) => w.identifier).sort();
+    const stripped = result.warnings
+      .filter((w): w is Extract<typeof w, { kind: "stripped-unknown-identifier" }> => w.kind === "stripped-unknown-identifier")
+      .map((w) => w.identifier)
+      .sort();
     expect(stripped).toContain("KnowledgeService.search");
     expect(stripped).toContain("KnowledgeService.index");
     expect(stripped).toContain("KnowledgeService.delete");

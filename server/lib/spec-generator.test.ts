@@ -596,10 +596,53 @@ describe("generateSpecForStory — affectedPaths integration", () => {
     });
 
     expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0].identifier).toBe("Foo.qux");
+    const w = result.warnings[0];
+    expect(w.kind).toBe("stripped-unknown-identifier");
+    if (w.kind === "stripped-unknown-identifier") {
+      expect(w.identifier).toBe("Foo.qux");
+    }
 
     const text = readFileSync(result.specPath, "utf-8");
     expect(text).toContain("Foo.bar");
     expect(text).not.toContain("Foo.qux");
+  });
+
+  it("AC-8: emits exactly one 'no-vocabulary' warning when affectedPaths is empty", async () => {
+    const synthSpy = async (): Promise<SynthesisResponse> => ({
+      contracts: [],
+      sections: {
+        "api-contracts": "- `SomeNew.thing`: would normally be stripped",
+        "data-models": "- `Another.field`: also normally stripped",
+        invariants: "(none)",
+        "test-surface": "(none)",
+      },
+      tokens: { inputTokens: 1, outputTokens: 1 },
+    });
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-EMPTY",
+      evalReport: {
+        storyId: "US-EMPTY",
+        verdict: "PASS",
+        criteria: [{ id: "AC-01", status: "PASS", evidence: "ok" }],
+      },
+      affectedPaths: [],
+      ctx,
+      synthesize: synthSpy,
+    });
+
+    // Exactly one warning, of kind "no-vocabulary"
+    expect(result.warnings).toHaveLength(1);
+    const w = result.warnings[0];
+    expect(w.kind).toBe("no-vocabulary");
+    if (w.kind === "no-vocabulary") {
+      expect(w.filesScanned).toBe(0);
+    }
+
+    // Spec wrote verbatim — no strips happened (lenient mode)
+    const text = readFileSync(result.specPath, "utf-8");
+    expect(text).toContain("SomeNew.thing");
+    expect(text).toContain("Another.field");
   });
 });

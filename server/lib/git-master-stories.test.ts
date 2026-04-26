@@ -30,6 +30,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -63,7 +64,7 @@ function commitWithSubject(cwd: string, subject: string, fileBody: string): stri
   execFileSync("git", ["-C", cwd, "checkout", "-q", "HEAD"], {
     /* no-op — keep cwd-on-branch */
   });
-  execFileSync("bash", ["-c", `printf '%s' "$1" > "$2"`, "_", fileBody, join(cwd, filename)]);
+  writeFileSync(join(cwd, filename), fileBody);
   execFileSync("git", ["add", filename], { cwd });
   execFileSync("git", ["commit", "-q", "-m", subject], { cwd });
   return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf-8" }).trim();

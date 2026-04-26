@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- **Dashboard self-reconciles against `origin/master`.** `renderDashboard` now scans the most recent ~50 `origin/master` commits via a single `git log` invocation per render, extracts story IDs from conventional-commit subjects (`/\b(US-\d+)\b/gi`), and upgrades any matching brief story whose status is `pending | ready | ready-for-retry | failed | dep-failed` to `done`. This closes the post-merge staleness window where `coordinate-brief.json` lagged behind a freshly-landed PR — operators no longer need to call `forge_coordinate` after `/ship` to clear stale `Ready` cards. Squash-merge-safe: matches commit subject text, not `lastGitSha` reachability (which is broken by squash). Upward-only — never demotes existing `done` (revert protection). Graceful fallback on missing-git / missing-ref / detached-HEAD / no-remotes / timeout — empty set + warning, brief renders verbatim, dashboard never throws. Ref discovery probes `origin/master` → `origin/main` → `master` → `main`. Known limitation: the helper relies on local `origin/master` being current; if no `git fetch` has happened since the merge, the dashboard catches up on the next pull (which `/ship` Stage 7 performs automatically). New helper at `server/lib/git-master-stories.ts`; tests at `server/lib/git-master-stories.test.ts` and `server/lib/dashboard-renderer-reconciliation.test.ts`.
+
 ## [0.36.1](https://github.com/ziyilam3999/forge-harness/compare/v0.36.0...v0.36.1) (2026-04-25)
 
 ### Bug Fixes

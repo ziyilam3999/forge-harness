@@ -19,8 +19,9 @@ vi.mock("../lib/codebase-scan.js", () => ({
 }));
 
 // Mock run-record — don't write real files during tests, but keep
-// canonicalizeEvalReport as the real implementation so the handler's
-// deterministic-serialization path is exercised (PH01-US-00a AC08).
+// canonicalizeEvalReport AND computeSpecGenCostUsd as the real implementation
+// so the handler's deterministic-serialization (PH01-US-00a AC08) and
+// v0.38.0 totalCostUsd math paths are exercised.
 vi.mock("../lib/run-record.js", async () => {
   const actual = await vi.importActual<typeof import("../lib/run-record.js")>(
     "../lib/run-record.js",
@@ -28,6 +29,7 @@ vi.mock("../lib/run-record.js", async () => {
   return {
     writeRunRecord: vi.fn(async () => {}),
     canonicalizeEvalReport: actual.canonicalizeEvalReport,
+    computeSpecGenCostUsd: actual.computeSpecGenCostUsd,
   };
 });
 
@@ -41,6 +43,7 @@ vi.mock("../lib/spec-generator.js", () => ({
     genTokens: { inputTokens: 0, outputTokens: 0 },
     contracts: [],
     bodyChanged: true,
+    warnings: [],
   })),
 }));
 

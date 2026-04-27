@@ -178,7 +178,140 @@ describe("adr-extractor — duplicate-PASS idempotency (AC-C4 ADR dedup)", () =>
   });
 });
 
-// ── Test 4: malformed front-matter ───────────────────────────────────────
+// ── Test 4 (AC-1): YAML `|` literal block scalars ────────────────────────
+//
+// Reproduces the US-08 regression: subagents writing multi-line ADR fields
+// with YAML's `|` literal block scalar syntax (the natural way to express
+// multi-paragraph context/decision/consequences blocks). Before the W1 fix,
+// `parseStubFrontMatter` rejected any indented continuation line, throwing
+// at line 165-167 of adr-extractor.ts; the throw was silently swallowed by
+// evaluate.ts:442-446, leaving INDEX.md stale.
+
+describe("adr-extractor — YAML `|` literal block scalars (AC-1, real US-08 stub format)", () => {
+  let tmp: string;
+  beforeEach(() => { tmp = mkdtempSync(join(tmpdir(), "forge-adr-")); });
+  afterEach(() => { rmSync(tmp, { recursive: true, force: true }); });
+
+  it("converts a stub with `|` block-scalar fields into a canonical ADR + INDEX row", () => {
+    // Mirrors monday-bot's actual US-08 stub format:
+    // .forge/staging/adr/US-08/add-slack-bolt-socket-mode.md
+    const dir = join(tmp, ".forge", "staging", "adr", "US-08");
+    mkdirSync(dir, { recursive: true });
+    const stubPath = join(dir, "add-slack-bolt-socket-mode.md");
+    writeFileSync(
+      stubPath,
+      [
+        "---",
+        "title: Adopt @slack/bolt with Socket Mode for the Slack adapter",
+        "story: US-08",
+        "context: |",
+        "  US-08 introduces the Slack-facing surface of monday-bot — handling @mention",
+        "  events and the /ask slash command, and posting Block Kit replies that include",
+        "  the answer text and per-citation source lines.",
+        "decision: |",
+        "  Add `@slack/bolt` (v4.x) as a runtime dependency and wire the adapter to use",
+        "  Socket Mode (`socketMode: true`, `appToken: <xapp-...>`).",
+        "consequences: |",
+        "  + Bundle gains `@slack/bolt` + transitive `@slack/web-api`, `@slack/socket-mode`.",
+        "  + Socket Mode means we never expose a public URL.",
+        "alternatives: |",
+        "  - `@slack/web-api` alone + a hand-rolled Socket Mode client: rejected.",
+        "  - HTTP Receiver (default Bolt): rejected — requires public ingress.",
+        "---",
+        "",
+        "(stub body — ignored by extractor)",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = processStory({
+      projectPath: tmp,
+      storyId: "US-08",
+      gitSha: "0123456789abcdef0123456789abcdef01234567",
+      today: "2026-04-27",
+    });
+
+    // (a) exactly one canonicalised ADR file
+    expect(result.newAdrPaths.length).toBe(1);
+    const adrPath = result.newAdrPaths[0];
+    expect(existsSync(adrPath)).toBe(true);
+    expect(adrPath).toMatch(/ADR-0001-adopt-slack-bolt-with-socket-mode-for-the-slack-adapter-US-08\.md$/);
+
+    // The canonical ADR's body preserves the multi-paragraph content as-is.
+    const adrText = readFileSync(adrPath, "utf-8");
+    expect(adrText).toContain("US-08 introduces the Slack-facing surface");
+    expect(adrText).toContain("Add `@slack/bolt` (v4.x) as a runtime dependency");
+    expect(adrText).toContain("Bundle gains `@slack/bolt`");
+    expect(adrText).toContain("HTTP Receiver (default Bolt): rejected");
+
+    // The validator approves it.
+    const v = validateAdr(adrPath);
+    expect(v.ok, v.output).toBe(true);
+
+    // (b) INDEX.md gains exactly one ADR row pointing at this story.
+    const indexText = readFileSync(result.indexPath, "utf-8");
+    const adrRows = indexText.split("\n").filter((l) => /^\| ADR-/.test(l));
+    expect(adrRows.length).toBe(1);
+    expect(adrRows[0]).toContain("ADR-0001");
+    expect(adrRows[0]).toContain("US-08");
+    expect(adrRows[0]).toContain("Adopt @slack/bolt with Socket Mode");
+
+    // (c) staging dir is gone.
+    expect(existsSync(join(tmp, ".forge", "staging", "adr", "US-08"))).toBe(false);
+
+    // (d) no spurious no-decisions row was appended on a story with stubs.
+    expect(result.appendedNoDecisionsRow).toBe(false);
+    const noDecRows = (indexText.match(/^\| US-08 \| no new decisions \|/gm) || []).length;
+    expect(noDecRows).toBe(0);
+  });
+
+  it("supports `>` folded block scalars (sibling form — joins lines with spaces)", () => {
+    const dir = join(tmp, ".forge", "staging", "adr", "US-09");
+    mkdirSync(dir, { recursive: true });
+    const stubPath = join(dir, "use-pgvector.md");
+    writeFileSync(
+      stubPath,
+      [
+        "---",
+        "title: Use pgvector for embeddings",
+        "story: US-09",
+        "context: >",
+        "  We need a vector store that lives next to relational data so we can",
+        "  filter by tenant id without crossing a network boundary.",
+        "decision: >",
+        "  Adopt pgvector v0.7 as a Postgres extension and store embeddings in a",
+        "  dedicated table.",
+        "consequences: >",
+        "  Adds a Postgres extension dependency; ops needs to install it on every",
+        "  environment.",
+        "alternatives: >",
+        "  Pinecone (rejected: separate infra, per-vector cost).",
+        "---",
+        "",
+        "body",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = processStory({
+      projectPath: tmp,
+      storyId: "US-09",
+      today: "2026-04-27",
+    });
+
+    expect(result.newAdrPaths.length).toBe(1);
+    const adrText = readFileSync(result.newAdrPaths[0], "utf-8");
+    // Folded scalar: continuation lines join with single spaces (no embedded newlines).
+    expect(adrText).toContain(
+      "We need a vector store that lives next to relational data so we can filter by tenant id without crossing a network boundary.",
+    );
+    expect(adrText).not.toContain("relational data so we can\nfilter");
+  });
+});
+
+// ── Test 5: malformed front-matter ───────────────────────────────────────
 
 describe("adr-extractor — malformed stub (AC-C6)", () => {
   let tmp: string;

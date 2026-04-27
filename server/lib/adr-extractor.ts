@@ -159,8 +159,14 @@ function parseStubFrontMatter(text: string, sourceLabel: string): StubFrontMatte
     );
   }
   const root: Record<string, string | number | null> = {};
-  for (const line of m[1].split("\n")) {
-    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+  const fmLines = m[1].split("\n");
+  let i = 0;
+  while (i < fmLines.length) {
+    const line = fmLines[i];
+    if (line.trim() === "" || line.trimStart().startsWith("#")) {
+      i++;
+      continue;
+    }
     const indent = line.length - line.trimStart().length;
     if (indent !== 0) {
       throw new Error(`adr-extractor: stub ${sourceLabel} unexpected indented line: "${line}"`);
@@ -170,7 +176,46 @@ function parseStubFrontMatter(text: string, sourceLabel: string): StubFrontMatte
       throw new Error(`adr-extractor: stub ${sourceLabel} line missing ":" — "${line}"`);
     }
     const key = line.slice(0, colonIdx).trim();
-    root[key] = parseScalarValue(line.slice(colonIdx + 1).trim());
+    const rawValue = line.slice(colonIdx + 1).trim();
+
+    // YAML block scalar indicators: `|` (literal — preserves newlines) or
+    // `>` (folded — joins consecutive lines with a single space, blank lines
+    // become paragraph breaks). Optional chomp suffix (`+`/`-`) is accepted
+    // and treated as the default "clip" because every field is `.trim()`'d
+    // by `renderAdrFile` before emit, making chomp variants observationally
+    // identical for our use case.
+    const blockMatch = rawValue.match(/^([|>])([+-]?)$/);
+    if (blockMatch) {
+      const indicator = blockMatch[1];
+      i++;
+      const collected: string[] = [];
+      let blockIndent: number | null = null;
+      while (i < fmLines.length) {
+        const cont = fmLines[i];
+        if (cont.trim() === "") {
+          collected.push("");
+          i++;
+          continue;
+        }
+        const contIndent = cont.length - cont.trimStart().length;
+        if (contIndent === 0) break;
+        if (blockIndent === null) blockIndent = contIndent;
+        if (contIndent < blockIndent) break;
+        collected.push(cont.slice(blockIndent));
+        i++;
+      }
+      // Clip trailing blank lines (default chomp).
+      while (collected.length > 0 && collected[collected.length - 1] === "") {
+        collected.pop();
+      }
+      root[key] = indicator === "|"
+        ? collected.join("\n")
+        : foldFoldedScalar(collected);
+      continue;
+    }
+
+    root[key] = parseScalarValue(rawValue);
+    i++;
   }
   const required = ["title", "story", "context", "decision", "consequences", "alternatives"];
   for (const k of required) {
@@ -213,6 +258,29 @@ function parseStubFrontMatter(text: string, sourceLabel: string): StubFrontMatte
     out.supersededBy = v as number | null;
   }
   return out;
+}
+
+/**
+ * YAML folded scalar (`>`): join consecutive non-blank lines with a single
+ * space; blank lines become paragraph breaks. Mirrors libyaml's default fold
+ * behavior closely enough for our short prose fields.
+ */
+function foldFoldedScalar(lines: string[]): string {
+  const out: string[] = [];
+  let buf: string[] = [];
+  for (const l of lines) {
+    if (l === "") {
+      if (buf.length > 0) {
+        out.push(buf.join(" "));
+        buf = [];
+      }
+      out.push("");
+    } else {
+      buf.push(l);
+    }
+  }
+  if (buf.length > 0) out.push(buf.join(" "));
+  return out.join("\n");
 }
 
 function parseScalarValue(raw: string): string | number | null {

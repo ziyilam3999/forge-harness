@@ -1094,15 +1094,21 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .forge-pulse .ember { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 4px var(--green); transform: translate(-50%, -50%); }
 .forge-pulse .pulse-caption { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.04em; }
 
-/* Idle — cold silhouette, slow opacity-only breath so operators can tell
-   the dashboard is still updating. v0.39.2 AC-3/B11 fix: previously the idle
-   pill was static; the previous wave-of-three working states all moved while
-   IDLE just sat there, making it ambiguous whether the page had frozen. The
-   idle breath is opacity-only (no transform), 4s duration, mirrors the
-   forge-respire shape but slower and more subdued. Disabled by the
-   prefers-reduced-motion block below for accessibility. */
+/* Idle — cold silhouette with a slow tri-axis respiration so operators can
+   tell the dashboard is still updating. v0.39.2 AC-3/B11 introduced an
+   opacity-only breath; v0.39.4 upgrades it to vary scale (0.78↔0.92, an 18%
+   diameter swing), opacity (0.40↔0.78), and a faint ambient halo in lockstep
+   over a 4.8s cycle, because at 12px hex size the prior opacity-only
+   modulation was below the perceptual floor and read as static. Base shape
+   stays scale(0.85)/opacity(0.55) to match the prefers-reduced-motion fallback
+   below — the keyframe modulates around that base in both directions.
+   Halo uses filter:drop-shadow, not box-shadow, because the .hex base rule
+   (above) carries a hexagonal clip-path that would clip a box-shadow
+   invisibly inside the polygon. filter:drop-shadow respects clip-path and
+   paints a halo that follows the hex silhouette. Caught in PR #494
+   stateless review. */
 .forge-pulse.idle { background: var(--border-light); border-color: var(--border); }
-.forge-pulse.idle .hex { background: var(--grey); opacity: 0.55; transform: scale(0.85); animation: forge-respire-idle 4s ease-in-out infinite; }
+.forge-pulse.idle .hex { background: var(--grey); opacity: 0.55; transform: scale(0.85); animation: forge-respire-idle 4.8s ease-in-out infinite; }
 .forge-pulse.idle .hex-1 { animation-delay: 0s; }
 .forge-pulse.idle .hex-2 { animation-delay: 0.3s; }
 .forge-pulse.idle .hex-3 { animation-delay: 0.6s; }
@@ -1131,7 +1137,7 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .forge-pulse.working-red .pulse-caption { color: var(--red); }
 
 @keyframes forge-respire { 0%, 100% { transform: scale(0.88); opacity: 0.7; } 50% { transform: scale(1.08); opacity: 1; } }
-@keyframes forge-respire-idle { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.7; } }
+@keyframes forge-respire-idle { 0%, 100% { transform: scale(0.78); opacity: 0.4; filter: drop-shadow(0 0 0 rgba(138, 138, 138, 0)); } 50% { transform: scale(0.92); opacity: 0.78; filter: drop-shadow(0 0 4px rgba(138, 138, 138, 0.55)); } }
 @keyframes forge-respire-stutter { 0%, 18%, 100% { transform: scale(0.9); opacity: 0.7; } 32% { transform: scale(1.04); opacity: 0.95; } 38% { transform: scale(0.96); opacity: 0.85; } 60% { transform: scale(1.06); opacity: 1; } }
 @keyframes forge-ember-green { 0%, 100% { transform: translate(-50%, -50%) scale(0.85); opacity: 0.85; } 50% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; } }
 @keyframes forge-ember-amber { 0%, 100% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.7; } 40% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; } 60% { transform: translate(-50%, -50%) scale(0.95); opacity: 0.85; } }

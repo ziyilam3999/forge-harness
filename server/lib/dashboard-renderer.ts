@@ -283,6 +283,74 @@ export async function readStoryGroundingSignals(
 }
 
 /**
+ * v0.39.2 AC-2/B7 — story IDs whose latest `.forge/runs/*.json` record
+ * post-dates the latest `.forge/coordinate-brief.json` write.
+ *
+ * Used by the renderer to route those stories into the IN PROGRESS column
+ * even when `.forge/activity.json` is idle. The set is the renderer-only
+ * fix monday recommended in W3 — read run records directly when assigning
+ * columns, sidestepping the deeper `coordinate-brief.json` SoT rebuild.
+ *
+ * Failure-tolerant in the same shape as `readStoryGroundingSignals`:
+ *   - missing runs dir → empty set
+ *   - unreadable file / corrupt JSON / missing storyId or timestamp → skip
+ *   - missing coordinate-brief.json → empty set (no anchor → can't decide
+ *     "since last coordinate"; defer to status-based routing)
+ *
+ * The "since last coordinate" anchor is `coordinate-brief.json`'s mtime
+ * rather than a timestamp embedded in the brief — `PhaseTransitionBrief`
+ * has no own timestamp field, and the file's mtime is what coordinator's
+ * atomic-rename writer leaves behind on every successful write.
+ */
+export async function readInProgressStoryIds(
+  projectPath: string,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const briefPath = join(projectPath, ".forge", "coordinate-brief.json");
+  let briefMtimeMs: number;
+  try {
+    const briefStat = await stat(briefPath);
+    briefMtimeMs = briefStat.mtimeMs;
+  } catch {
+    return out;
+  }
+  const runsDir = join(projectPath, ".forge", "runs");
+  let files: string[];
+  try {
+    files = await readdir(runsDir);
+  } catch {
+    return out;
+  }
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    let content: string;
+    try {
+      content = await readFile(join(runsDir, file), "utf-8");
+    } catch {
+      continue;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(content) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const storyId =
+      typeof parsed.storyId === "string" ? parsed.storyId : null;
+    if (!storyId) continue;
+    const ts =
+      typeof parsed.timestamp === "string" ? parsed.timestamp : "";
+    if (!ts) continue;
+    const tsMs = Date.parse(ts);
+    if (!Number.isFinite(tsMs)) continue;
+    if (tsMs > briefMtimeMs) {
+      out.add(storyId);
+    }
+  }
+  return out;
+}
+
+/**
  * Render the per-path ✓/✗ existence indicator block. Empty array → "".
  * Each path is wrapped in a span with `data-path-exists="true|false"` so the
  * AC can grep for either value plus the path text.
@@ -318,11 +386,21 @@ function renderWarningChips(warnings: SpecGeneratorWarning[]): string {
   }
   const chips: string[] = [];
   for (const [kind, count] of counts) {
-    const severity = kind === "stripped-unknown-identifier" ? "error" : "warning";
+    // v0.39.2 AC-1/B12 — every spec-generator warning is amber. The earlier
+    // hardcoded `kind === "stripped-unknown-identifier" → "error"` mapping
+    // painted a non-fatal warning red, the colour reserved for actual
+    // failures. The `.card-warning-chip.error` CSS class continues to exist
+    // (G1) — it is reserved for a future error-surface rendering path that
+    // would consume `generatedDocs.errors[]`. No chip-emitting site uses it
+    // at this revision. The literal `card-warning-chip warning` is inlined
+    // (rather than `card-warning-chip ${severity}` with a hoisted const) so
+    // the dist also carries the literal string; AC-8's dist grep is the
+    // observable contract that no future commit silently re-introduces a
+    // dynamic severity branch here.
     const label = kind === "no-vocabulary" ? "no vocabulary" : kind === "stripped-unknown-identifier" ? "unknown identifier" : kind;
     const countLabel = count > 1 ? ` ×${count}` : "";
     chips.push(
-      `<span class="card-warning-chip ${severity}" data-warning="${escapeHtml(kind)}" data-severity="${severity}">${escapeHtml(label)}${escapeHtml(countLabel)}</span>`,
+      `<span class="card-warning-chip warning" data-warning="${escapeHtml(kind)}" data-severity="warning">${escapeHtml(label)}${escapeHtml(countLabel)}</span>`,
     );
   }
   return `<div class="card-warnings">${chips.join("")}</div>`;
@@ -393,6 +471,23 @@ export interface DashboardRenderInput {
    * pre-date v0.39.0 stay byte-stable except for the new attribute.
    */
   masterMergedIds?: ReadonlySet<string>;
+  /**
+   * v0.39.2 AC-2/B7+W3 — set of story IDs whose most-recent run record
+   * post-dates the latest `forge_coordinate` brief write. The renderer
+   * routes those stories to the `col-in-progress` column even when
+   * `.forge/activity.json` is idle, so the IN PROGRESS column can light
+   * up between an evaluate finishing and the next coordinate landing.
+   *
+   * The previous routing rule keyed exclusively off `activity.json`'s
+   * `tool` field — empty activity meant the column never populated, even
+   * when run records had clearly landed since the last coordinate. monday's
+   * US-08 audit observed a 35-minute build during which the IN PROGRESS
+   * column never lit up; this field closes that gap.
+   *
+   * Optional-with-default-empty: when absent, the renderer uses the
+   * pre-v0.39.2 activity-only routing.
+   */
+  inProgressFromRuns?: ReadonlySet<string>;
 }
 
 // ── Format helpers ────────────────────────────────────────────────────────
@@ -774,6 +869,7 @@ function renderBoard(
   groundingSignals: ReadonlyMap<string, StoryGroundingSignal>,
   projectPath: string | null,
   masterMergedIds: ReadonlySet<string>,
+  inProgressFromRuns: ReadonlySet<string>,
 ): string {
   const entries = brief?.stories ?? [];
 
@@ -792,6 +888,19 @@ function renderBoard(
     // Stories whose id matches the activity signal route to in-progress,
     // regardless of their underlying StoryStatus.
     if (activeStoryId && entry.storyId === activeStoryId) {
+      byColumn[COLUMN_IDS.inProgress].push(entry);
+      continue;
+    }
+    // v0.39.2 AC-2/B7 — stories with run-record activity since the last
+    // forge_coordinate also route to in-progress, even when activity.json
+    // is idle. `done` and other terminal kanban states are NOT overridden:
+    // a freshly-finished story should appear in DONE, not IN PROGRESS.
+    if (
+      inProgressFromRuns.has(entry.storyId) &&
+      entry.status !== "done" &&
+      entry.status !== "failed" &&
+      entry.status !== "dep-failed"
+    ) {
       byColumn[COLUMN_IDS.inProgress].push(entry);
       continue;
     }
@@ -851,11 +960,62 @@ function renderBoard(
 </div>`;
 }
 
+/**
+ * v0.39.2 AC-4/F4 — clip sub-stage entries' rendered timestamps to the
+ * latest envelope-close timestamp.
+ *
+ * The bug monday observed: a sub-stage entry (e.g. `tool: "spec-gen"` at
+ * 03:08:10) timestamped AFTER its parent envelope's close (e.g. the
+ * `forge_evaluate` close at 03:07:56). The activity feed displayed
+ * sub-stages as occurring after the envelope had already finished — time
+ * travel from the operator's perspective.
+ *
+ * Strategy: scan every entry once, track the maximum ISO-string timestamp
+ * across entries marked as a close envelope (`stage === "close"`). For any
+ * entry whose own timestamp exceeds that max-close, render it with the
+ * timestamp clipped to the close timestamp. The clipped timestamp flows
+ * through both halves of the row template (the iso-attribute and the
+ * formatted display value) together so the in-browser timezone conversion
+ * script sees a coherent value.
+ *
+ * Non-close-envelope entries with timestamps not exceeding any close are
+ * untouched. When no close envelope exists in the feed (the common case
+ * for an in-progress phase with no completed evaluate yet), the function
+ * returns the entries verbatim — `latestClose` is `null` and the per-entry
+ * comparison is skipped.
+ *
+ * The two flavours of `forge_evaluate` close are both honoured: the live
+ * `stage: "close"` envelope (the one monday's audit observed) and any
+ * future entry that also tags itself as a close envelope. Other envelope
+ * tools (e.g. `forge_generate`) are not currently expected to emit a
+ * `stage === "close"` row, but if they do they participate identically.
+ */
+function clipFeedTimestamps(
+  entries: ReadonlyArray<AuditFeedEntry>,
+): AuditFeedEntry[] {
+  let latestClose: string | null = null;
+  for (const e of entries) {
+    if (e.stage === "close") {
+      if (latestClose === null || e.timestamp > latestClose) {
+        latestClose = e.timestamp;
+      }
+    }
+  }
+  if (latestClose === null) return entries.slice();
+  const close = latestClose;
+  return entries.map((e) => {
+    if (e.stage === "close") return e;
+    if (e.timestamp <= close) return e;
+    return { ...e, timestamp: close };
+  });
+}
+
 function renderFeed(auditEntries: ReadonlyArray<AuditFeedEntry>): string {
   if (auditEntries.length === 0) {
     return `<div class="activity-feed empty"><div class="feed-empty">No audit entries yet.</div></div>`;
   }
-  const rows = auditEntries.map((e) =>
+  const clipped = clipFeedTimestamps(auditEntries);
+  const rows = clipped.map((e) =>
     `<div class="feed-entry">
   <span class="feed-time" data-iso="${escapeHtml(e.timestamp)}">${escapeHtml(formatTimeOfDay(e.timestamp))}</span>
   <span class="feed-tool"><span class="hex-dot"></span>${escapeHtml(e.tool)}</span>
@@ -937,9 +1097,18 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .forge-pulse .ember { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 4px var(--green); transform: translate(-50%, -50%); }
 .forge-pulse .pulse-caption { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.04em; }
 
-/* Idle — cold silhouette, no animation, no ember. */
+/* Idle — cold silhouette, slow opacity-only breath so operators can tell
+   the dashboard is still updating. v0.39.2 AC-3/B11 fix: previously the idle
+   pill was static; the previous wave-of-three working states all moved while
+   IDLE just sat there, making it ambiguous whether the page had frozen. The
+   idle breath is opacity-only (no transform), 4s duration, mirrors the
+   forge-respire shape but slower and more subdued. Disabled by the
+   prefers-reduced-motion block below for accessibility. */
 .forge-pulse.idle { background: var(--border-light); border-color: var(--border); }
-.forge-pulse.idle .hex { background: var(--grey); opacity: 0.55; transform: scale(0.85); }
+.forge-pulse.idle .hex { background: var(--grey); opacity: 0.55; transform: scale(0.85); animation: forge-respire-idle 4s ease-in-out infinite; }
+.forge-pulse.idle .hex-1 { animation-delay: 0s; }
+.forge-pulse.idle .hex-2 { animation-delay: 0.3s; }
+.forge-pulse.idle .hex-3 { animation-delay: 0.6s; }
 .forge-pulse.idle .pulse-caption { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
 
 /* Working-green — smooth respiration wave + steady ember pulse. */
@@ -965,6 +1134,7 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .forge-pulse.working-red .pulse-caption { color: var(--red); }
 
 @keyframes forge-respire { 0%, 100% { transform: scale(0.88); opacity: 0.7; } 50% { transform: scale(1.08); opacity: 1; } }
+@keyframes forge-respire-idle { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.7; } }
 @keyframes forge-respire-stutter { 0%, 18%, 100% { transform: scale(0.9); opacity: 0.7; } 32% { transform: scale(1.04); opacity: 0.95; } 38% { transform: scale(0.96); opacity: 0.85; } 60% { transform: scale(1.06); opacity: 1; } }
 @keyframes forge-ember-green { 0%, 100% { transform: translate(-50%, -50%) scale(0.85); opacity: 0.85; } 50% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; } }
 @keyframes forge-ember-amber { 0%, 100% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.7; } 40% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; } 60% { transform: translate(-50%, -50%) scale(0.95); opacity: 0.85; } }
@@ -1050,6 +1220,8 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
   const projectPath = input.projectPath ?? null;
   const masterMergedIds: ReadonlySet<string> =
     input.masterMergedIds ?? new Set<string>();
+  const inProgressFromRuns: ReadonlySet<string> =
+    input.inProgressFromRuns ?? new Set<string>();
   // Declaration is optional on the input (default null) so the wide universe
   // of renderer tests that build `DashboardRenderInput` literals keep working
   // untouched. When absent, `renderDeclarationPill` emits "" — no false
@@ -1096,7 +1268,7 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
 <div class="dashboard">
 ${renderHeader(brief, declaration, totalsElapsedMs, pulseState, pulseElapsedMs, groundingSignals)}
 ${renderReplanningNotes(brief)}
-${renderBoard(brief, activity, groundingSignals, projectPath, masterMergedIds)}
+${renderBoard(brief, activity, groundingSignals, projectPath, masterMergedIds, inProgressFromRuns)}
 ${renderFeed(auditEntries)}
 </div>
 <script>
@@ -1631,11 +1803,12 @@ export async function renderDashboard(
   io: DashboardIo = DEFAULT_IO,
 ): Promise<void> {
   try {
-    const [brief, activity, auditEntries, groundingSignals] = await Promise.all([
+    const [brief, activity, auditEntries, groundingSignals, inProgressFromRuns] = await Promise.all([
       readCoordinateBrief(projectPath),
       readActivity(projectPath),
       readActivityFeed(projectPath),
       readStoryGroundingSignals(projectPath),
+      readInProgressStoryIds(projectPath),
     ]);
     // Declaration is a synchronous in-memory read — deliberately NOT bundled
     // into the Promise.all above because there's no I/O to overlap. Reading
@@ -1678,6 +1851,7 @@ export async function renderDashboard(
       groundingSignals,
       projectPath,
       masterMergedIds: upgradedIds,
+      inProgressFromRuns,
     });
     await writeDashboardHtml(projectPath, html, io);
     await maybeAutoOpenBrowser(projectPath);

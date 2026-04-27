@@ -162,7 +162,12 @@ describe("dashboard grounding signals — v0.38.0 (I1+I2+I3+I7)", () => {
     );
   });
 
-  it("AC-4: stripped-unknown-identifier renders red chip with data-severity=error", () => {
+  it("AC-4: stripped-unknown-identifier renders amber chip with data-severity=warning (v0.39.2 B12 fix)", () => {
+    // v0.39.2 AC-1/B12 — every spec-generator warning now renders amber.
+    // The previous "error" severity painted a non-fatal warning red, the
+    // colour reserved for actual failures. The CSS class
+    // `.card-warning-chip.error` continues to exist (G1 invariant) but no
+    // chip-emitting site uses it at this revision.
     const brief = makeBrief({
       stories: [makeStoryEntry("US-02", "done")],
       completedCount: 1,
@@ -187,7 +192,7 @@ describe("dashboard grounding signals — v0.38.0 (I1+I2+I3+I7)", () => {
     const card = extractStoryCard(html, "US-02");
 
     expect(card).toMatch(
-      /<span class="card-warning-chip[^"]*"[^>]*data-warning="stripped-unknown-identifier"[^>]*data-severity="error"/,
+      /<span class="card-warning-chip[^"]*"[^>]*data-warning="stripped-unknown-identifier"[^>]*data-severity="warning"/,
     );
   });
 

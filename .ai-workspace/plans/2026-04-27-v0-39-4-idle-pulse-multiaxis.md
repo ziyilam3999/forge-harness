@@ -35,7 +35,7 @@ This is a one-keyframe-rule + one-comment-block CSS edit. No state-machine chang
 
 - [ ] **AC-1.** `grep -c '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts` returns `1` (single source of truth, no dupes).
 - [ ] **AC-2.** `grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'transform: scale'` returns `>= 1` (proves scale modulation present, not opacity-only).
-- [ ] **AC-3.** `grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'box-shadow'` returns `>= 1` (proves halo modulation present).
+- [ ] **AC-3.** `grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'filter: drop-shadow'` returns `>= 1` (proves halo modulation present via `filter: drop-shadow`, which respects the hex `clip-path` — `box-shadow` would be clipped invisibly inside the polygon and would not render).
 - [ ] **AC-4.** `grep -c 'forge-respire-idle 4.8s' server/lib/dashboard-renderer.ts` returns `1` (proves cycle slowed from 4s → 4.8s).
 - [ ] **AC-5.** `grep -E 'opacity: 0\.55; transform: scale\(0\.85\)' server/lib/dashboard-renderer.ts` matches inside the `prefers-reduced-motion` block (line ~1146 area) — proves accessibility fallback target preserved.
 - [ ] **AC-6.** `npm run build` succeeds on the worktree (TypeScript compile clean).
@@ -56,7 +56,7 @@ This is a one-keyframe-rule + one-comment-block CSS edit. No state-machine chang
 # AC-1 to AC-5: grep gates
 grep -c '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts            # → 1
 grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'transform: scale'  # → >= 1
-grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'box-shadow'        # → >= 1
+grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'filter: drop-shadow' # → >= 1
 grep -c 'forge-respire-idle 4.8s' server/lib/dashboard-renderer.ts                  # → 1
 grep -nE 'opacity: 0\.55; transform: scale\(0\.85\)' server/lib/dashboard-renderer.ts | head        # → match in prefers-reduced-motion block
 
@@ -75,7 +75,7 @@ gh pr view <PR> --json files -q '.files[].path'
 - `server/lib/dashboard-renderer.ts` — three edits:
   1. Comment block at lines ~1097-1103: explain the v0.39.4 multi-axis upgrade and why opacity-only failed at 12px.
   2. `.forge-pulse.idle .hex` animation duration `4s` → `4.8s` (line ~1105).
-  3. `@keyframes forge-respire-idle` (line ~1134): add `transform: scale(0.78 ↔ 0.92)` and `box-shadow` modulation alongside the existing opacity stops.
+  3. `@keyframes forge-respire-idle` (line ~1134): add `transform: scale(0.78 ↔ 0.92)` and `filter: drop-shadow(0 ↔ 4px)` modulation alongside the existing opacity stops. (Use `filter: drop-shadow`, not `box-shadow` — the `.forge-pulse .hex` base rule applies a hexagonal `clip-path` that clips `box-shadow` invisibly, making the halo dead CSS; `filter: drop-shadow` respects `clip-path` and paints a halo that follows the silhouette. Caught in stateless review of PR #494, fixed pre-merge.)
 - `package.json` — bump `0.39.3` → `0.39.4` (driven by /ship Stage 7 conventional-commit detection).
 - `CHANGELOG.md` — /ship Stage 7 prepends a v0.39.4 entry under `### Bug Fixes`.
 - `dist/**` — rebuilt by /ship Stage 7 (or post-merge `npm run build` per the auto-pull-rebuild rule).

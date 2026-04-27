@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.39.3](https://github.com/ziyilam3999/forge-harness/compare/v0.39.2...v0.39.3) (2026-04-27)
+
+### Bug Fixes
+
+- **dashboard:** delete unused `.card-warning-chip.error` CSS rule (#493)
+
 ## [0.39.2](https://github.com/ziyilam3999/forge-harness/compare/v0.39.1...v0.39.2) (2026-04-27)
 
 ### Bug Fixes

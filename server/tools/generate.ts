@@ -6,6 +6,8 @@ import {
   type AssembleInput,
 } from "../lib/generator.js";
 import type { EvalReport } from "../types/eval-report.js";
+import { writeActivity } from "../lib/activity.js";
+import { writeRunRecord, type RunRecord } from "../lib/run-record.js";
 
 // v0.36.0 Phase C (AC-C5): re-export the ADR capture contract so the tool
 // surface is the single import point for clients that want to inspect the
@@ -171,6 +173,32 @@ export async function handleGenerate(input: GenerateInput) {
     };
   }
 
+  // v0.39.0 G3/AC-4/AC-5 — observability completion for forge_generate.
+  // The handler writes an activity signal at start (so the dashboard's
+  // in-progress overlay can route this story while the brief is being
+  // assembled) and clears it on return. After completion (success or
+  // failure) it also writes a parallel `.forge/runs/forge_generate-*.json`
+  // run record carrying {tool, storyId, timestamp, outcome, metrics}. The
+  // shape mirrors evaluate/coordinate so analytics joins stay uniform.
+  //
+  // All side effects are best-effort: writeActivity + writeRunRecord both
+  // swallow their own errors. We never let observability bookkeeping take
+  // down the brief assembly itself.
+  const startedAtIso = new Date().toISOString();
+  const startedAtMs = Date.now();
+  const projectPath = input.projectPath;
+
+  if (projectPath) {
+    await writeActivity(projectPath, {
+      tool: "forge_generate",
+      storyId: input.storyId,
+      stage: "assemble",
+      startedAt: startedAtIso,
+      lastUpdate: startedAtIso,
+      label: input.evalReport ? "fix iteration" : "init",
+    });
+  }
+
   try {
     // Parse JSON-serialized complex inputs
     let evalReport: EvalReport | undefined;
@@ -205,6 +233,15 @@ export async function handleGenerate(input: GenerateInput) {
 
     const result = await assembleGenerateResultWithContext(assembleInput);
 
+    if (projectPath) {
+      await writeForgeGenerateRunRecord(projectPath, {
+        storyId: input.storyId,
+        timestamp: startedAtIso,
+        outcome: "ok",
+        durationMs: Date.now() - startedAtMs,
+      });
+    }
+
     return {
       content: [
         {
@@ -214,6 +251,14 @@ export async function handleGenerate(input: GenerateInput) {
       ],
     };
   } catch (err) {
+    if (projectPath) {
+      await writeForgeGenerateRunRecord(projectPath, {
+        storyId: input.storyId,
+        timestamp: startedAtIso,
+        outcome: "failure",
+        durationMs: Date.now() - startedAtMs,
+      });
+    }
     return {
       content: [
         {
@@ -227,4 +272,49 @@ export async function handleGenerate(input: GenerateInput) {
       isError: true,
     };
   }
+}
+
+/**
+ * Build and persist a `.forge/runs/forge_generate-*.json` record for one
+ * handleGenerate invocation. Schema mirrors evaluate/coordinate writers:
+ * the same `RunRecord` interface, with `tool: "forge_generate"`. The vast
+ * majority of fields default to null/zero because forge_generate is a
+ * pure read-only brief-assembler — it has no documentTier, no LLM token
+ * spend, no critique rounds, no eval verdict. The fields that ARE
+ * meaningful (timestamp, storyId, outcome, durationMs) carry the
+ * dashboard's grounding-signal needs.
+ *
+ * `writeRunRecord` itself does writeActivity(null) + renderDashboard
+ * post-write (see `server/lib/run-record.ts`), so the activity overlay
+ * is cleared atomically with the record landing.
+ */
+async function writeForgeGenerateRunRecord(
+  projectPath: string,
+  args: {
+    storyId: string;
+    timestamp: string;
+    outcome: Extract<RunRecord["outcome"], "ok" | "failure">;
+    durationMs: number;
+  },
+): Promise<void> {
+  const record: RunRecord = {
+    timestamp: args.timestamp,
+    tool: "forge_generate",
+    documentTier: null,
+    mode: null,
+    tier: null,
+    storyId: args.storyId,
+    metrics: {
+      inputTokens: 0,
+      outputTokens: 0,
+      critiqueRounds: 0,
+      findingsTotal: 0,
+      findingsApplied: 0,
+      findingsRejected: 0,
+      validationRetries: 0,
+      durationMs: args.durationMs,
+    },
+    outcome: args.outcome,
+  };
+  await writeRunRecord(projectPath, record);
 }

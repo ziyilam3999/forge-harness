@@ -1105,7 +1105,7 @@ ${renderFeed(auditEntries)}
 // UTC ISO is kept as the element's title attribute so hovering reveals it.
 (function () {
   function pad(n) { return String(n).padStart(2, "0"); }
-  var nodes = document.querySelectorAll("[data-iso]");
+  var nodes = document.querySelectorAll(".feed-time[data-iso]");
   for (var i = 0; i < nodes.length; i++) {
     var el = nodes[i];
     var iso = el.getAttribute("data-iso");

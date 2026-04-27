@@ -957,7 +957,7 @@ function renderBoard(
  */
 function clipFeedTimestamps(
   entries: ReadonlyArray<AuditFeedEntry>,
-): AuditFeedEntry[] {
+): ReadonlyArray<AuditFeedEntry> {
   let latestClose: string | null = null;
   for (const e of entries) {
     if (e.stage === "close") {
@@ -966,7 +966,7 @@ function clipFeedTimestamps(
       }
     }
   }
-  if (latestClose === null) return entries.slice();
+  if (latestClose === null) return entries;
   const close = latestClose;
   return entries.map((e) => {
     if (e.stage === "close") return e;

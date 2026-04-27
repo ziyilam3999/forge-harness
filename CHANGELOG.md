@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.39.5](https://github.com/ziyilam3999/forge-harness/compare/v0.39.4...v0.39.5) (2026-04-27)
+
+### Bug Fixes
+
+- **dashboard:** v0.39.5 — top-bar legibility cleanup (#496)
+  - Drop redundant orange ACTIVE pill (was duplicating the green IN PROGRESS phase-tag; both derived from `brief.status`).
+  - Add `background-color: #3a3a3a ↔ #c8c8c8` as a 4th axis on the idle Forge Pulse keyframe — previous axes (scale, opacity, halo) all lived on the brightness channel; widening the luminance swing on the fill itself materially boosts the breath's perceived motion at the 12px native render size.
+
 ## [0.39.4](https://github.com/ziyilam3999/forge-harness/compare/v0.39.3...v0.39.4) (2026-04-27)
 
 ### Bug Fixes

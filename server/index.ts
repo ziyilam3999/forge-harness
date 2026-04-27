@@ -8,6 +8,7 @@ import { reconcileInputSchema, handleReconcile } from "./tools/reconcile.js";
 import { lintRefreshInputSchema, handleLintRefresh } from "./tools/lint-refresh.js";
 import { statusInputSchema, handleStatus } from "./tools/status.js";
 import { declareStoryInputSchema, handleDeclareStory } from "./tools/declare-story.js";
+import * as dashboardRenderLoop from "./lib/dashboard-render-loop.js";
 
 const server = new McpServer({
   name: "forge",
@@ -139,6 +140,38 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("forge: MCP server running on stdio");
+
+  // v0.39.0 G1/AC-1/AC-2 — start the periodic dashboard re-render loop.
+  // Anchors on `process.cwd()` because the MCP server is launched from
+  // the project root by every consumer (monday-bot, forge-harness's own
+  // dogfood, etc.); this matches what `progress.ts` and `run-record.ts`
+  // already pass to `renderDashboard()` via their own RunContext.
+  // Failure to start the loop is non-fatal — the dashboard simply falls
+  // back to its pre-v0.39.0 event-driven cadence.
+  try {
+    dashboardRenderLoop.start(process.cwd());
+  } catch (err) {
+    console.error(
+      "forge: failed to start dashboard render loop (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // Graceful shutdown — best effort. Stops the timer and awaits any
+  // in-flight render so we don't strand the dashboard mid-write.
+  const cleanup = async () => {
+    try {
+      await dashboardRenderLoop.stop();
+    } catch {
+      // swallow — process is exiting anyway
+    }
+  };
+  process.on("SIGINT", () => {
+    void cleanup().finally(() => process.exit(0));
+  });
+  process.on("SIGTERM", () => {
+    void cleanup().finally(() => process.exit(0));
+  });
 }
 
 main().catch((error) => {

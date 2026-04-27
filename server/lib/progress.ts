@@ -154,6 +154,15 @@ export class ProgressReporter {
     }
   }
 
+  /**
+   * Test-only accessor for `activityStartedAt`. Lets tests assert the reset
+   * invariant directly (#377) instead of relying on a wall-clock gap between
+   * two `begin()` calls to detect re-seeding.
+   */
+  getActivityStartedAtForTesting(): string | null {
+    return this.activityStartedAt;
+  }
+
   /** Mark a stage as skipped (e.g., critique skipped in quick tier). */
   skip(stageName: string): void {
     this.results.push({ name: stageName, durationMs: 0, status: "skipped" });

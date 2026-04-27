@@ -579,6 +579,36 @@ function buildGroundingDriftSummary(
   return lines.join("");
 }
 
+/**
+ * v0.39.0 G4/AC-6 — top-bar phase-status pill, renamed away from
+ * `in-progress` so its class + visible text no longer collide with the
+ * "IN PROGRESS" kanban column heading.
+ *
+ * Mapping (status → class+label) — only the `in-progress` row changes
+ * from the legacy renderer; every other status keeps its existing class
+ * literal so the rest of the dashboard's CSS keeps working.
+ *
+ *   in-progress    →  class="active",  label="active"
+ *   complete       →  class="complete", label="complete"
+ *   needs-replan   →  class="needs-replan", label="needs-replan"
+ *   halted         →  class="halted", label="halted"
+ *   waiting        →  class="waiting", label="waiting"
+ *   <anything else>→  pass-through (legacy parity)
+ *
+ * AC-6 invariants:
+ *  - `phase-status-pill in-progress` substring appears 0 times.
+ *  - The visible pill text never contains the substring `in progress`
+ *    (case-insensitive).
+ *  - Some non-empty pill markup announces the phase status for every
+ *    brief whose status is `in-progress`.
+ */
+function renderPhaseStatusPill(status: string): string {
+  if (status === "in-progress") {
+    return `<div class="phase-status-pill active">active</div>`;
+  }
+  return `<div class="phase-status-pill ${escapeHtml(status)}">${escapeHtml(status)}</div>`;
+}
+
 function renderHeader(
   brief: PhaseTransitionBrief | null,
   declaration: StoryDeclaration | null | undefined,
@@ -651,7 +681,7 @@ function renderHeader(
   <div class="top-bar-left">
     <div class="logo">Hive Mind <span>Forge</span><span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
     <div class="phase-tag">${escapeHtml(brief.status)}</div>
-    <div class="phase-status-pill ${escapeHtml(brief.status)}">${escapeHtml(brief.status)}</div>
+    ${renderPhaseStatusPill(brief.status)}
     ${declarationHtml}
   </div>
   <div class="top-bar-right">
@@ -902,7 +932,7 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .phase-status-pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: var(--border-light); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
 .phase-status-pill.complete { background: var(--green-bg); color: var(--green); }
 .phase-status-pill.needs-replan, .phase-status-pill.halted { background: var(--red-bg); color: var(--red); }
-.phase-status-pill.in-progress { background: var(--amber-bg); color: var(--amber); }
+.phase-status-pill.active { background: var(--amber-bg); color: var(--amber); }
 .declaration-pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: var(--green-bg); color: var(--green); display: inline-flex; align-items: center; gap: 6px; }
 .declaration-pill .decl-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); font-weight: 700; }
 .declaration-pill .decl-story-id { font-family: var(--font-mono); font-weight: 700; }
@@ -993,6 +1023,9 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .story-card .card-warning-chip { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); }
 .story-card .card-warning-chip.warning { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber); }
 .story-card .card-warning-chip.error { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+.story-card .master-merged-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--green-bg); color: var(--green); border: 1px solid var(--green); margin-top: 4px; }
+.story-card .card-non-fatal-warnings { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.story-card .card-non-fatal-warning { font-size: 11px; color: var(--amber); font-style: italic; }
 .story-card .card-paths { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
 .story-card .card-path { font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary); display: inline-block; }
 .story-card .card-path.path-ok .path-indicator { color: var(--green); font-weight: 700; }

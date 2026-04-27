@@ -145,6 +145,30 @@ export async function computeDriftCounts(
 
 const MAX_RETRIES = 3;
 
+/**
+ * v0.39.2 AC-5/F5 — count authoritative failed evaluate records only.
+ *
+ * Background: a story's run-record list contains every primary record we
+ * write — `forge_evaluate` records (which carry `evalVerdict`), plus
+ * `forge_generate` and `forge_plan` records (which do NOT). The retry
+ * counter shown on the dashboard's story card should only reflect actual
+ * failed evaluation attempts. The previous filter `r.evalVerdict !== "PASS"`
+ * folded in every non-evaluate record because `undefined !== "PASS"` is
+ * true — a story with one PASS evaluate and any number of generate/plan
+ * records would surface as "1/3 retries" when nothing had retried.
+ *
+ * The scoped filter `r.evalVerdict === "FAIL" || r.evalVerdict === "INCONCLUSIVE"`
+ * counts only the two explicit failure verdicts. Records without a verdict
+ * (the generator/planner path) and PASS records both contribute zero.
+ */
+function countRetries(records: ReadonlyArray<RunRecord>): number {
+  let n = 0;
+  for (const r of records) {
+    if (r.evalVerdict === "FAIL" || r.evalVerdict === "INCONCLUSIVE") n += 1;
+  }
+  return n;
+}
+
 // ── Config file schema (REQ-15) ─────────────────────────────
 
 const observabilitySchema = z.object({
@@ -340,9 +364,15 @@ export async function assessPhase(
   for (const story of sorted) {
     const records = recordsByStory.get(story.id) ?? [];
     const mostRecent = records.length > 0 ? records[records.length - 1] : null;
-    const retryCount = records.filter(
-      (r) => r.evalVerdict !== "PASS",
-    ).length;
+    // v0.39.2 AC-5/F5 — count only AUTHORITATIVE failed evaluate records.
+    // The previous filter `r.evalVerdict !== "PASS"` matched every non-PASS
+    // record, including `forge_generate` / `forge_plan` records that have no
+    // `evalVerdict` field at all (undefined !== "PASS" is true). That made a
+    // story with one PASS evaluate plus any number of generate/plan records
+    // render as "1/3 retries" even when nothing had retried. Restricting to
+    // explicit FAIL/INCONCLUSIVE verdicts ignores records that never carried
+    // a verdict in the first place.
+    const retryCount = countRetries(records);
     const retriesRemaining = Math.max(0, MAX_RETRIES - retryCount);
 
     // Dangling-dep override: if this story has a dangling dep, force pending
@@ -1076,7 +1106,10 @@ export async function recoverState(plan: ExecutionPlan, projectPath: string): Pr
   for (const story of sorted) {
     const records = recordsByStory.get(story.id) ?? [];
     const mostRecent = records.length > 0 ? records[records.length - 1] : null;
-    const retryCount = records.filter((r) => r.evalVerdict !== "PASS").length;
+    // v0.39.2 AC-5/F5 — see assessPhase: count only authoritative FAIL /
+    // INCONCLUSIVE evaluate records, not records that lack an evalVerdict
+    // (`forge_generate` and `forge_plan` records have no verdict).
+    const retryCount = countRetries(records);
     const retriesRemaining = Math.max(0, MAX_RETRIES - retryCount);
 
     const status = classifyStory(story, mostRecent, retryCount, records.length, statusMap, storyIds);

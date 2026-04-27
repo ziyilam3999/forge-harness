@@ -1568,3 +1568,146 @@ describe("computeDriftCounts — cap boundary + overflow spill", () => {
   });
 });
 
+// ── v0.39.2 AC-5 / F5 — retryCount semantics ──────────────────────────────
+
+/**
+ * Build a `forge_generate` primary record (NOT a generator-iteration record).
+ * forge_generate writes a top-level RunRecord with `tool: "forge_generate"`
+ * and NO `evalVerdict` field — see server/tools/generate.ts:300-319. Those
+ * records flow into the coordinator's `recordsByStory` join exactly like
+ * forge_evaluate records, which is why the retry filter must distinguish
+ * "no verdict" from "FAIL/INCONCLUSIVE verdict".
+ */
+function makeGeneratePrimaryRecord(
+  storyId: string,
+  timestamp: string,
+): PrimaryRecord {
+  const record: RunRecord = {
+    timestamp,
+    tool: "forge_generate",
+    documentTier: null,
+    mode: null,
+    tier: null,
+    storyId,
+    // explicitly NO evalVerdict — that's the bug surface
+    metrics: {
+      inputTokens: 0,
+      outputTokens: 0,
+      critiqueRounds: 0,
+      findingsTotal: 0,
+      findingsApplied: 0,
+      findingsRejected: 0,
+      validationRetries: 0,
+      durationMs: 1000,
+    },
+    outcome: "ok",
+  };
+  return { source: "primary", record };
+}
+
+function makePlanPrimaryRecord(
+  storyId: string,
+  timestamp: string,
+): PrimaryRecord {
+  const record: RunRecord = {
+    timestamp,
+    tool: "forge_plan",
+    documentTier: null,
+    mode: null,
+    tier: null,
+    storyId,
+    metrics: {
+      inputTokens: 0,
+      outputTokens: 0,
+      critiqueRounds: 0,
+      findingsTotal: 0,
+      findingsApplied: 0,
+      findingsRejected: 0,
+      validationRetries: 0,
+      durationMs: 1000,
+    },
+    outcome: "success",
+  };
+  return { source: "primary", record };
+}
+
+describe("retryCount counts only failed evaluate records", () => {
+  it("retryCount counts only failed evaluate records: PASS evaluate + forge_generate record yields retryCount=0 (assessPhase)", async () => {
+    const plan = makePlan([makeStory("US-08")]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makeGeneratePrimaryRecord("US-08", "2026-04-27T03:00:00Z"),
+      makePrimaryRecord("US-08", "PASS", "2026-04-27T03:07:00Z"),
+    ]);
+
+    const result = await assessPhase(plan, "/tmp/test");
+    const entry = result.brief.stories.find((s) => s.storyId === "US-08")!;
+    expect(entry.retryCount).toBe(0);
+    expect(entry.retriesRemaining).toBe(3);
+  });
+
+  it("retryCount counts only failed evaluate records: PASS evaluate + forge_plan + forge_generate records yields retryCount=0 (assessPhase)", async () => {
+    const plan = makePlan([makeStory("US-08")]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePlanPrimaryRecord("US-08", "2026-04-27T02:00:00Z"),
+      makeGeneratePrimaryRecord("US-08", "2026-04-27T03:00:00Z"),
+      makePrimaryRecord("US-08", "PASS", "2026-04-27T03:07:00Z"),
+    ]);
+
+    const result = await assessPhase(plan, "/tmp/test");
+    const entry = result.brief.stories.find((s) => s.storyId === "US-08")!;
+    expect(entry.retryCount).toBe(0);
+    expect(entry.retriesRemaining).toBe(3);
+  });
+
+  it("retryCount counts only failed evaluate records: PASS evaluate + forge_generate record yields retryCount=0 (recoverState)", async () => {
+    // Both filter sites must be fixed — the live-state path (assessPhase)
+    // and the recovery path (recoverState). v0.39.2 plan AC-5 explicitly
+    // requires both sites to be covered.
+    const plan = makePlan([makeStory("US-08")]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makeGeneratePrimaryRecord("US-08", "2026-04-27T03:00:00Z"),
+      makePrimaryRecord("US-08", "PASS", "2026-04-27T03:07:00Z"),
+    ]);
+
+    const result = await recoverState(plan, "/tmp/test");
+    const entry = result.get("US-08")!;
+    expect(entry.retryCount).toBe(0);
+    expect(entry.retriesRemaining).toBe(3);
+  });
+
+  it("retryCount counts only failed evaluate records: FAIL then PASS yields retryCount=1 (positive control, both sites)", async () => {
+    // Positive control: a real retry (one FAIL eval before the PASS) MUST
+    // continue to register as retryCount=1 — the fix narrows the filter,
+    // it doesn't disable retry-counting.
+    const plan = makePlan([makeStory("US-08")]);
+    mockedReadRunRecords
+      .mockResolvedValueOnce([
+        makePrimaryRecord("US-08", "FAIL", "2026-04-27T03:00:00Z"),
+        makePrimaryRecord("US-08", "PASS", "2026-04-27T03:07:00Z"),
+      ])
+      .mockResolvedValueOnce([
+        makePrimaryRecord("US-08", "FAIL", "2026-04-27T03:00:00Z"),
+        makePrimaryRecord("US-08", "PASS", "2026-04-27T03:07:00Z"),
+      ]);
+
+    const live = await assessPhase(plan, "/tmp/test");
+    const recovered = await recoverState(plan, "/tmp/test");
+    expect(live.brief.stories.find((s) => s.storyId === "US-08")!.retryCount).toBe(1);
+    expect(recovered.get("US-08")!.retryCount).toBe(1);
+  });
+
+  it("retryCount counts only failed evaluate records: INCONCLUSIVE evaluate counts as a retry (positive control)", async () => {
+    // INCONCLUSIVE is the second authoritative failure verdict — it MUST
+    // continue to count as a retry per the existing classifyStory rule.
+    const plan = makePlan([makeStory("US-08")]);
+    mockedReadRunRecords.mockResolvedValueOnce([
+      makePrimaryRecord("US-08", "INCONCLUSIVE", "2026-04-27T03:00:00Z"),
+      makePrimaryRecord("US-08", "PASS", "2026-04-27T03:07:00Z"),
+    ]);
+
+    const result = await assessPhase(plan, "/tmp/test");
+    const entry = result.brief.stories.find((s) => s.storyId === "US-08")!;
+    expect(entry.retryCount).toBe(1);
+  });
+});
+

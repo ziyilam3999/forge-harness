@@ -139,6 +139,17 @@ export interface RunRecord {
    * non-evaluate writers.
    */
   affectedPaths?: string[];
+  /**
+   * v0.39.0 G5 — environmental, non-fatal warnings emitted during a tool run.
+   * The dashboard surfaces each entry on the relevant story card so operators
+   * see "this story passed but with caveats" (e.g., a polyfill that was
+   * skipped, an optional dependency that wasn't loaded). Empty array OR field
+   * absent ⇒ no UI noise. Forward-only; pre-v0.39.0 records lack this field.
+   *
+   * Currently populated by `forge_evaluate` when its harness emits warnings
+   * the operator should know about but that did not gate AC outcome.
+   */
+  nonFatalWarnings?: string[];
   outcome:
     | "success"
     | "failure"
@@ -146,7 +157,14 @@ export interface RunRecord {
     | "validation-failure"
     | "api-error"
     | "timeout"
-    | "corrector-failed";
+    | "corrector-failed"
+    /**
+     * v0.39.0 AC-4 — `forge_generate` is a pure brief-assembler with no
+     * inherent pass/fail axis. Its run records use this dedicated outcome
+     * literal so future tooling can match on it without conflating with
+     * an evaluator's "success".
+     */
+    | "ok";
 }
 
 /**

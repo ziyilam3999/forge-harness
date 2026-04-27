@@ -164,7 +164,7 @@ describe("AC-5 — feed-time format carries date prefix", () => {
     // Regex from the plan: the HTML must match /2026-04-20.{0,200}13:10:43/
     expect(html).toMatch(/2026-04-20.{0,200}13:10:43/);
     // And both tokens must appear in the feed-time span.
-    const feedTimeRe = /<span class="feed-time">([^<]+)<\/span>/;
+    const feedTimeRe = /<span class="feed-time"[^>]*>([^<]+)<\/span>/;
     const match = feedTimeRe.exec(html);
     expect(match).not.toBeNull();
     expect(match![1]).toContain("2026-04-20");

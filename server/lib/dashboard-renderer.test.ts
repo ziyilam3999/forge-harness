@@ -479,7 +479,7 @@ describe("renderDashboardHtml — audit feed count + ordering (AC-08)", () => {
     // (date prefix added so cross-day rows don't look chronologically
     // scrambled). Regex updated to accept the new shape; the ordering
     // assertion below is unchanged.
-    const tsRe = /<span class="feed-time">(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})<\/span>/g;
+    const tsRe = /<span class="feed-time"[^>]*>(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})<\/span>/g;
     const feedTimestamps: string[] = [];
     let m;
     while ((m = tsRe.exec(html)) !== null) feedTimestamps.push(m[1]);

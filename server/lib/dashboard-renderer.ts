@@ -431,20 +431,13 @@ export function formatElapsed(ms: number): string {
 }
 
 /**
- * v0.35.1 AC-5 — format an ISO timestamp as `YYYY-MM-DD HH:MM:SS` (UTC).
+ * Format an ISO timestamp as `YYYY-MM-DD HH:MM:SS` in UTC.
  *
- * Pre-v0.35.1 this only rendered `HH:MM:SS`, which made cross-day rows in
- * the activity feed look chronologically scrambled (all rows showed the
- * same time-of-day band with no date distinction). The date prefix is
- * emitted ahead of the time so the Regex AC (`/YYYY-MM-DD.*HH:MM:SS/`)
- * can match within one feed row.
- *
- * UTC getters (`getUTCFullYear`, etc.) guarantee the rendered date matches
- * the ISO input's date component regardless of the host timezone — avoids
- * the edge case where a machine east/west of UTC would show a one-day-off
- * label near midnight UTC. The Reviewer AC fixture uses a mid-afternoon
- * UTC timestamp, but making this timezone-stable costs nothing and prevents
- * flakiness on CI runners in any TZ.
+ * UTC is deliberate on the server: it keeps rendered HTML deterministic so
+ * tests assert literal tokens regardless of the runner's TZ. The viewer
+ * never sees this value — the inline `<script>` at the end of the page
+ * rewrites every `[data-iso]` element to the browser's local TZ on load.
+ * If JS is disabled, this UTC fallback is still readable (just shifted).
  */
 function formatTimeOfDay(iso: string): string {
   try {
@@ -864,7 +857,7 @@ function renderFeed(auditEntries: ReadonlyArray<AuditFeedEntry>): string {
   }
   const rows = auditEntries.map((e) =>
     `<div class="feed-entry">
-  <span class="feed-time">${escapeHtml(formatTimeOfDay(e.timestamp))}</span>
+  <span class="feed-time" data-iso="${escapeHtml(e.timestamp)}">${escapeHtml(formatTimeOfDay(e.timestamp))}</span>
   <span class="feed-tool"><span class="hex-dot"></span>${escapeHtml(e.tool)}</span>
   <span class="feed-stage">${escapeHtml(e.stage)}</span>
   <span class="feed-decision">(decision: ${escapeHtml(e.decision)})</span>
@@ -1106,6 +1099,26 @@ ${renderReplanningNotes(brief)}
 ${renderBoard(brief, activity, groundingSignals, projectPath, masterMergedIds)}
 ${renderFeed(auditEntries)}
 </div>
+<script>
+// Localize feed timestamps. Server emits UTC for CI/test determinism; the
+// browser converts to the viewer's TZ on every meta-refresh load. Original
+// UTC ISO is kept as the element's title attribute so hovering reveals it.
+(function () {
+  function pad(n) { return String(n).padStart(2, "0"); }
+  var nodes = document.querySelectorAll("[data-iso]");
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i];
+    var iso = el.getAttribute("data-iso");
+    if (!iso) continue;
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) continue;
+    el.textContent =
+      d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+      " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+    el.title = "UTC: " + iso;
+  }
+})();
+</script>
 </body>
 </html>`;
 

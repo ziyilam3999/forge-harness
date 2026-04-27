@@ -93,8 +93,12 @@ function baseInput(
  * tag and returns the substring up to the matching close.
  */
 function extractStoryCard(html: string, storyId: string): string {
+  // v0.39.0 — story cards may carry additional attributes (e.g.
+  // `data-master-merged="true|false"`) after `data-story-id`, so the
+  // closing `>` is no longer guaranteed to follow the story-id attribute
+  // immediately. Match any subsequent attributes up to the tag close.
   const re = new RegExp(
-    `<div class="story-card[^"]*" data-story-id="${storyId}">`,
+    `<div class="story-card[^"]*" data-story-id="${storyId}"[^>]*>`,
   );
   const match = re.exec(html);
   if (!match) throw new Error(`story card for ${storyId} not found in HTML`);

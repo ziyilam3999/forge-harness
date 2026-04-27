@@ -664,36 +664,6 @@ function buildGroundingDriftSummary(
   return lines.join("");
 }
 
-/**
- * v0.39.0 G4/AC-6 — top-bar phase-status pill, renamed away from
- * `in-progress` so its class + visible text no longer collide with the
- * "IN PROGRESS" kanban column heading.
- *
- * Mapping (status → class+label) — only the `in-progress` row changes
- * from the legacy renderer; every other status keeps its existing class
- * literal so the rest of the dashboard's CSS keeps working.
- *
- *   in-progress    →  class="active",  label="active"
- *   complete       →  class="complete", label="complete"
- *   needs-replan   →  class="needs-replan", label="needs-replan"
- *   halted         →  class="halted", label="halted"
- *   waiting        →  class="waiting", label="waiting"
- *   <anything else>→  pass-through (legacy parity)
- *
- * AC-6 invariants:
- *  - `phase-status-pill in-progress` substring appears 0 times.
- *  - The visible pill text never contains the substring `in progress`
- *    (case-insensitive).
- *  - Some non-empty pill markup announces the phase status for every
- *    brief whose status is `in-progress`.
- */
-function renderPhaseStatusPill(status: string): string {
-  if (status === "in-progress") {
-    return `<div class="phase-status-pill active">active</div>`;
-  }
-  return `<div class="phase-status-pill ${escapeHtml(status)}">${escapeHtml(status)}</div>`;
-}
-
 function renderHeader(
   brief: PhaseTransitionBrief | null,
   declaration: StoryDeclaration | null | undefined,
@@ -710,7 +680,6 @@ function renderHeader(
   <div class="top-bar-left">
     <div class="logo">Hive Mind <span>Forge</span><span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
     <div class="phase-tag">no brief</div>
-    <div class="phase-status-pill">waiting</div>
     ${declarationHtml}
   </div>
   <div class="top-bar-right">
@@ -766,7 +735,6 @@ function renderHeader(
   <div class="top-bar-left">
     <div class="logo">Hive Mind <span>Forge</span><span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
     <div class="phase-tag">${escapeHtml(brief.status)}</div>
-    ${renderPhaseStatusPill(brief.status)}
     ${declarationHtml}
   </div>
   <div class="top-bar-right">
@@ -1079,10 +1047,6 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .logo-divider { color: var(--border); margin: 0 2px; font-weight: 300; }
 .logo-sub { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
 .phase-tag { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--green); background: var(--green-bg); padding: 3px 10px; border-radius: 6px; }
-.phase-status-pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: var(--border-light); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
-.phase-status-pill.complete { background: var(--green-bg); color: var(--green); }
-.phase-status-pill.needs-replan, .phase-status-pill.halted { background: var(--red-bg); color: var(--red); }
-.phase-status-pill.active { background: var(--amber-bg); color: var(--amber); }
 .declaration-pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: var(--green-bg); color: var(--green); display: inline-flex; align-items: center; gap: 6px; }
 .declaration-pill .decl-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); font-weight: 700; }
 .declaration-pill .decl-story-id { font-family: var(--font-mono); font-weight: 700; }
@@ -1137,7 +1101,7 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .forge-pulse.working-red .pulse-caption { color: var(--red); }
 
 @keyframes forge-respire { 0%, 100% { transform: scale(0.88); opacity: 0.7; } 50% { transform: scale(1.08); opacity: 1; } }
-@keyframes forge-respire-idle { 0%, 100% { transform: scale(0.78); opacity: 0.4; filter: drop-shadow(0 0 0 rgba(138, 138, 138, 0)); } 50% { transform: scale(0.92); opacity: 0.78; filter: drop-shadow(0 0 4px rgba(138, 138, 138, 0.55)); } }
+@keyframes forge-respire-idle { 0%, 100% { transform: scale(0.78); opacity: 0.4; background-color: #3a3a3a; filter: drop-shadow(0 0 0 rgba(138, 138, 138, 0)); } 50% { transform: scale(0.92); opacity: 0.78; background-color: #c8c8c8; filter: drop-shadow(0 0 4px rgba(138, 138, 138, 0.55)); } }
 @keyframes forge-respire-stutter { 0%, 18%, 100% { transform: scale(0.9); opacity: 0.7; } 32% { transform: scale(1.04); opacity: 0.95; } 38% { transform: scale(0.96); opacity: 0.85; } 60% { transform: scale(1.06); opacity: 1; } }
 @keyframes forge-ember-green { 0%, 100% { transform: translate(-50%, -50%) scale(0.85); opacity: 0.85; } 50% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; } }
 @keyframes forge-ember-amber { 0%, 100% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.7; } 40% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; } 60% { transform: translate(-50%, -50%) scale(0.95); opacity: 0.85; } }

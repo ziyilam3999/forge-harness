@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.39.1](https://github.com/ziyilam3999/forge-harness/compare/v0.39.0...v0.39.1) (2026-04-27)
+
+### Bug Fixes
+
+- **Activity-feed timestamps render in viewer-local timezone.** `formatTimeOfDay` in `server/lib/dashboard-renderer.ts` had used `getUTC*` getters deliberately so the existing AC-5 test fixture (`/2026-04-20.{0,200}13:10:43/`) matched deterministically on any CI runner — but every viewer saw UTC regardless of where they live, and a viewer at UTC+8 read `02:54:21` when their wall clock said `10:54`. Server now still emits UTC `YYYY-MM-DD HH:MM:SS` (preserves test stability + no-JS fallback), each `<span class="feed-time">` carries `data-iso="<raw-iso>"`, and an inline `<script>` at end-of-body rewrites the visible text to the browser's local TZ on every meta-refresh. Original UTC ISO is preserved as the element's `title` attribute so hovering reveals the source-of-truth value for cross-machine debugging. The two test regexes that pinned the feed-time span shape were widened from `<span class="feed-time">` to `<span class="feed-time"[^>]*>` to tolerate the new attribute; their captured-content assertions are unchanged. (#480)
+
 ## [0.39.0](https://github.com/ziyilam3999/forge-harness/compare/v0.38.0...v0.39.0) (2026-04-27)
 
 ### Features

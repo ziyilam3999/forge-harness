@@ -71,6 +71,9 @@ function makeSignal(
     warnings,
     affectedPaths,
     latestRunTimestamp: "2026-04-26T00:00:00.000Z",
+    // v0.39.0 — required field; default empty so existing tests stay
+    // byte-stable on the warning chip + path indicator paths.
+    nonFatalWarnings: [],
   };
 }
 

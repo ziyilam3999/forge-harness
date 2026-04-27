@@ -171,8 +171,9 @@ export const AC_LINT_RULES: AcLintRule[] = [
     // `/` -- that is, a project-root basename re-entry. Subdirectory cd
     // (`cd packages/foo && ...`) is fine and intentionally NOT flagged
     // because the path token contains a `/`. The pattern requires the cd
-    // to be a standalone command token (start-of-line, or after `|`/`;`/`&`/`(`).
-    pattern: /(?:^|[|;&(]\s*)cd\s+[A-Za-z0-9._-]+\s*&&\s*\S/,
+    // to be a standalone command token (start-of-line, after leading
+    // whitespace, or after `|`/`;`/`&`/`(`).
+    pattern: /(?:^|[|;&(\s]\s*)cd\s+[A-Za-z0-9._-]+\s*&&\s*\S/,
     severity: "suspect",
     wrongExample: `${AC_CWD_POLICY_WRONG_EXAMPLE} --noEmit`,
     rightExample: "npx tsc --noEmit",

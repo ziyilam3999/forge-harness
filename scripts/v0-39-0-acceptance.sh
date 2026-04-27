@@ -77,12 +77,6 @@ fi
 #   MSYS_NO_PATHCONV=1 git show origin/master:server/lib/dashboard-renderer.ts \
 #     | grep -c 'phase-status-pill in-progress'
 # returns 0 on the post-merge tree. Pre-merge we check the worktree directly.
-PILL_COUNT="$(grep -c 'phase-status-pill in-progress' server/lib/dashboard-renderer.ts || true)"
-# The renderer file carries one comment line that mentions the literal
-# substring as part of the AC-6 spec ("- `phase-status-pill in-progress`
-# substring appears 0 times."). That's a documentation reference, not a
-# code path. The grep MUST find at most that one comment line; the
-# actual pill markup must NOT contain the string.
 ACTIVE_PILL_COUNT="$(grep -c 'class="phase-status-pill in-progress"' server/lib/dashboard-renderer.ts || true)"
 if [ "$ACTIVE_PILL_COUNT" -eq 0 ]; then
   # Also run the renderer-level test for belt-and-braces.

@@ -251,7 +251,7 @@ describe("AC-3 — idle pill animation (B11 + W4)", () => {
     //    other half of the link — without it the animation declaration is a
     //    dead reference and the idle pill would not actually pulse.
     const keyframesRegex = new RegExp(
-      `@keyframes\\s+${animationName.replace(/[-/\\^$*+?.()|[\\]{}]/g, "\\\\$&")}\\s*\\{`,
+      `@keyframes\\s+${animationName.replace(/[-/\\^$*+?.()|[\\]{}]/g, "\\$&")}\\s*\\{`,
     );
     expect(
       keyframesRegex.test(css),

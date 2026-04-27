@@ -4,9 +4,13 @@
  *
  *   AC-3 — `data-master-merged="true"` for stories the master-reconciler
  *          upgraded; `"false"` for everything else.
- *   AC-6 — `phase-status-pill in-progress` substring appears 0 times for
- *          briefs whose status is `in-progress`; the pill is non-empty;
- *          its visible text never contains "in progress" (case-insens).
+ *   AC-6 — phase-status pill renamed away from "in-progress" so its
+ *          class + visible text don't collide with the kanban "IN
+ *          PROGRESS" column heading. v0.39.5 retired the pill entirely
+ *          (the orange ACTIVE pill duplicated the green phase-tag); the
+ *          green phase-tag is now the canonical phase-status surface,
+ *          and the AC-6 collision invariants are satisfied vacuously
+ *          (no pill class exists at all).
  *   AC-7 — `nonFatalWarnings` reach the rendered HTML when present;
  *          empty array produces no warning markup.
  */
@@ -109,10 +113,10 @@ describe("AC-3 — data-master-merged attribute on story cards", () => {
   });
 });
 
-// ── AC-6 — top-bar pill rename ─────────────────────────────────────────────
+// ── AC-6 — top-bar pill collision (now retired in v0.39.5) ─────────────────
 
-describe("AC-6 — phase-status-pill no longer collides with the IN PROGRESS column", () => {
-  it("status='in-progress' brief produces 0 occurrences of 'phase-status-pill in-progress' in HTML", () => {
+describe("AC-6 — phase-status surface no longer collides with the IN PROGRESS column", () => {
+  it("status='in-progress' brief produces 0 occurrences of 'phase-status-pill' in HTML", () => {
     const brief = makeBrief("in-progress", [makeStoryEntry("US-01", "ready")]);
     const html = renderDashboardHtml({
       brief,
@@ -120,11 +124,11 @@ describe("AC-6 — phase-status-pill no longer collides with the IN PROGRESS col
       auditEntries: [],
       renderedAt: "2026-04-27T00:00:00.000Z",
     });
-    const occurrences = (html.match(/phase-status-pill in-progress/g) ?? []).length;
+    const occurrences = (html.match(/phase-status-pill/g) ?? []).length;
     expect(occurrences).toBe(0);
   });
 
-  it("pill markup is still emitted with non-empty visible text for in-progress briefs", () => {
+  it("phase-tag emits non-empty visible text for in-progress briefs without the ambiguous space-form", () => {
     const brief = makeBrief("in-progress", [makeStoryEntry("US-01", "ready")]);
     const html = renderDashboardHtml({
       brief,
@@ -132,10 +136,9 @@ describe("AC-6 — phase-status-pill no longer collides with the IN PROGRESS col
       auditEntries: [],
       renderedAt: "2026-04-27T00:00:00.000Z",
     });
-    // Some pill exists with non-empty visible text.
-    const pillMatch = /<div class="phase-status-pill[^"]*">([^<]+)<\/div>/.exec(html);
-    expect(pillMatch).not.toBeNull();
-    const visible = pillMatch?.[1] ?? "";
+    const tagMatch = /<div class="phase-tag">([^<]+)<\/div>/.exec(html);
+    expect(tagMatch).not.toBeNull();
+    const visible = tagMatch?.[1] ?? "";
     expect(visible.length).toBeGreaterThan(0);
     // Visible text MUST NOT contain "in progress" (case-insensitive, with
     // space). The literal "in-progress" with hyphen is fine — the AC
@@ -144,7 +147,7 @@ describe("AC-6 — phase-status-pill no longer collides with the IN PROGRESS col
     expect(/in\s+progress/i.test(visible)).toBe(false);
   });
 
-  it("status='complete' still classes the pill literally as 'complete'", () => {
+  it("status='complete' surfaces the literal token in the phase-tag", () => {
     const brief = makeBrief("complete", [makeStoryEntry("US-01", "done")]);
     const html = renderDashboardHtml({
       brief,
@@ -152,7 +155,7 @@ describe("AC-6 — phase-status-pill no longer collides with the IN PROGRESS col
       auditEntries: [],
       renderedAt: "2026-04-27T00:00:00.000Z",
     });
-    expect(html).toContain('phase-status-pill complete');
+    expect(html).toContain('<div class="phase-tag">complete</div>');
   });
 });
 

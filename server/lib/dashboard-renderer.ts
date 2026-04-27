@@ -200,6 +200,13 @@ export interface StoryGroundingSignal {
   affectedPaths: string[];
   warnings: SpecGeneratorWarning[];
   latestRunTimestamp: string;
+  /**
+   * v0.39.0 G5/AC-7 — environmental, non-fatal warnings the evaluator
+   * captured (e.g. "DOMMatrix polyfill skipped"). Empty array ⇒ no UI noise.
+   * Pulled from the same latest-record-per-storyId join the other signals
+   * use; absent in records pre-v0.39.0.
+   */
+  nonFatalWarnings: string[];
 }
 
 /**
@@ -259,11 +266,17 @@ export async function readStoryGroundingSignals(
       generatedDocs && Array.isArray(generatedDocs.warnings)
         ? (generatedDocs.warnings as SpecGeneratorWarning[])
         : [];
+    const nonFatalWarnings: string[] = Array.isArray(parsed.nonFatalWarnings)
+      ? (parsed.nonFatalWarnings as unknown[]).filter(
+          (w): w is string => typeof w === "string",
+        )
+      : [];
     out.set(storyId, {
       storyId,
       affectedPaths,
       warnings: [...warnings],
       latestRunTimestamp: ts,
+      nonFatalWarnings: [...nonFatalWarnings],
     });
   }
   return out;
@@ -369,6 +382,17 @@ export interface DashboardRenderInput {
    * for every path.
    */
   projectPath?: string;
+  /**
+   * v0.39.0 G2/AC-3 — set of story IDs that the master-reconciliation
+   * upgraded to `done` because they appear in `origin/master`. The renderer
+   * stamps `data-master-merged="true"` on those story cards (and explicitly
+   * `"false"` on every other card so the attribute is greppable either way).
+   *
+   * Optional-with-default-empty: when absent, every card renders with
+   * `data-master-merged="false"`. Existing renderer test fixtures that
+   * pre-date v0.39.0 stay byte-stable except for the new attribute.
+   */
+  masterMergedIds?: ReadonlySet<string>;
 }
 
 // ── Format helpers ────────────────────────────────────────────────────────
@@ -555,6 +579,36 @@ function buildGroundingDriftSummary(
   return lines.join("");
 }
 
+/**
+ * v0.39.0 G4/AC-6 — top-bar phase-status pill, renamed away from
+ * `in-progress` so its class + visible text no longer collide with the
+ * "IN PROGRESS" kanban column heading.
+ *
+ * Mapping (status → class+label) — only the `in-progress` row changes
+ * from the legacy renderer; every other status keeps its existing class
+ * literal so the rest of the dashboard's CSS keeps working.
+ *
+ *   in-progress    →  class="active",  label="active"
+ *   complete       →  class="complete", label="complete"
+ *   needs-replan   →  class="needs-replan", label="needs-replan"
+ *   halted         →  class="halted", label="halted"
+ *   waiting        →  class="waiting", label="waiting"
+ *   <anything else>→  pass-through (legacy parity)
+ *
+ * AC-6 invariants:
+ *  - `phase-status-pill in-progress` substring appears 0 times.
+ *  - The visible pill text never contains the substring `in progress`
+ *    (case-insensitive).
+ *  - Some non-empty pill markup announces the phase status for every
+ *    brief whose status is `in-progress`.
+ */
+function renderPhaseStatusPill(status: string): string {
+  if (status === "in-progress") {
+    return `<div class="phase-status-pill active">active</div>`;
+  }
+  return `<div class="phase-status-pill ${escapeHtml(status)}">${escapeHtml(status)}</div>`;
+}
+
 function renderHeader(
   brief: PhaseTransitionBrief | null,
   declaration: StoryDeclaration | null | undefined,
@@ -627,7 +681,7 @@ function renderHeader(
   <div class="top-bar-left">
     <div class="logo">Hive Mind <span>Forge</span><span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
     <div class="phase-tag">${escapeHtml(brief.status)}</div>
-    <div class="phase-status-pill ${escapeHtml(brief.status)}">${escapeHtml(brief.status)}</div>
+    ${renderPhaseStatusPill(brief.status)}
     ${declarationHtml}
   </div>
   <div class="top-bar-right">
@@ -657,6 +711,8 @@ function renderStoryCard(
   entry: StoryStatusEntry,
   signal: StoryGroundingSignal | undefined,
   projectPath: string | null,
+  masterMerged: boolean,
+  nonFatalWarnings: string[],
 ): string {
   const retryBadge = entry.retryCount > 0
     ? `<span class="retry-badge">${entry.retryCount}/3 retries</span>`
@@ -671,7 +727,39 @@ function renderStoryCard(
   const pathsBlock = signal
     ? renderAffectedPathsBlock(projectPath, signal.affectedPaths)
     : "";
-  return `<div class="story-card ${escapeHtml(entry.status)}" data-story-id="${escapeHtml(entry.storyId)}"><div class="card-id">${escapeHtml(entry.storyId)}</div>${retryBadge}${warningsBlock}${pathsBlock}${evidence}</div>`;
+  // v0.39.0 G2/AC-3 — `data-master-merged` attribute, ALWAYS rendered with
+  // a literal "true" or "false" so the reviewer's grep works either way.
+  // v0.39.0 G5/AC-7 — surface evaluator non-fatal warnings on the card.
+  // Empty array ⇒ "" (no UI noise).
+  const masterMergedAttr = masterMerged ? "true" : "false";
+  const nonFatalBlock = renderNonFatalWarnings(nonFatalWarnings);
+  // Add a "merged-via-master" badge as the visible counterpart to the
+  // attribute so a human eyeballing the dashboard can see the
+  // distinction without inspecting DOM.
+  const mergedBadge = masterMerged
+    ? `<span class="master-merged-badge" title="finished because the PR merged to master">merged via master</span>`
+    : "";
+  return `<div class="story-card ${escapeHtml(entry.status)}" data-story-id="${escapeHtml(entry.storyId)}" data-master-merged="${masterMergedAttr}"><div class="card-id">${escapeHtml(entry.storyId)}</div>${mergedBadge}${retryBadge}${warningsBlock}${pathsBlock}${nonFatalBlock}${evidence}</div>`;
+}
+
+/**
+ * v0.39.0 G5/AC-7 — render the per-card non-fatal warnings block.
+ *
+ * Each warning is a plain string the evaluator captured but did not gate
+ * the AC outcome on (e.g., "DOMMatrix polyfill skipped"). Surfacing them
+ * tells the operator "this passed, but with caveats." Empty array ⇒ ""
+ * (the AC-7 negative case explicitly checks the empty-list path produces
+ * no warning markup).
+ */
+function renderNonFatalWarnings(warnings: string[]): string {
+  if (!warnings || warnings.length === 0) return "";
+  const items = warnings
+    .map(
+      (w) =>
+        `<div class="card-non-fatal-warning" data-non-fatal-warning="true">⚠ ${escapeHtml(w)}</div>`,
+    )
+    .join("");
+  return `<div class="card-non-fatal-warnings">${items}</div>`;
 }
 
 function renderActivityCard(activity: Activity): string {
@@ -692,6 +780,7 @@ function renderBoard(
   activity: Activity | null,
   groundingSignals: ReadonlyMap<string, StoryGroundingSignal>,
   projectPath: string | null,
+  masterMergedIds: ReadonlySet<string>,
 ): string {
   const entries = brief?.stories ?? [];
 
@@ -729,9 +818,12 @@ function renderBoard(
   const renderColumn = (id: string, title: string, accent: string) => {
     const items = byColumn[id];
     const cards = items
-      .map((entry) =>
-        renderStoryCard(entry, groundingSignals.get(entry.storyId), projectPath),
-      )
+      .map((entry) => {
+        const signal = groundingSignals.get(entry.storyId);
+        const merged = masterMergedIds.has(entry.storyId);
+        const nonFatal = signal?.nonFatalWarnings ?? [];
+        return renderStoryCard(entry, signal, projectPath, merged, nonFatal);
+      })
       .join("");
     const extra = id === COLUMN_IDS.inProgress ? activityHtml : "";
     const count = items.length + (id === COLUMN_IDS.inProgress && activityHtml ? 1 : 0);
@@ -840,7 +932,7 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .phase-status-pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: var(--border-light); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
 .phase-status-pill.complete { background: var(--green-bg); color: var(--green); }
 .phase-status-pill.needs-replan, .phase-status-pill.halted { background: var(--red-bg); color: var(--red); }
-.phase-status-pill.in-progress { background: var(--amber-bg); color: var(--amber); }
+.phase-status-pill.active { background: var(--amber-bg); color: var(--amber); }
 .declaration-pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; background: var(--green-bg); color: var(--green); display: inline-flex; align-items: center; gap: 6px; }
 .declaration-pill .decl-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); font-weight: 700; }
 .declaration-pill .decl-story-id { font-family: var(--font-mono); font-weight: 700; }
@@ -931,6 +1023,9 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .story-card .card-warning-chip { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); }
 .story-card .card-warning-chip.warning { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber); }
 .story-card .card-warning-chip.error { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+.story-card .master-merged-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--green-bg); color: var(--green); border: 1px solid var(--green); margin-top: 4px; }
+.story-card .card-non-fatal-warnings { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.story-card .card-non-fatal-warning { font-size: 11px; color: var(--amber); font-style: italic; }
 .story-card .card-paths { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
 .story-card .card-path { font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary); display: inline-block; }
 .story-card .card-path.path-ok .path-indicator { color: var(--green); font-weight: 700; }
@@ -960,6 +1055,8 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
   const groundingSignals: ReadonlyMap<string, StoryGroundingSignal> =
     input.groundingSignals ?? new Map();
   const projectPath = input.projectPath ?? null;
+  const masterMergedIds: ReadonlySet<string> =
+    input.masterMergedIds ?? new Set<string>();
   // Declaration is optional on the input (default null) so the wide universe
   // of renderer tests that build `DashboardRenderInput` literals keep working
   // untouched. When absent, `renderDeclarationPill` emits "" — no false
@@ -1006,7 +1103,7 @@ export function renderDashboardHtml(input: DashboardRenderInput): string {
 <div class="dashboard">
 ${renderHeader(brief, declaration, totalsElapsedMs, pulseState, pulseElapsedMs, groundingSignals)}
 ${renderReplanningNotes(brief)}
-${renderBoard(brief, activity, groundingSignals, projectPath)}
+${renderBoard(brief, activity, groundingSignals, projectPath, masterMergedIds)}
 ${renderFeed(auditEntries)}
 </div>
 </body>
@@ -1439,10 +1536,23 @@ export async function readActivityFeed(
  * pass synthesized brief literals; mutating them would create cross-test
  * leakage.
  */
+/**
+ * Reconciliation outcome — the upgraded brief plus the set of story IDs
+ * the reconciler promoted from a non-terminal state to `done` because
+ * they appear in `origin/master`. The renderer uses `upgradedIds` to
+ * stamp `data-master-merged="true"` on those story cards (G2/AC-3) so
+ * the operator can see "this finished because it merged" vs "this
+ * finished because evaluate passed."
+ */
+interface ReconciliationResult {
+  brief: PhaseTransitionBrief;
+  upgradedIds: Set<string>;
+}
+
 function reconcileBriefStatusesWithMaster(
   brief: PhaseTransitionBrief,
   master: { shippedStoryIds: Set<string>; warning: string | null },
-): PhaseTransitionBrief {
+): ReconciliationResult {
   // Empty result set + warning is the graceful-fallback path: the brief
   // passes through verbatim. Surface the warning to stderr so operators
   // can diagnose why reconciliation degraded (plan AC-4).
@@ -1452,7 +1562,7 @@ function reconcileBriefStatusesWithMaster(
     );
   }
   if (master.shippedStoryIds.size === 0) {
-    return brief;
+    return { brief, upgradedIds: new Set() };
   }
 
   // Status states from which an upgrade to `"done"` is permitted. `"done"`
@@ -1466,28 +1576,31 @@ function reconcileBriefStatusesWithMaster(
     "dep-failed",
   ]);
 
-  let upgrades = 0;
+  const upgradedIds = new Set<string>();
   const stories = brief.stories.map((entry) => {
     if (
       master.shippedStoryIds.has(entry.storyId) &&
       upgradable.has(entry.status)
     ) {
-      upgrades += 1;
+      upgradedIds.add(entry.storyId);
       return { ...entry, status: "done" as StoryStatus };
     }
     return entry;
   });
 
-  if (upgrades === 0) {
+  if (upgradedIds.size === 0) {
     // Nothing changed — return original to keep object identity stable
     // for any caller doing reference equality checks.
-    return brief;
+    return { brief, upgradedIds };
   }
 
   return {
-    ...brief,
-    stories,
-    completedCount: brief.completedCount + upgrades,
+    brief: {
+      ...brief,
+      stories,
+      completedCount: brief.completedCount + upgradedIds.size,
+    },
+    upgradedIds,
   };
 }
 
@@ -1531,12 +1644,16 @@ export async function renderDashboard(
     // the renderer can use to mark stories `done` upward-only. Failure
     // returns an empty set + a warning string; the renderer falls back to
     // the brief's verbatim status. Plan AC-1..AC-8.
-    const reconciled = brief
+    const reconciliation = brief
       ? reconcileBriefStatusesWithMaster(
           brief,
           await readShippedStoriesFromMaster(projectPath),
         )
-      : brief;
+      : null;
+    const reconciled = reconciliation ? reconciliation.brief : brief;
+    const upgradedIds = reconciliation
+      ? reconciliation.upgradedIds
+      : new Set<string>();
 
     const html = renderDashboardHtml({
       brief: reconciled,
@@ -1547,6 +1664,7 @@ export async function renderDashboard(
       totals,
       groundingSignals,
       projectPath,
+      masterMergedIds: upgradedIds,
     });
     await writeDashboardHtml(projectPath, html, io);
     await maybeAutoOpenBrowser(projectPath);

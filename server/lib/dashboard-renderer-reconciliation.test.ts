@@ -95,16 +95,19 @@ describe("AC-1 — story whose ID appears on master surfaces as done", () => {
       makeStoryEntry("US-05", "ready"),
       makeStoryEntry("US-06", "pending"),
     ]);
-    const result = reconcile(brief, {
+    const { brief: reconciled, upgradedIds } = reconcile(brief, {
       shippedStoryIds: new Set(["US-05"]),
       warning: null,
     });
-    const us05 = result.stories.find((s) => s.storyId === "US-05");
+    const us05 = reconciled.stories.find((s) => s.storyId === "US-05");
     expect(us05?.status).toBe("done");
     // STORIES x/y widget reads completedCount; verify bump.
-    expect(result.completedCount).toBe(1);
+    expect(reconciled.completedCount).toBe(1);
     // Other stories untouched.
-    expect(result.stories.find((s) => s.storyId === "US-06")?.status).toBe("pending");
+    expect(reconciled.stories.find((s) => s.storyId === "US-06")?.status).toBe("pending");
+    // v0.39.0 — upgradedIds carries the master-merged set.
+    expect(upgradedIds.has("US-05")).toBe(true);
+    expect(upgradedIds.has("US-06")).toBe(false);
   });
 
   it("upgrade applied to all the eligible non-terminal states", () => {
@@ -115,12 +118,13 @@ describe("AC-1 — story whose ID appears on master surfaces as done", () => {
       makeStoryEntry("US-04", "failed"),
       makeStoryEntry("US-05", "dep-failed"),
     ]);
-    const result = reconcile(brief, {
+    const { brief: reconciled, upgradedIds } = reconcile(brief, {
       shippedStoryIds: new Set(["US-01", "US-02", "US-03", "US-04", "US-05"]),
       warning: null,
     });
-    expect(result.stories.every((s) => s.status === "done")).toBe(true);
-    expect(result.completedCount).toBe(5);
+    expect(reconciled.stories.every((s) => s.status === "done")).toBe(true);
+    expect(reconciled.completedCount).toBe(5);
+    expect(upgradedIds.size).toBe(5);
   });
 });
 
@@ -133,12 +137,13 @@ describe("AC-2 — master-presence predicate, not forge_status agreement", () =>
     // `state: shipped`). Dashboard is stricter: no master-subject ⇒ no
     // promotion to done.
     const brief = makeBrief([makeStoryEntry("US-07", "ready")]);
-    const result = reconcile(brief, {
+    const { brief: reconciled, upgradedIds } = reconcile(brief, {
       shippedStoryIds: new Set(),
       warning: null,
     });
-    expect(result.stories[0].status).toBe("ready");
-    expect(result.completedCount).toBe(0);
+    expect(reconciled.stories[0].status).toBe("ready");
+    expect(reconciled.completedCount).toBe(0);
+    expect(upgradedIds.size).toBe(0);
   });
 });
 
@@ -147,23 +152,24 @@ describe("AC-2 — master-presence predicate, not forge_status agreement", () =>
 describe("AC-3 — upward-only (no demote on missing master entry)", () => {
   it("brief.done + master-empty ⇒ remains done (revert scenario protection)", () => {
     const brief = makeBrief([makeStoryEntry("US-08", "done")]);
-    const result = reconcile(brief, {
+    const { brief: reconciled } = reconcile(brief, {
       shippedStoryIds: new Set(),
       warning: null,
     });
-    expect(result.stories[0].status).toBe("done");
-    expect(result.completedCount).toBe(1);
+    expect(reconciled.stories[0].status).toBe("done");
+    expect(reconciled.completedCount).toBe(1);
   });
 
   it("brief.done + master also has it ⇒ still done, no double-count", () => {
     const brief = makeBrief([makeStoryEntry("US-08", "done")]);
-    const result = reconcile(brief, {
+    const { brief: reconciled, upgradedIds } = reconcile(brief, {
       shippedStoryIds: new Set(["US-08"]),
       warning: null,
     });
-    expect(result.stories[0].status).toBe("done");
+    expect(reconciled.stories[0].status).toBe("done");
     // upgradable set excludes "done", so no upgrade fires, so no bump.
-    expect(result.completedCount).toBe(1);
+    expect(reconciled.completedCount).toBe(1);
+    expect(upgradedIds.size).toBe(0);
   });
 
   it("identity preserved when no upgrades happen (referential stability)", () => {
@@ -172,9 +178,12 @@ describe("AC-3 — upward-only (no demote on missing master entry)", () => {
       shippedStoryIds: new Set(["US-09"]),
       warning: null,
     });
-    // No upgrade ⇒ helper returns the original brief object so reference
-    // checks downstream stay stable.
-    expect(result).toBe(brief);
+    // No upgrade ⇒ helper returns the original brief object on `result.brief`
+    // so reference checks downstream stay stable. v0.39.0 wraps the return
+    // in `{brief, upgradedIds}` — the inner brief reference is what callers
+    // (the renderer) actually consume.
+    expect(result.brief).toBe(brief);
+    expect(result.upgradedIds.size).toBe(0);
   });
 });
 
@@ -198,12 +207,12 @@ describe("graceful fallback — helper warning short-circuits to verbatim brief"
     })();
 
     try {
-      const result = reconcile(brief, {
+      const { brief: reconciled } = reconcile(brief, {
         shippedStoryIds: new Set(),
         warning: "git binary not found on PATH",
       });
-      expect(result.stories[0].status).toBe("ready");
-      expect(result.completedCount).toBe(0);
+      expect(reconciled.stories[0].status).toBe("ready");
+      expect(reconciled.completedCount).toBe(0);
       // Operator-facing warning landed.
       expect(errSpy.calls.some((c) => c.includes("master-reconciliation degraded"))).toBe(true);
       expect(errSpy.calls.some((c) => c.includes("git binary not found on PATH"))).toBe(true);

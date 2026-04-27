@@ -389,14 +389,11 @@ function renderWarningChips(warnings: SpecGeneratorWarning[]): string {
     // v0.39.2 AC-1/B12 — every spec-generator warning is amber. The earlier
     // hardcoded `kind === "stripped-unknown-identifier" → "error"` mapping
     // painted a non-fatal warning red, the colour reserved for actual
-    // failures. The `.card-warning-chip.error` CSS class continues to exist
-    // (G1) — it is reserved for a future error-surface rendering path that
-    // would consume `generatedDocs.errors[]`. No chip-emitting site uses it
-    // at this revision. The literal `card-warning-chip warning` is inlined
-    // (rather than `card-warning-chip ${severity}` with a hoisted const) so
-    // the dist also carries the literal string; AC-8's dist grep is the
-    // observable contract that no future commit silently re-introduces a
-    // dynamic severity branch here.
+    // failures. The literal `card-warning-chip warning` is inlined (rather
+    // than `card-warning-chip ${severity}` with a hoisted const) so the dist
+    // also carries the literal string; AC-8's dist grep is the observable
+    // contract that no future commit silently re-introduces a dynamic
+    // severity branch here.
     const label = kind === "no-vocabulary" ? "no vocabulary" : kind === "stripped-unknown-identifier" ? "unknown identifier" : kind;
     const countLabel = count > 1 ? ` ×${count}` : "";
     chips.push(
@@ -1185,7 +1182,6 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .story-card .card-warnings { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .story-card .card-warning-chip { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); }
 .story-card .card-warning-chip.warning { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber); }
-.story-card .card-warning-chip.error { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
 .story-card .master-merged-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--green-bg); color: var(--green); border: 1px solid var(--green); margin-top: 4px; }
 .story-card .card-non-fatal-warnings { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
 .story-card .card-non-fatal-warning { font-size: 11px; color: var(--amber); font-style: italic; }

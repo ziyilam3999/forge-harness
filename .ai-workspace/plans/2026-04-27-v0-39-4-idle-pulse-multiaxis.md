@@ -37,7 +37,7 @@ This is a one-keyframe-rule + one-comment-block CSS edit. No state-machine chang
 - [ ] **AC-2.** `grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'transform: scale'` returns `>= 1` (proves scale modulation present, not opacity-only).
 - [ ] **AC-3.** `grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'filter: drop-shadow'` returns `>= 1` (proves halo modulation present via `filter: drop-shadow`, which respects the hex `clip-path` — `box-shadow` would be clipped invisibly inside the polygon and would not render).
 - [ ] **AC-4.** `grep -c 'forge-respire-idle 4.8s' server/lib/dashboard-renderer.ts` returns `1` (proves cycle slowed from 4s → 4.8s).
-- [ ] **AC-5.** `grep -E 'opacity: 0\.55; transform: scale\(0\.85\)' server/lib/dashboard-renderer.ts` matches inside the `prefers-reduced-motion` block (line ~1146 area) — proves accessibility fallback target preserved.
+- [ ] **AC-5.** `grep -E 'transform: scale\(0\.85\); opacity: 0\.55' server/lib/dashboard-renderer.ts` matches inside the `prefers-reduced-motion` block — proves accessibility fallback target preserved. (Source declaration order is `transform; opacity;` — matches CSS visual-grouping convention. Future plans should write order-independent regex if order isn't load-bearing.)
 - [ ] **AC-6.** `npm run build` succeeds on the worktree (TypeScript compile clean).
 - [ ] **AC-7.** `npx vitest run server/lib/dashboard-renderer.test.ts server/lib/dashboard-renderer-grounding.test.ts` exits 0.
 - [ ] **AC-8.** `git diff master -- server/lib/dashboard-renderer.ts | wc -l` reports a small focused diff (≤ 30 changed lines) — proves the edit is surgical, not a drive-by refactor.
@@ -47,7 +47,7 @@ This is a one-keyframe-rule + one-comment-block CSS edit. No state-machine chang
 
 - Rebalancing working-green / working-amber / working-red keyframes. Those animate *visibly* already (frame-by-frame analysis confirmed); only idle was below the perceptual floor.
 - Changing the IDLE caption color, container background, or border. Those are already correct per v0.39.2 audit fix.
-- Introducing new CSS variables for the halo color. Inlined `rgba(138,138,138,0.45)` is a direct match to the existing `var(--grey)` (`#8a8a8a`) plus 45% alpha — adding a `--grey-rgb` variable for one keyframe usage would be premature abstraction.
+- Introducing new CSS variables for the halo color. Inlined `rgba(138,138,138,0.55)` is a direct match to the existing `var(--grey)` (`#8a8a8a`) plus 55% alpha — adding a `--grey-rgb` variable for one keyframe usage would be premature abstraction. (Filed as a tracking issue — when a second alpha-modulated grey lands, introduce `--grey-rgb` and rewrite both sites to `rgba(var(--grey-rgb), <alpha>)`.)
 - Filing a follow-up perceptual-floor benchmark for the working states. Out of scope; defer until evidence shows a working-state ambiguity.
 
 ## Verification procedure (reviewer's one-shot)
@@ -58,7 +58,7 @@ grep -c '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts        
 grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'transform: scale'  # → >= 1
 grep '@keyframes forge-respire-idle' server/lib/dashboard-renderer.ts | grep -c 'filter: drop-shadow' # → >= 1
 grep -c 'forge-respire-idle 4.8s' server/lib/dashboard-renderer.ts                  # → 1
-grep -nE 'opacity: 0\.55; transform: scale\(0\.85\)' server/lib/dashboard-renderer.ts | head        # → match in prefers-reduced-motion block
+grep -nE 'transform: scale\(0\.85\); opacity: 0\.55' server/lib/dashboard-renderer.ts | head        # → match in prefers-reduced-motion block
 
 # AC-6 + AC-7: build + tests
 npm run build

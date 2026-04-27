@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.39.6](https://github.com/ziyilam3999/forge-harness/compare/v0.39.5...v0.39.6) (2026-04-27)
+
+### Bug Fixes
+
+- **adr-extractor:** support YAML `|` and `>` block scalars in stub front-matter (#500)
+  - Pre-fix, `parseStubFrontMatter` rejected indented continuation lines with `unexpected indented line`, throwing on the natural multi-line ADR field shape (e.g. `context: |` followed by indented prose). The throw was silently swallowed by `evaluate.ts:442-446`, so PASS runs left `INDEX.md` without a row for the affected story (US-08 in monday-bot).
+  - New parser recognises `|` (literal — preserves newlines) and `>` (folded — joins consecutive non-blank lines with a single space, blank lines preserved as paragraph breaks). Chomp indicators `[+-]?` are accepted for compatibility but treated as default "clip" since `renderAdrFile` trims output.
+  - Adds `scripts/forge-adr-backfill.mjs` — a recovery CLI that re-runs `processStory` against historical PASS run records to recover missing INDEX rows. Idempotent by reuse of `processStory`'s deterministic INDEX rebuild.
+- remove dead PILL_COUNT variable (#476) (#486)
+
 ## [0.39.5](https://github.com/ziyilam3999/forge-harness/compare/v0.39.4...v0.39.5) (2026-04-27)
 
 ### Bug Fixes

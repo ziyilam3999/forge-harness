@@ -173,6 +173,12 @@ export interface RunRecord {
  *   - "stripped-unknown-identifier": a backtick-quoted identifier in a spec
  *     bullet was not found in the source vocabulary, so the bullet was
  *     removed (strict mode) or flagged (warn mode).
+ *   - "stripped-unknown-chain": a backtick-quoted dotted identifier (e.g.
+ *     `Foo.bar`) named an OWNER that exists in the vocabulary but a MEMBER
+ *     that does not — the call chain doesn't resolve per the AST harvest.
+ *     Distinct from `stripped-unknown-identifier` so monday-bot-style
+ *     mis-attribution (binding behaviour to a function chain that doesn't
+ *     implement it) is observable in the run record. W5 (#516).
  *   - "no-vocabulary": grounding was lenient because no source vocabulary
  *     could be built (empty/unparseable affectedPaths). The spec was written
  *     verbatim without strips.
@@ -181,6 +187,12 @@ export type SpecGeneratorWarning =
   | {
       kind: "stripped-unknown-identifier";
       identifier: string;
+      section: string;
+      filesScanned: number;
+    }
+  | {
+      kind: "stripped-unknown-chain";
+      chain: string;
       section: string;
       filesScanned: number;
     }
@@ -200,6 +212,12 @@ export const SpecGeneratorWarningSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("stripped-unknown-identifier"),
     identifier: z.string(),
+    section: z.string(),
+    filesScanned: z.number().int().nonnegative(),
+  }),
+  z.object({
+    kind: z.literal("stripped-unknown-chain"),
+    chain: z.string(),
     section: z.string(),
     filesScanned: z.number().int().nonnegative(),
   }),

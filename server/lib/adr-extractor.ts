@@ -70,6 +70,7 @@ import {
   rmSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { idempotentWrite } from "./idempotent-write.js";
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -593,7 +594,10 @@ export function processStory(input: AdrExtractorInput): AdrExtractorResult {
     }
   }
   const indexBody = buildIndex(decisionsDir, preserved, today);
-  writeFileSync(indexPath, indexBody, "utf-8");
+  // W3 (#514): skip the write if the existing INDEX.md already represents
+  // the same logical state (ignoring the daily date line). Eliminates
+  // per-PASS dated-banner churn in consumer repos.
+  idempotentWrite(indexPath, indexBody);
 
   return {
     newAdrPaths,

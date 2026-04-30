@@ -997,3 +997,171 @@ describe("maybeAutoOpenBrowser — env gate (#295)", () => {
     expect(calls.length).toBe(0);
   });
 });
+
+describe("renderDashboardHtml — column-header gap (W7 / forge-harness #517)", () => {
+  // monday-bot v0.10.0 audit (2026-04-30): when the IN PROGRESS column
+  // widened to fit a long file path (e.g. `src/slack/queryHandler.ts` as a
+  // story label), the narrower BACKLOG/READY/DONE/BLOCKED columns
+  // compressed until their `<span class="col-title">` and
+  // `<span class="col-count">` butted against each other visually
+  // (`BACKLOG2` instead of `BACKLOG  2`).
+  //
+  // Root cause: the `.column-header` flex rule had
+  // `justify-content: space-between` but no `gap` property, so once
+  // `space-between` reached zero leftover space the spans rendered with
+  // zero visual separation.
+  //
+  // AC-1 (REQUIRED — runtime-effect assertion): render a dashboard where
+  // IN PROGRESS contains a story with a long file-path-shaped label, parse
+  // the rendered `<style>` block, find the `.column-header` rule, and
+  // assert it declares either `gap` ≥ 6px on `.column-header` itself OR
+  // `margin-left` ≥ 6px on `.col-count`. The assertion is scoped to the
+  // matched rule (not a free-text grep) so a `gap:` declaration on a
+  // sibling selector cannot satisfy it.
+
+  /**
+   * Extract the rule body for a CSS selector from the rendered <style>
+   * block. Returns the substring inside `{ ... }` for the first occurrence
+   * of `<selector> { ... }` whose selector text exactly matches. Throws
+   * with a specific message when the rule is absent.
+   */
+  function extractCssRuleBody(html: string, selector: string): string {
+    const styleMatch = /<style[^>]*>([\s\S]*?)<\/style>/.exec(html);
+    if (!styleMatch) throw new Error("no <style> block in rendered HTML");
+    const css = styleMatch[1];
+    // Anchor selector match to a non-word boundary on the left so that
+    // `.col-count` does not also match `.column-header.col-count` (none
+    // such exist today, but the test contract guards against future
+    // selector concatenation regressions). Selector is followed by
+    // optional whitespace then `{`.
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(^|[\\s,>+~])${escaped}\\s*\\{([^}]*)\\}`, "m");
+    const match = re.exec(css);
+    if (!match) {
+      throw new Error(`CSS rule for ${selector} not found in <style> block`);
+    }
+    return match[2];
+  }
+
+  /**
+   * Parse a CSS rule body into a property-name → value map. Splits on
+   * `;`, trims, and skips empty fragments. Lowercase property names.
+   */
+  function parseCssDeclarations(body: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const decl of body.split(";")) {
+      const trimmed = decl.trim();
+      if (!trimmed) continue;
+      const colon = trimmed.indexOf(":");
+      if (colon < 0) continue;
+      const prop = trimmed.slice(0, colon).trim().toLowerCase();
+      const val = trimmed.slice(colon + 1).trim();
+      out[prop] = val;
+    }
+    return out;
+  }
+
+  /** Parse a CSS length value like "8px" → 8. Returns NaN on non-px. */
+  function pxValue(v: string | undefined): number {
+    if (!v) return NaN;
+    const m = /^(-?\d+(?:\.\d+)?)px$/.exec(v.trim());
+    if (!m) return NaN;
+    return Number(m[1]);
+  }
+
+  it("AC-1: column-header keeps a layout-level gap so .col-title and .col-count never visually butt when IN PROGRESS widens", () => {
+    // Build the bug-trigger condition: IN PROGRESS column receives a story
+    // whose id is shaped like a long file path. (StoryStatusEntry has no
+    // free-text "label" field — a long storyId is the closest fixture
+    // equivalent and is what monday-bot's audit board displayed.)
+    //
+    // The IN PROGRESS column is populated via the `activity` signal, NOT
+    // via a `"in-progress"` StoryStatus value (which does not exist —
+    // see server/types/coordinate-result.ts). A story is shown in the
+    // column when activity.storyId matches the entry's storyId, OR by
+    // a synthetic activity card when activity.storyId is unmatched.
+    const longPathStoryId = "src/slack/queryHandler.ts";
+    const html = renderDashboardHtml(
+      baseInput(
+        {
+          stories: [
+            makeStoryEntry(longPathStoryId, "ready"),
+            makeStoryEntry("US-01", "ready"),
+            makeStoryEntry("US-02", "done"),
+          ],
+        },
+        {
+          activity: {
+            tool: "forge_generate",
+            storyId: longPathStoryId,
+            stage: "running",
+            startedAt: "2026-04-18T00:00:00.000Z",
+            lastUpdate: "2026-04-17T23:59:55.000Z",
+          },
+        },
+      ),
+    );
+
+    // The layout-level fix lives in the inline <style> block. Extract the
+    // .column-header rule body and the .col-count rule body, then assert
+    // the gap-or-margin contract on the parsed declarations (not a
+    // free-text grep — F36 anti-pattern).
+    const headerBody = extractCssRuleBody(html, ".column-header");
+    const headerDecls = parseCssDeclarations(headerBody);
+
+    // .col-count rule may not exist (gap-on-parent path); only parse it
+    // when present.
+    let countDecls: Record<string, string> = {};
+    try {
+      const countBody = extractCssRuleBody(html, ".col-count");
+      countDecls = parseCssDeclarations(countBody);
+    } catch {
+      // No .col-count rule. Acceptable — the gap-on-.column-header path
+      // (alternative (a) in the W7 plan) does not need one.
+    }
+
+    // The fix must land on ONE of the two layout-correct surfaces.
+    const headerGapPx = pxValue(headerDecls["gap"]);
+    const countMarginLeftPx = pxValue(countDecls["margin-left"]);
+
+    // F36 dodge: this assertion is on the *parsed* rule, not a substring
+    // search. A stray `gap: 6px` on `.replanning-notes` (line 1128) does
+    // not satisfy it.
+    const headerGapOk = !Number.isNaN(headerGapPx) && headerGapPx >= 6;
+    const countMarginOk =
+      !Number.isNaN(countMarginLeftPx) && countMarginLeftPx >= 6;
+    expect(
+      headerGapOk || countMarginOk,
+    ).toBe(true);
+
+    // Belt-and-braces: the .column-header flex shape stays
+    // `justify-content: space-between` (W7 out-of-scope: do not change
+    // the flex layout shape).
+    expect(headerDecls["justify-content"]).toBe("space-between");
+    expect(headerDecls["display"]).toBe("flex");
+  });
+
+  it("AC-2 (supporting): the inline <style> declares gap≥6px on .column-header OR margin-left≥6px on .col-count", () => {
+    // Source-text helper. Sufficient-not-necessary by itself (F36) — AC-1
+    // above is the runtime-effect assertion. Kept as a small regression
+    // tripwire so a future rule-rewrite that drops the property gets
+    // caught quickly with a localized failure.
+    const html = renderDashboardHtml(baseInput());
+    const headerBody = extractCssRuleBody(html, ".column-header");
+    const headerDecls = parseCssDeclarations(headerBody);
+    const headerGapPx = pxValue(headerDecls["gap"]);
+
+    let countMarginLeftPx = NaN;
+    try {
+      const countBody = extractCssRuleBody(html, ".col-count");
+      countMarginLeftPx = pxValue(parseCssDeclarations(countBody)["margin-left"]);
+    } catch {
+      // optional rule
+    }
+
+    expect(
+      (!Number.isNaN(headerGapPx) && headerGapPx >= 6) ||
+        (!Number.isNaN(countMarginLeftPx) && countMarginLeftPx >= 6),
+    ).toBe(true);
+  });
+});

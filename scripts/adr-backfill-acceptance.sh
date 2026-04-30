@@ -84,8 +84,7 @@ EOF
 check "AC-5(a)/pre" "INDEX.md absent before backfill" "$AC5A_PRE"
 
 # Run the CLI.
-node "$CLI" --project "$PROJ_A" > "$SCRATCH_BASE/case-a.log" 2>&1
-AC5A_EXIT=$?
+if node "$CLI" --project "$PROJ_A" > "$SCRATCH_BASE/case-a.log" 2>&1; then AC5A_EXIT=0; else AC5A_EXIT=$?; fi
 check "AC-5(a)/exit" "CLI exits 0 with stub on disk" "$AC5A_EXIT"
 
 # Assert: ADR file created with US-08 suffix.
@@ -111,8 +110,7 @@ echo
 # ── AC-5(b) — re-running case (a) is a no-op (INDEX byte-identical) ──────
 INDEX_BEFORE_HASH=$(sha256sum "$PROJ_A/docs/decisions/INDEX.md" | awk '{print $1}')
 
-node "$CLI" --project "$PROJ_A" > "$SCRATCH_BASE/case-b.log" 2>&1
-AC5B_EXIT=$?
+if node "$CLI" --project "$PROJ_A" > "$SCRATCH_BASE/case-b.log" 2>&1; then AC5B_EXIT=0; else AC5B_EXIT=$?; fi
 check "AC-5(b)/exit" "CLI re-run exits 0" "$AC5B_EXIT"
 
 INDEX_AFTER_HASH=$(sha256sum "$PROJ_A/docs/decisions/INDEX.md" | awk '{print $1}')
@@ -177,8 +175,7 @@ node "$CLI" --project "$PROJ_C" > "$SCRATCH_BASE/case-c-priming.log" 2>&1
 INDEX_C_HASH_BEFORE=$(sha256sum "$PROJ_C/docs/decisions/INDEX.md" | awk '{print $1}')
 
 # Re-run: must be a byte-stable no-op.
-node "$CLI" --project "$PROJ_C" > "$SCRATCH_BASE/case-c.log" 2>&1
-AC5C_EXIT=$?
+if node "$CLI" --project "$PROJ_C" > "$SCRATCH_BASE/case-c.log" 2>&1; then AC5C_EXIT=0; else AC5C_EXIT=$?; fi
 check "AC-5(c)/exit" "CLI re-run on already-current project exits 0" "$AC5C_EXIT"
 
 INDEX_C_HASH_AFTER=$(sha256sum "$PROJ_C/docs/decisions/INDEX.md" | awk '{print $1}')

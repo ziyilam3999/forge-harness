@@ -1138,7 +1138,7 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .kanban-column.accent-amber::before { background: var(--amber); }
 .kanban-column.accent-green::before { background: var(--green); }
 .kanban-column.accent-red::before { background: var(--red); }
-.column-header { display: flex; justify-content: space-between; align-items: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 700; padding-bottom: 8px; border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
+.column-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 700; padding-bottom: 8px; border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
 .column-body { display: flex; flex-direction: column; gap: 8px; }
 .story-card { background: var(--off-white); border: 1px solid var(--border-light); border-radius: 8px; padding: 10px; font-size: 12px; }
 .story-card.active { background: var(--amber-bg); border: 1.5px solid var(--amber); }

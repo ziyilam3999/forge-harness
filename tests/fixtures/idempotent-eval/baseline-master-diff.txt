@@ -1,0 +1,50 @@
+Bundle-A master-baseline regression record
+============================================
+Captured: 2026-04-30 (against master f3ebb6c, branch fix/monday-w3-w4-w5-spec-generator)
+
+Setup: with `server/lib/spec-generator.ts`, `adr-extractor.ts`, `run-record.ts`, and
+`spec-source-vocabulary.ts` reverted to their master state but the new test file
+`server/lib/spec-generator-monday-w3-w4-w5.test.ts` in place, vitest reports the
+following baseline FAILURES — proving each test is the load-bearing change for its
+sub-plan AC (P17: green-on-branch alone proves nothing without master-baseline).
+
+Failing tests on master (11 of 19):
+
+W3 (#514) idempotent-write — TECHNICAL-SPEC.md
+  - AC-1: TECHNICAL-SPEC.md is byte-identical across two consecutive PASSes on the same story
+  - AC-6: a third successive PASS still produces byte-identical content
+
+W4 (#515) cross-section non-mutation
+  - AC-1: rendering a US-10 section leaves US-01 and US-02 byte-identical
+  - AC-2: TECHNICAL-SPEC.md never contains a triple-blank-line gap (\n\n\n)
+  - AC-3: re-rendering an existing US-X section is fully idempotent at the bytes layer
+
+W5 (#516) call-chain grounding — chainResolves helper
+  (the helper does not exist on master; all 3 cases fail at import time)
+  - returns false when the owner is a known class but the named member is NOT a method/field
+  - returns true (no chain check applies) when the owner is unknown — defers to legacy path
+  - returns true for a bare (non-dotted) identifier — no chain check applies
+
+W5 (#516) call-chain grounding — validator end-to-end
+  - AC-1: monday-bot's mis-attribution scenario — a chain to a non-implementing layer is flagged
+  - AC-2: `Foo.baz` where Foo is a known class but baz is NOT a method → flagged as `unknown chain`
+
+W5 (#516) prompt clause — option (c)
+  - system prompt names the call-chain grounding rule (W5)
+
+Raw vitest summary line:
+  ❯ server/lib/spec-generator-monday-w3-w4-w5.test.ts (19 tests | 11 failed) 802ms
+   Test Files  1 failed (1)
+        Tests  11 failed | 8 passed (19)
+
+Tests that pass on master (8 of 19):
+
+  - W3 AC-3 (NEW story whose inputs DO change): writes still work normally on master
+  - W3 AC-4 (single agent-first comment block): byte-stable header shipped in v0.40.0 #510
+  - W3 INDEX AC-1 (same-day INDEX re-run): same `today` ⇒ master writes identical bytes
+    even without the skip; passes on both. The branch instead skips the write entirely.
+  - W3 helper unit tests (idempotentWrite + stripVolatile): the helper module is in the
+    branch only; the unit tests run green against it.
+  - W5 AC-5 (chain DOES resolve passes through): legacy `vocabularyContains` already accepts.
+
+After the bundle-A fix is applied (this PR), all 19 tests in the new file pass green.

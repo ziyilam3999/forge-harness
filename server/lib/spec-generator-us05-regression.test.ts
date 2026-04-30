@@ -121,15 +121,24 @@ describe("AC-7 — US-05 regression replay", () => {
     expect(text).not.toMatch(/`KnowledgeResult`/);
 
     // ── Warnings recorded ─────────────────────────────────────
-    const stripped = result.warnings
+    // W5 (#516): chain-form mis-identifications are recorded under the new
+    // `stripped-unknown-chain` kind (`KnowledgeService.search` etc. — owner
+    // is a known class but the named member is not one of its methods);
+    // bare identifier mis-identifications (`KnowledgeDocument`, `KnowledgeResult`)
+    // are still recorded under the legacy `stripped-unknown-identifier` kind.
+    const strippedChains = result.warnings
+      .filter((w): w is Extract<typeof w, { kind: "stripped-unknown-chain" }> => w.kind === "stripped-unknown-chain")
+      .map((w) => w.chain)
+      .sort();
+    const strippedIds = result.warnings
       .filter((w): w is Extract<typeof w, { kind: "stripped-unknown-identifier" }> => w.kind === "stripped-unknown-identifier")
       .map((w) => w.identifier)
       .sort();
-    expect(stripped).toContain("KnowledgeService.search");
-    expect(stripped).toContain("KnowledgeService.index");
-    expect(stripped).toContain("KnowledgeService.delete");
-    expect(stripped.some((id) => id === "KnowledgeDocument")).toBe(true);
-    expect(stripped.some((id) => id === "KnowledgeResult")).toBe(true);
+    expect(strippedChains).toContain("KnowledgeService.search");
+    expect(strippedChains).toContain("KnowledgeService.index");
+    expect(strippedChains).toContain("KnowledgeService.delete");
+    expect(strippedIds.some((id) => id === "KnowledgeDocument")).toBe(true);
+    expect(strippedIds.some((id) => id === "KnowledgeResult")).toBe(true);
   });
 });
 

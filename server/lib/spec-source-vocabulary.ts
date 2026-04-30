@@ -489,3 +489,47 @@ export function vocabularyContains(vocab: SourceVocabulary, identifier: string):
   }
   return false;
 }
+
+/**
+ * W5 (#516) — call-chain resolution check.
+ *
+ * Returns true iff `chain` (a multi-segment dotted identifier like `Foo.bar`
+ * or `Foo.bar.baz`) is structurally grounded in the vocabulary: the leftmost
+ * (owner) segment is a known identifier, AND the second segment is a known
+ * method/field of that owner per the AST harvest.
+ *
+ * Distinct from `vocabularyContains` in that the latter accepts dotted
+ * identifiers as long as the OWNER appears anywhere in the vocabulary
+ * (which masks "owner is a known type but the named member doesn't exist on
+ * it" — exactly the call-chain mis-attribution monday-bot's W5 audit
+ * surfaced). This predicate is the structural ground truth: returns false
+ * for `Foo.qux` when `Foo` is a class but `Foo.qux` isn't one of its public
+ * methods or properties.
+ *
+ * Returns true (does not flag) for:
+ *   - Bare identifiers (no dot): the chain check doesn't apply.
+ *   - Owners that aren't in `identifiers` at all: those are already caught
+ *     by the existing `unknown identifier` path; emitting `unknown chain`
+ *     would double-flag the same root cause.
+ *   - Three-or-more-segment chains where the two-segment prefix resolves:
+ *     deeper navigation (`Foo.bar.baz.qux`) is treated as resolved so long
+ *     as `Foo.bar` resolves; the AST harvest doesn't track nested fields.
+ */
+export function chainResolves(vocab: SourceVocabulary, chain: string): boolean {
+  if (chain.indexOf(".") === -1) return true; // not a chain
+  const segs = chain.split(".");
+  const owner = segs[0];
+  const member = segs[1];
+  // If the owner isn't even a known identifier / type / class, this is an
+  // `unknown identifier` case, not an `unknown chain` case. Defer to the
+  // existing strip path.
+  const ownerKnown =
+    vocab.identifiers.has(owner) ||
+    [...vocab.methods].some((m) => m.startsWith(`${owner}.`)) ||
+    [...vocab.fields].some((f) => f.startsWith(`${owner}.`));
+  if (!ownerKnown) return true;
+  // Owner is known. The chain resolves iff `Owner.member` is a known method
+  // or field per the AST harvest.
+  const twoSeg = `${owner}.${member}`;
+  return vocab.methods.has(twoSeg) || vocab.fields.has(twoSeg);
+}

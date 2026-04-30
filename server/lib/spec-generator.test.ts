@@ -413,9 +413,13 @@ describe("validateAgainstVocabulary — AC-5 strip path", () => {
     expect(result.sections["api-contracts"]).not.toContain("Foo.qux");
     expect(result.sections["data-models"]).toContain("Baz.id");
     expect(result.warnings).toHaveLength(1);
+    // W5 (#516): `Foo.qux` is now diagnosed as `stripped-unknown-chain` —
+    // a more precise kind than the legacy `stripped-unknown-identifier` —
+    // because the owner `Foo` IS a known class but the member `qux` is not
+    // one of its public methods/fields per the AST harvest.
     expect(result.warnings[0]).toMatchObject({
-      kind: "stripped-unknown-identifier",
-      identifier: "Foo.qux",
+      kind: "stripped-unknown-chain",
+      chain: "Foo.qux",
       section: "api-contracts",
     });
   });
@@ -487,7 +491,13 @@ describe("validateAgainstVocabulary — AC-11 mode flag", () => {
     expect(result.sections["api-contracts"]).toContain("Foo.bar");
     // Warning still recorded
     expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0].identifier).toBe("Foo.qux");
+    // W5: `Foo.qux` is a chain miss now (owner known, member unknown).
+    const w0 = result.warnings[0];
+    if (w0.kind === "stripped-unknown-chain") {
+      expect(w0.chain).toBe("Foo.qux");
+    } else {
+      throw new Error(`expected stripped-unknown-chain warning, got ${w0.kind}`);
+    }
   });
 
   it("default (mode unset) strips the bullet", () => {
@@ -600,9 +610,12 @@ describe("generateSpecForStory — affectedPaths integration", () => {
 
     expect(result.warnings).toHaveLength(1);
     const w = result.warnings[0];
-    expect(w.kind).toBe("stripped-unknown-identifier");
-    if (w.kind === "stripped-unknown-identifier") {
-      expect(w.identifier).toBe("Foo.qux");
+    // W5 (#516): `Foo.qux` is now an `unknown chain` (owner Foo is known,
+    // member qux is not). The legacy `unknown identifier` kind is reserved
+    // for cases where the OWNER itself is unknown.
+    expect(w.kind).toBe("stripped-unknown-chain");
+    if (w.kind === "stripped-unknown-chain") {
+      expect(w.chain).toBe("Foo.qux");
     }
 
     const text = readFileSync(result.specPath, "utf-8");

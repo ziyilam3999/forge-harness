@@ -19,13 +19,15 @@
  * The merge is by `id`, not by position.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
+import { idempotentWrite } from "./idempotent-write.js";
 import type { EvalReport } from "../types/eval-report.js";
 import { RunContext, trackedCallClaude } from "./run-context.js";
 import {
   buildSourceVocabulary,
+  chainResolves,
   renderVocabularyForPrompt,
   vocabularyContains,
   type SourceVocabulary,
@@ -235,7 +237,13 @@ function splitBodyByStory(body: string): BodySection[] {
   let curId: string | null = null;
   let buf: string[] = [];
   const flush = () => {
-    if (curId !== null) sections.push({ id: curId, markdown: buf.join("\n") });
+    if (curId !== null) {
+      // W4 (#515): trim trailing whitespace so a section's extracted markdown
+      // is uniform regardless of whether trailing blank lines belong to it
+      // or to the next section. Cross-section non-mutation depends on this:
+      // section bytes must NOT vary with neighboring-section position.
+      sections.push({ id: curId, markdown: buf.join("\n").replace(/\s+$/, "") });
+    }
     curId = null; buf = [];
   };
   for (const line of lines) {
@@ -312,7 +320,9 @@ Rules:
 - Be terse. Each bullet should be one line, ideally under 120 chars.
 - The "contracts" array is the canonical list of MCP tool identifiers (top-level tool names only, no method paths) that the diff TOUCHES, regardless of whether each tool has a dedicated bullet under api-contracts.
 - Do NOT invent contracts. If you can't see a tool change in the evidence, do not list it.
-- Every backtick-quoted identifier you emit MUST appear in the "Real symbols available" section of the user prompt. If a needed symbol isn't there, emit "(none)" for that section.`;
+- Every backtick-quoted identifier you emit MUST appear in the "Real symbols available" section of the user prompt. If a needed symbol isn't there, emit "(none)" for that section.
+- Attribution discipline (W5): when an "invariants" or "api-contracts" bullet asserts that some symbol "MUST" do something, attribute it to the layer that ACTUALLY implements the behaviour — the constant, function, or method whose body contains the logic. Do NOT bind invariants to upstream callers, just-forwarders, or proxy layers that merely route to the implementing layer. If the behaviour is encoded in a constant (e.g. a not-found message string), name the constant; do not name the function that returns it.
+- Call-chain grounding (W5): when emitting a dotted identifier like \`Foo.bar()\`, the chain MUST resolve in the source vocabulary — i.e. \`Foo\` must list \`bar\` among its public methods or fields. If the chain doesn't resolve, choose a different identifier or emit "(none)".`;
 
 export function buildUserPrompt(req: SynthesisRequest): string {
   const acLines = req.evalReport.criteria
@@ -427,11 +437,21 @@ export function validateAgainstVocabulary(
   storyContext: { filesScanned: number },
 ): {
   sections: Record<SectionName, string>;
-  warnings: Array<Extract<SpecGeneratorWarning, { kind: "stripped-unknown-identifier" }>>;
+  warnings: Array<
+    Extract<
+      SpecGeneratorWarning,
+      { kind: "stripped-unknown-identifier" } | { kind: "stripped-unknown-chain" }
+    >
+  >;
 } {
   const mode = validatorMode();
   const out: Record<SectionName, string> = { ...sections };
-  const warnings: Array<Extract<SpecGeneratorWarning, { kind: "stripped-unknown-identifier" }>> = [];
+  const warnings: Array<
+    Extract<
+      SpecGeneratorWarning,
+      { kind: "stripped-unknown-identifier" } | { kind: "stripped-unknown-chain" }
+    >
+  > = [];
 
   for (const sectionName of REQUIRED_SECTIONS) {
     const text = sections[sectionName];
@@ -483,6 +503,24 @@ export function validateAgainstVocabulary(
         // Top-level segment of a dotted path: if the head is a builtin, skip.
         const head = id.split(".")[0];
         if (TS_BUILTINS.has(head)) continue;
+        // W5 (#516) — call-chain check FIRST for dotted identifiers. When the
+        // owner is a known class/type but the second segment isn't one of its
+        // public methods/fields, emit `stripped-unknown-chain` (a distinct
+        // diagnostic) rather than the older `stripped-unknown-identifier`.
+        // This catches monday-bot-style mis-attribution where an invariant
+        // is bound to a function chain whose member doesn't implement (or
+        // even exist in) the asserted shape. When the chain DOES resolve,
+        // pass through to the existing `vocabularyContains` accept path.
+        if (id.indexOf(".") !== -1 && !chainResolves(vocab, id)) {
+          warnings.push({
+            kind: "stripped-unknown-chain",
+            chain: id,
+            section: sectionName,
+            filesScanned: storyContext.filesScanned,
+          });
+          if (mode === "strip") bulletKept = false;
+          continue;
+        }
         // Two-segment check: `Foo.bar` validates against full string OR the owner being a known class/type.
         const okFull = vocabularyContains(vocab, id);
         if (okFull) continue;
@@ -620,7 +658,11 @@ export async function generateSpecForStory(
     "",
   ].join("\n");
   const out = `${headerBlock}\n---\n${renderFrontMatter(parsed.frontMatter)}\n---\n\n${normaliseBody(parsed.body)}`;
-  writeFileSync(specPath, out, "utf-8");
+  // W3 (#514): skip the write if the existing file already represents the
+  // same logical state (ignoring the daily date line and the `lastUpdated:`
+  // timestamps). Eliminates per-PASS dated-banner churn in consumer repos.
+  // Preserves AC-1a-3 byte-stability of the agent-first comment block.
+  idempotentWrite(specPath, out);
 
   return {
     specPath,
@@ -680,7 +722,14 @@ function mergeStorySectionInBody(
     const bId = b.match(/^## story: (\S.*)/)?.[1] ?? "";
     return aId.localeCompare(bId);
   });
-  parsed.body = [...otherChunks, ...storyChunks].join("\n\n").trim();
+  // W4 (#515): trim ALL trailing whitespace (newlines and spaces) from each
+  // chunk before joining so the `"\n\n"` join produces exactly one blank line
+  // between adjacent sections — never two or three. Without this, sections
+  // that already ended with a trailing blank line stack with the join's two
+  // newlines to produce `\n\n\n` (a triple-blank-line gap), and re-rendering
+  // a story section perturbs the bytes of OTHER (unrelated) story sections.
+  const trim = (chunk: string) => chunk.replace(/\s+$/, "");
+  parsed.body = [...otherChunks, ...storyChunks].map(trim).join("\n\n").trim();
   return bodyChanged;
 }
 

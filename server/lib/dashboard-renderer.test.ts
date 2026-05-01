@@ -1035,7 +1035,7 @@ describe("renderDashboardHtml — column-header gap (W7 / forge-harness #517)", 
     // selector concatenation regressions). Selector is followed by
     // optional whitespace then `{`.
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`(^|[\\s,>+~])${escaped}\\s*\\{([^}]*)\\}`, "m");
+    const re = new RegExp(`(^|[\\n,>+~])${escaped}\\s*\\{([^}]*)\\}`, "m");
     const match = re.exec(css);
     if (!match) {
       throw new Error(`CSS rule for ${selector} not found in <style> block`);

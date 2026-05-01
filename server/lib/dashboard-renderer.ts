@@ -342,7 +342,12 @@ export async function readInProgressStoryIds(
       typeof parsed.timestamp === "string" ? parsed.timestamp : "";
     if (!ts) continue;
     const tsMs = Date.parse(ts);
-    if (!Number.isFinite(tsMs)) continue;
+    if (!Number.isFinite(tsMs)) {
+      console.warn(
+        `forge: run-record ${file} has malformed timestamp ${JSON.stringify(ts)} (skipping)`,
+      );
+      continue;
+    }
     if (tsMs > briefMtimeMs) {
       out.add(storyId);
     }

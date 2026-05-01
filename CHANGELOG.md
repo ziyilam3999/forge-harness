@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.40.1](https://github.com/ziyilam3999/forge-harness/compare/v0.40.0...v0.40.1) (2026-05-01)
+
+### Bug Fixes
+
+- set-e-safe exit-code capture in adr-backfill-acceptance.sh (#501) (#509)
+- dashboard column-header gap so count badges don't crowd labels (#517) (#518)
+- monday-bot W3+W4+W5 spec-generator fixes (#514, #515, #516) (#521)
+
 ## [0.40.0](https://github.com/ziyilam3999/forge-harness/compare/v0.39.6...v0.40.0) (2026-04-28)
 
 ### Features

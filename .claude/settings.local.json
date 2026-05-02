@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONIOENCODING=utf-8 python ~/.claude/skills/show-plan/scripts/render.py \"/c/Users/ziyil/coding_projects/forge-harness/.ai-workspace/plans/2026-04-07-forge-generate-sessions.md\")",
+      "Bash(PYTHONIOENCODING=utf-8 python:*)",
+      "mcp__forge__forge_evaluate"
+    ]
+  },
+  "outputStyle": "Explanatory"
+}

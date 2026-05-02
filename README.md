@@ -1,5 +1,9 @@
 # Forge Harness
 
+[![License](https://img.shields.io/github/license/ziyilam3999/forge-harness)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-blue)](https://nodejs.org)
+[![Latest release](https://img.shields.io/github/v/release/ziyilam3999/forge-harness)](https://github.com/ziyilam3999/forge-harness/releases)
+
 Composable AI primitives — plan, evaluate, generate, coordinate — as a local MCP server.
 
 Successor to [Hive Mind v3](https://github.com/ziyilam3999/hive-mind). Each primitive works standalone and composes together.
@@ -25,7 +29,7 @@ Then restart Claude Code. The forge tools will appear in your tool list.
 
 ## Status
 
-**Phase 0** — MCP server scaffold with placeholder tools. All tools return "not yet implemented."
+Active. All four primitives are implemented and shipping releases on a regular cadence — see [Releases](https://github.com/ziyilam3999/forge-harness/releases) for the latest. The harness is dogfooded daily on its own development.
 
 ## Development
 
@@ -38,7 +42,22 @@ npm run lint      # Run ESLint
 
 ## Architecture
 
-Forge is a **local MCP server** — runs on your machine as a subprocess. Claude Code (or any MCP client) connects via stdio. See `docs/forge-harness-plan.md` for the full design spec.
+Forge runs as a local MCP server — a Node subprocess that Claude Code (or any MCP client) connects to over stdio. No network calls; everything stays on your machine.
+
+```mermaid
+graph LR
+    CC[Claude Code<br/>or MCP client] -->|stdio| F[Forge MCP Server]
+    F --> P[forge_plan]
+    F --> E[forge_evaluate]
+    F --> G[forge_generate]
+    F --> C[forge_coordinate]
+    G -.GAN loop.-> E
+    C -.composes.-> P
+    C -.composes.-> G
+    C -.composes.-> E
+```
+
+See `docs/forge-harness-plan.md` for the full design spec.
 
 ## License
 

@@ -152,15 +152,23 @@ Executor can assume the following are installed: `node`, `npm`, `git`, `grep`, `
 - [x] Planner: `/coherent-plan` pass (2 MAJOR + 5 MINOR fixed in-place; below escalation threshold; outcome-shaped plan, so coherent-plan per `feedback_double_critique_scope`)
 - [x] Planner: surface for user review
 - [x] User: approve (2026-04-18 — approved outright after `/coherent-plan` pass)
-- [ ] Planner: `/delegate` to subagent with this plan as the brief source
-- [ ] Executor: ack with dirty-worktree pre-flight + tool availability check
-- [ ] Executor: AC-1 artefact (skeleton + Context section)
-- [ ] Executor: AC-2 critic sweep rows populated
-- [ ] Executor: AC-3 classifications tagged
-- [ ] Executor: AC-4 decision recorded with rationale
-- [ ] Executor: AC-5 XOR AC-6 (whichever path applies)
-- [ ] Executor: AC-7 task #66 marked completed
-- [ ] Planner: stateless reviewer on the artefact + any new plan + any memory update
-- [ ] Planner: update this plan's Checkpoint to reality on review
+- [x] Planner: `/delegate` to subagent with this plan as the brief source (subagent id `acd809869a9fb83af`, --via subagent per `feedback_delegate_subagent_default.md`)
+- [x] Executor: ack with dirty-worktree pre-flight + tool availability check
+- [x] Executor: AC-1 artefact (skeleton + Context section)
+- [x] Executor: AC-2 critic sweep rows populated (12 rows = `ls .ai-workspace/plans/*.json | wc -l`; MCP critic returned all 15 globbed plans including 3 nested `f55-validation/*` excluded from the sweep table per AC-2 non-recursive scope)
+- [x] Executor: AC-3 classifications tagged (232 bullet classifications matching 232 finding integers in AC-2 table)
+- [x] Executor: AC-4 decision recorded with rationale (`decision: exit`; rationale cites 180/19/33/0 classification split + S7 convergence)
+- [x] Executor: AC-5 XOR AC-6 path — **exit** (AC-6 memory update with `exit-state: 2026-04-18` + artefact pointer; AC-5 vacuously satisfied by absent continuation plan, explicitly noted in artefact's `## Follow-on`)
+- [x] Executor: AC-7 flagged-not-closed (TaskUpdate tool unavailable in subagent schema — handed back to planner per "flag, don't guess" rule)
+- [x] Planner: stateless reviewer on the branch (fresh subagent id `acc99f440f713a16e`, zero implementation context; verdict PASS 6/7 verifiable, AC-7 UNVERIFIED due to same TaskGet-tool-scope limitation the executor hit)
+- [x] Planner: close AC-7 from planner session via TaskUpdate (task #66 → completed, 2026-04-18)
+- [x] Planner: update this Checkpoint to reality on review
 
-Last updated: 2026-04-18T00:00+08:00 — post-`/coherent-plan` revision (2 MAJOR + 5 MINOR findings fixed in-place; below escalation threshold).
+## Shipped reality (post-review)
+
+- Branch `exec/resume-calibration-loop-2026-04-18` carries the plan (commit `5246668`) but the artefact files (`.ai-workspace/dogfood/2026-04-18-*.{md,json}`) are **NOT committed** — the executor correctly identified `.ai-workspace/dogfood/` as gitignored (`.gitignore:5` `.ai-workspace/*`, with negations only for `plans/` and `audits/`). Forcing them into git via `-f` would break the q05-q1-gitignore-design convention (dogfood is session-scoped). Decision substance is preserved durably in the memory file `~/.claude/projects/C--Users-ziyil-coding-projects-forge-harness/memory/project_calibration_loop.md` instead. This is a reality-update on the plan's Critical files implicit assumption that the artefact would land in master.
+- AC-7 verification from subagents is impossible under the current Claude Code tool schema (neither executor nor reviewer subagent sessions surface `TaskGet`/`TaskUpdate`). This is a future-plan consideration: ACs that depend on internal harness tools must either be satisfied from the planner's main session OR drop the subagent-verification claim.
+- Branch remains unmerged per the plan's "no /ship, no PR, no release" Out of scope rule. The branch is a durable record; the memory file is the durable decision. Future sessions searching for "task #66 outcome" land in the memory file, which inlines the classification summary.
+- README.md had unrelated working-tree modifications when the executor started (a marketing/badges/mermaid-diagram edit, not staged anywhere). Executor excluded it from the branch commit; it remains unstaged on the working tree. Planner can `git checkout README.md` at discretion — not a calibration-loop concern.
+
+Last updated: 2026-04-18T01:30+08:00 — post-review. Plan complete; task #66 closed; loop retired.

@@ -37,8 +37,6 @@ check() {
   fi
 }
 
-# Each scenario gets its own scratch project. tmp/ is gitignored.
-mkdir -p tmp
 SCRATCH_BASE="$(mktemp -d "${TMPDIR:-/tmp}/forge-adr-backfill-XXXXXX")"
 trap 'rm -rf "$SCRATCH_BASE"' EXIT
 

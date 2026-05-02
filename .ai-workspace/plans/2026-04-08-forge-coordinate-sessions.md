@@ -19,6 +19,7 @@ Seven sessions to build the foreman. Session 1 writes the job description (PRD).
 | S5 | PH-03: ReplanningNote, Reconciliation, Observability (5 stories) | PR, version bump | S3, S4 |
 | S6 | PH-04: MCP Handler, Checkpoint Gates, Tests, Dogfood (4 stories) | PR, version bump | S4, S5 |
 | S7 | Divergence measurement | Baseline comparison report | S6 |
+| S8 | Kanban dashboard | `.forge/dashboard.html` renderer + hooks | S7 |
 
 ---
 
@@ -353,6 +354,57 @@ After completing:
   - Whether any replanning is needed for future work
 ```
 
+### Session 8: Kanban Dashboard — Near-Live Monitoring
+```
+Read these files for context:
+- .ai-workspace/PROJECT-INDEX.md — project knowledge index (start here)
+- .ai-workspace/plans/2026-04-11-kanban-dashboard.md — full plan (double-critiqued, 16 ACs)
+- .ai-workspace/plans/dashboard-reference.html — visual reference mockup (open in browser)
+- server/lib/coordinator.ts — assessPhase, assemblePhaseTransitionBrief
+- server/lib/progress.ts — ProgressReporter (constructor: toolName, stages)
+- server/lib/run-record.ts — writeRunRecord
+- server/lib/audit.ts — AuditLog, AuditEntry interface
+- server/lib/run-reader.ts — readRunRecords, readAuditEntries
+- server/types/coordinate-result.ts — PhaseTransitionBrief, StoryStatusEntry, BudgetInfo, TimeBudgetInfo
+- C:/Users/ziyil/coding_projects/ai-brain/hive-mind-persist/design-system.md — UI design tokens
+
+Implement the Kanban dashboard as specified in the plan. Key deliverables:
+
+1. Hook 0: Coordinator writes .forge/coordinate-brief.json after assessPhase()
+2. server/lib/activity.ts — read/write .forge/activity.json (ephemeral liveness signal)
+3. server/lib/dashboard-renderer.ts — renderDashboard(brief, activity, auditEntries) -> HTML string
+   - 6 Kanban columns: Backlog, Ready, In Progress, Retry, Done, Blocked
+   - Header with phase info, budget gauge, time gauge, progress counter
+   - Staleness detection banner (green/amber/red via JS)
+   - Activity feed from .forge/audit/ JSONL (last 20 entries, actual AuditEntry fields)
+   - Auto-refresh every 5s via <meta http-equiv="refresh" content="5">
+   - Single self-contained HTML, no external deps, file:// compatible
+   - Follow design-system.md tokens exactly (colors, fonts, shadows, hex shapes)
+4. Hook 1: Extend ProgressReporter with optional projectPath? and storyId? params
+   - On begin()/complete(): write activity.json + call renderDashboard()
+   - Non-fatal: wrap in try/catch, swallow errors (match existing writeRunRecord pattern)
+5. Hook 2: After writeRunRecord(): clear activity.json + call renderDashboard()
+6. Unit tests for dashboard-renderer (16 ACs in plan)
+7. Unit tests for activity signal
+8. fs.mkdir({ recursive: true }) bootstrap for .forge/ on first run
+
+Key constraints:
+- Error handling: all dashboard/activity writes are NON-FATAL (console.error + continue)
+- Atomic writes: dashboard.tmp.html -> rename to dashboard.html
+- Windows compatible (path.join, no colons)
+- No new npm dependencies
+- classifyStaleness exported as pure function for testing
+- All existing tests must pass
+
+Dogfood: run forge_coordinate against a real plan, open .forge/dashboard.html in browser, verify near-live updates.
+
+Ship as a PR.
+
+After shipping:
+- Update sessions plan checkpoint + backlog
+- Move "Kanban dashboard" from "Planned - S8" to "Already Implemented" in backlog
+```
+
 ---
 
 ## Session Grouping Summary
@@ -364,8 +416,9 @@ After completing:
 | **3** | PH-01: Types + State + Core | 7 | Session 2 | Largest phase, includes evaluate write-side fix |
 | **4** | PH-02: Budget + Safety | 4 | Session 3 | Advisory enforcement |
 | **5** | PH-03: Replanning + Observability | 5 | Sessions 3, 4 | ReplanningNote routing, reconciliation |
-| **6** | PH-04: MCP Handler + Tests | 4 | Sessions 4, 5 | 15-20 integration tests, dogfood |
+| **6** | PH-04: MCP Handler + Tests | 6 | Sessions 4, 5 | 17-22 integration tests, dogfood, spec-vs-types |
 | **7** | Divergence measurement | — | Session 6 | Compare against 80-item baseline |
+| **8** | Kanban dashboard | 2 new files + 3 hooks | Session 7 | Display-only monitoring, .forge/dashboard.html |
 
 ## Verification
 
@@ -376,6 +429,7 @@ After completing:
 - [ ] Session 5: PH-03 US-01 through US-05 ACs pass, reconcileState 5+ tests, replanning mapping verified
 - [ ] Session 6: PH-04 US-01 through US-04 ACs pass, all 9 NFRs verified, full test suite green, dogfood report written
 - [ ] Session 7: Divergence count measured, compared against 80-item baseline
+- [ ] Session 8: Dashboard renders, all 16 ACs pass, dogfood with real coordinate run
 
 ## Checkpoint
 
@@ -384,7 +438,8 @@ After completing:
 - [ ] Session 3: Implement PH-01 — Types, Topo Sort, State Readers, Evaluate Write-Side, Core Loop (7 stories)
 - [ ] Session 4: Implement PH-02 — Budget, Time, INCONCLUSIVE, Crash Recovery (4 stories)
 - [ ] Session 5: Implement PH-03 — ReplanningNote, Reconciliation, Observability (5 stories)
-- [ ] Session 6: Implement PH-04 — MCP Handler, Checkpoint Gates, Tests, Dogfood (4 stories)
+- [ ] Session 6: Implement PH-04 — MCP Handler, Checkpoint Gates, Tests, Dogfood (6 stories)
 - [ ] Session 7: Divergence measurement
+- [ ] Session 8: Kanban dashboard — activity.ts, dashboard-renderer.ts, ProgressReporter hooks, writeRunRecord hook, coordinator brief write
 
-Last updated: 2026-04-08T01:45:00+08:00
+Last updated: 2026-04-11T00:00:00+08:00

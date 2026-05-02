@@ -170,9 +170,15 @@ forge_coordinate follows the **Intelligent Clipboard pattern** — it assembles 
 - Double-critique on final report (design doc line 340)
 - Mode and tier read from plan (design doc line 341-342)
 
+### Planned — S8 (Post-S7 Divergence Measurement)
+- **Kanban dashboard** (`.forge/dashboard.html`): near-live monitoring dashboard rendered as single self-contained HTML file. 6 Kanban columns (Backlog/Ready/In Progress/Retry/Done/Blocked) populated from `PhaseTransitionBrief` + new `activity.json` liveness signal. Auto-refreshes every 5s via `<meta http-equiv="refresh">`. Display-only, no user actions. Hooks into `ProgressReporter.begin/complete()` and `writeRunRecord()`. Follows hive-mind-persist `design-system.md` tokens. Full plan: `.ai-workspace/plans/2026-04-11-kanban-dashboard.md`. Reference mockup: `.ai-workspace/plans/dashboard-reference.html`.
+  - New files: `server/lib/activity.ts` (activity signal read/write), `server/lib/dashboard-renderer.ts` (PhaseTransitionBrief + Activity -> HTML)
+  - Hook 0: Coordinator writes `.forge/coordinate-brief.json` after `assessPhase()`
+  - Hook 1: `ProgressReporter` extended with optional `projectPath?` and `storyId?` params
+  - Hook 2: `writeRunRecord()` clears activity and re-renders
+  - 16 acceptance criteria, double-critiqued (R23: 17 findings, 100% applied)
+
 ### New Improvement Ideas
-- **Topological story dispatch**: dependency-ordered execution
-- **Consolidated dashboard**: per-story status, accumulated cost, progress, aggregated audit
 - **Budget enforcement point**: CostTracker is advisory, Coordinate enforces
 - **Audit file discovery**: glob .forge/audit/{tool}-*.jsonl
 - **Three-tier integration**: after each phase, call forge_plan(documentTier: "update") to reconcile both the completed phase plan AND the master plan with implementation reality. Collect **structured replanning notes** from three sources: (a) divergence findings from forge_evaluate, (b) escalation reports from forge_generate, (c) implementation notes from the session. Feed as `replanningNotes: ReplanningNote[]` alongside existing `implementationNotes` string. Route mechanically: `ac-drift`/`assumption-changed` → master plan update; `partial-completion`/`dependency-satisfied` → phase plan update; `gap-found` → logged, deferred. (Validated by manual workflow: sessions plan updated after each session, /coherent-plan catches drift.)

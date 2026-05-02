@@ -1046,10 +1046,31 @@ describe("renderDashboardHtml — column-header gap (W7 / forge-harness #517)", 
   /**
    * Parse a CSS rule body into a property-name → value map. Splits on
    * `;`, trims, and skips empty fragments. Lowercase property names.
+   * Quote-aware: `;` inside `'...'` or `"..."` (e.g. `content: "..;.."`)
+   * does not terminate a declaration.
    */
   function parseCssDeclarations(body: string): Record<string, string> {
     const out: Record<string, string> = {};
-    for (const decl of body.split(";")) {
+    const decls: string[] = [];
+    let buf = "";
+    let quote: '"' | "'" | null = null;
+    for (let i = 0; i < body.length; i++) {
+      const ch = body[i];
+      if (quote) {
+        if (ch === quote) quote = null;
+        buf += ch;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+        buf += ch;
+      } else if (ch === ";") {
+        decls.push(buf);
+        buf = "";
+      } else {
+        buf += ch;
+      }
+    }
+    if (buf.length > 0) decls.push(buf);
+    for (const decl of decls) {
       const trimmed = decl.trim();
       if (!trimmed) continue;
       const colon = trimmed.indexOf(":");

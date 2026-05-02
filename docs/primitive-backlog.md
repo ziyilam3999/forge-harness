@@ -108,7 +108,7 @@
 
 ---
 
-## `/generate` (Generator) — PH-01/02/03 shipped, PH-04 in progress
+## `/generate` (Generator) — COMPLETE (v0.16.0, all 4 phases shipped)
 
 ### Already Implemented
 - GenerateResult, GenerationBrief, FixBrief, Escalation, CostEstimate, DiffManifest, EvalHint types (`server/types/generate-result.ts`) (v0.13.0, PH-01)
@@ -125,16 +125,19 @@
 - Three-tier document inputs: `buildBrief` accepts optional `prdContent`, `masterPlanContent`, `phasePlanContent` → `brief.documentContext` structured object, omitted when none provided (`server/lib/generator.ts`) (v0.15.0, PH-03)
 - Context injection: `buildBrief` accepts optional `contextFiles` string array → reads each file into `brief.injectedContext`, skips missing with warning (`server/lib/generator.ts`) (v0.15.0, PH-03)
 - Lineage pass-through: `story.lineage` from plan passes through to `brief.lineage` — read-only, not inferred (`server/lib/generator.ts`) (v0.15.0, PH-03)
+- MCP handler: `handleGenerate` with 15-field zod input schema, wired to `assembleGenerateResultWithContext`, JSON-serialized evalReport/baselineDiagnostics parsing, error handling (`server/tools/generate.ts`) (v0.16.0, PH-04)
+- Tool registration: `forge_generate` registered with `readOnlyHint: true`, full description documenting brief assembler + stopping conditions (`server/index.ts`) (v0.16.0, PH-04)
+- Integration tests: 23 tests covering init/fix/escalate cycle, all 6 NFRs (zero callClaude, response time, Windows paths, read-only, graceful degradation, schema 3.0.0) (`server/tools/generate.test.ts`) (v0.16.0, PH-04)
+- Dogfood validated: real PH-04 execution plan tested through all 3 action paths (`.ai-workspace/plans/forge-generate-dogfood-report.md`) (v0.16.0, PH-04)
 
-### In Design Doc — To Be Implemented
-- GAN loop: implement → evaluate → fix → evaluate, max 3 rounds (design doc lines 280-310)
-- 8 production-grade GAN elements (core logic done in PH-01; remaining: git branching, command blocklist, two-tier feedback wiring):
+### In Design Doc — To Be Implemented (forge_coordinate scope)
+- GAN loop orchestration: implement → evaluate → fix → evaluate, max 3 rounds (design doc lines 280-310) — forge_generate provides the primitives, forge_coordinate orchestrates
+- 8 production-grade GAN elements (core logic done; remaining: git branching, command blocklist, two-tier feedback wiring — all forge_coordinate scope):
   3. Two-tier feedback: fast (hooks exit-code-2) + slow (/evaluate subagent)
-  4. Hash-based no-op detection — **logic done** (PH-01), git integration pending (PH-04)
-- Per-story git branches (feat/{story-id}), squash-merge on finalization
-- Git-native rollback on fail
-- Command blocklist + path-scoped writes (design doc line 290)
-- MCP handler expansion + integration tests + dogfood (PH-04)
+  4. Hash-based no-op detection — **logic done** (PH-01), git integration is caller responsibility
+- Per-story git branches (feat/{story-id}), squash-merge on finalization — caller responsibility
+- Git-native rollback on fail — caller responsibility
+- Command blocklist + path-scoped writes (design doc line 290) — forge_coordinate scope
 
 ### New Improvement Ideas
 - **file-ops.ts**: sandboxed file read/write (project directory only, defense-in-depth)
@@ -199,6 +202,39 @@ interface ReplanningNote {
 - `gap-found` → logged to audit, deferred to next planning session
 - `severity: "blocking"` → halt phase progression (any note with severity `blocking` halts phase progression)
 - `affectedPhases` → targeted updates (only re-plan affected phases, not all remaining)
+
+### Brain-Dump Ideas (2026-04-08, full classification)
+
+On 2026-04-08, user brain-dumped ~15 forge_coordinate ideas. Full disposition recorded in `~/.claude/plans/piped-sprouting-island.md` Part 4. Preserved here so future readers don't re-litigate the decisions from scratch.
+
+**Classification summary:**
+
+| Category | Ideas | Disposition |
+|---|---|---|
+| Already in MVP | Reasoning per primitive call, audit trails, consolidated view (cost/progress/audit), stop/resume/course-correct (partial), standard failure/recovery patterns, financial observability (partial) | Covered by PH-01 US-05 `PhaseTransitionBrief.recommendation`, `AuditLog` + `readAuditEntries()`, `aggregateStatus()` PH-03 US-03, crash recovery PH-02 US-04, INCONCLUSIVE blocking PH-02 US-03, ReplanningNote routing PH-03 US-01 |
+| Net-new MVP | Config file for orchestration behavior | Became PH-04 US-01.5 after 2 rounds of schema redesign |
+| Backlog v2 (forge-harness layer) | Parallel multi-agent execution + merge/conflict, richer standard failure taxonomy, full finops (cost per successful task + quality correlation), phase auto-detection, call-time tool/context provisioning | Deferred — need either real-world failure data, bigger use case, or architectural support (e.g., MasterPlan.Phase.planPath field) |
+| Out-of-scope (infrastructure layer) | Agent lifecycle as managed service (spawn/health/scale/terminate), supervision hierarchy (meta-agent monitors others) | Not forge-harness's layer — k8s/Temporal territory. forge-harness is stateless MCP calls. Record as long-term research note, not actionable backlog |
+| Separate primitive / skill | Persistent memory + SQL-backed search agent (→ potential `forge_recall` primitive or new skill), inspectable/editable artifacts (already done via three-tier documents), compounding context (already running via hive-mind-persist) | Not forge_coordinate scope. Each deserves its own plan when concrete need surfaces |
+
+### Configuration File Design Decisions (forge_coordinate US-01.5)
+
+The config file for forge_coordinate went through two rounds of scope review before landing on its v1 schema. Record here for future reference when adding new fields or designing v2 config modes.
+
+**Rejected in R23 critic review (scope creep, never shipped):**
+
+1. **`phaseGates: boolean`** — Required manual acknowledgment between phases. **Rejected because:** would introduce a new `status: "blocked"` trigger that conflicts with existing semantics (blocked = dep failed or INCONCLUSIVE). No unblock mechanism defined. **Replaced in R4 by:** the richer `phaseBoundaryBehavior` enum (`auto-advance` / `halt-and-notify` / `halt-hard`) which uses the existing `halted` status and optionally emits a synthetic blocking ReplanningNote. **Revisit if:** a multi-phase gating workflow needs per-phase policy (e.g., "halt after PH-02 but auto-advance after PH-01")
+2. **`excludePaths: string[]`** — Glob-exclude stories from dispatch. **Rejected because:** no concrete brain-dump grounding, would change `assessPhase` classification semantics (what does "excluded" mean — done? skipped? blocked?). **Revisit if:** a concrete workflow need surfaces, e.g., selective re-runs of specific story subtrees
+
+**Rejected in R4 by user as unsuitable for Max-plan supervised runs:**
+
+3. **`budgetUsd: number`** — Stop coordinate when aggregated prior-run cost exceeds N USD. **Rejected because:** Max-plan users have no hard cost ceiling; halting mid-phase creates work rather than saving it. Brief is called once per cycle, not hot-path — cost aggregation is nearly free but the halt behavior is user-hostile for supervised runs. **Revisit if:** forge-harness is deployed in pay-per-token contexts (enterprise API billing, multi-tenant SaaS), or for nightly/unsupervised batch runs where a human isn't watching
+4. **`maxTimeMs: number`** — Stop coordinate when wall-clock elapsed since `startTimeMs` exceeds N ms. **Rejected because:** supervised users accept long runs; interrupting mid-phase loses context. **Revisit if:** CI/CD contexts where hung processes need a hard timeout, or shared-compute environments with time quotas
+5. **`escalationThresholds: { consecutiveInconclusive, consecutiveFail }`** — Halt phase after N consecutive ambiguous/failing stories. **Rejected because:** defensive automation hides signal the human would catch live. If 3 stories in a row fail, either the plan is broken or the implementer is stuck — either way, a human should intervene on the plan, not rely on a halt. **Revisit if:** unsupervised/nightly runs where auto-halt is the ONLY failure circuit breaker
+
+**v1 schema (shipped in PH-04 US-01.5):** `storyOrdering`, `phaseBoundaryBehavior`, `briefVerbosity`, `observability.{logLevel, writeAuditLog, writeRunRecord}`. Purpose: **output shaping and observability control**, not resource capping. Designed for supervised power-user workflows (dogfood development, plan-driven solo work, interactive sessions).
+
+**Lesson for future config fields:** before proposing a field, ask "who actually wants this on? For what concrete workflow?" Fields that exist to guard against unsupervised runs are dead weight in a supervised context, and vice versa. A config file schema should be opinionated about its target deployment mode.
 
 ---
 

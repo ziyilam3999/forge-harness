@@ -108,7 +108,7 @@
 
 ---
 
-## `/generate` (Generator) — PH-01/02/03 shipped, PH-04 in progress
+## `/generate` (Generator) — COMPLETE (v0.16.0, all 4 phases shipped)
 
 ### Already Implemented
 - GenerateResult, GenerationBrief, FixBrief, Escalation, CostEstimate, DiffManifest, EvalHint types (`server/types/generate-result.ts`) (v0.13.0, PH-01)
@@ -125,16 +125,19 @@
 - Three-tier document inputs: `buildBrief` accepts optional `prdContent`, `masterPlanContent`, `phasePlanContent` → `brief.documentContext` structured object, omitted when none provided (`server/lib/generator.ts`) (v0.15.0, PH-03)
 - Context injection: `buildBrief` accepts optional `contextFiles` string array → reads each file into `brief.injectedContext`, skips missing with warning (`server/lib/generator.ts`) (v0.15.0, PH-03)
 - Lineage pass-through: `story.lineage` from plan passes through to `brief.lineage` — read-only, not inferred (`server/lib/generator.ts`) (v0.15.0, PH-03)
+- MCP handler: `handleGenerate` with 15-field zod input schema, wired to `assembleGenerateResultWithContext`, JSON-serialized evalReport/baselineDiagnostics parsing, error handling (`server/tools/generate.ts`) (v0.16.0, PH-04)
+- Tool registration: `forge_generate` registered with `readOnlyHint: true`, full description documenting brief assembler + stopping conditions (`server/index.ts`) (v0.16.0, PH-04)
+- Integration tests: 23 tests covering init/fix/escalate cycle, all 6 NFRs (zero callClaude, response time, Windows paths, read-only, graceful degradation, schema 3.0.0) (`server/tools/generate.test.ts`) (v0.16.0, PH-04)
+- Dogfood validated: real PH-04 execution plan tested through all 3 action paths (`.ai-workspace/plans/forge-generate-dogfood-report.md`) (v0.16.0, PH-04)
 
-### In Design Doc — To Be Implemented
-- GAN loop: implement → evaluate → fix → evaluate, max 3 rounds (design doc lines 280-310)
-- 8 production-grade GAN elements (core logic done in PH-01; remaining: git branching, command blocklist, two-tier feedback wiring):
-  1. Two-tier feedback: fast (hooks exit-code-2) + slow (/evaluate subagent)
-  2. Hash-based no-op detection — **logic done** (PH-01), git integration pending (PH-04)
-- Per-story git branches (feat/{story-id}), squash-merge on finalization
-- Git-native rollback on fail
-- Command blocklist + path-scoped writes (design doc line 290)
-- MCP handler expansion + integration tests + dogfood (PH-04)
+### In Design Doc — To Be Implemented (forge_coordinate scope)
+- GAN loop orchestration: implement → evaluate → fix → evaluate, max 3 rounds (design doc lines 280-310) — forge_generate provides the primitives, forge_coordinate orchestrates
+- 8 production-grade GAN elements (core logic done; remaining: git branching, command blocklist, two-tier feedback wiring — all forge_coordinate scope):
+  3. Two-tier feedback: fast (hooks exit-code-2) + slow (/evaluate subagent)
+  4. Hash-based no-op detection — **logic done** (PH-01), git integration is caller responsibility
+- Per-story git branches (feat/{story-id}), squash-merge on finalization — caller responsibility
+- Git-native rollback on fail — caller responsibility
+- Command blocklist + path-scoped writes (design doc line 290) — forge_coordinate scope
 
 ### New Improvement Ideas
 - **file-ops.ts**: sandboxed file read/write (project directory only, defense-in-depth)
@@ -200,6 +203,39 @@ interface ReplanningNote {
 - `severity: "blocking"` → halt phase progression (any note with severity `blocking` halts phase progression)
 - `affectedPhases` → targeted updates (only re-plan affected phases, not all remaining)
 
+### Brain-Dump Ideas (2026-04-08, full classification)
+
+On 2026-04-08, user brain-dumped ~15 forge_coordinate ideas. Full disposition recorded in `~/.claude/plans/piped-sprouting-island.md` Part 4. Preserved here so future readers don't re-litigate the decisions from scratch.
+
+**Classification summary:**
+
+| Category | Ideas | Disposition |
+|---|---|---|
+| Already in MVP | Reasoning per primitive call, audit trails, consolidated view (cost/progress/audit), stop/resume/course-correct (partial), standard failure/recovery patterns, financial observability (partial) | Covered by PH-01 US-05 `PhaseTransitionBrief.recommendation`, `AuditLog` + `readAuditEntries()`, `aggregateStatus()` PH-03 US-03, crash recovery PH-02 US-04, INCONCLUSIVE blocking PH-02 US-03, ReplanningNote routing PH-03 US-01 |
+| Net-new MVP | Config file for orchestration behavior | Became PH-04 US-01.5 after 2 rounds of schema redesign |
+| Backlog v2 (forge-harness layer) | Parallel multi-agent execution + merge/conflict, richer standard failure taxonomy, full finops (cost per successful task + quality correlation), phase auto-detection, call-time tool/context provisioning | Deferred — need either real-world failure data, bigger use case, or architectural support (e.g., MasterPlan.Phase.planPath field) |
+| Out-of-scope (infrastructure layer) | Agent lifecycle as managed service (spawn/health/scale/terminate), supervision hierarchy (meta-agent monitors others) | Not forge-harness's layer — k8s/Temporal territory. forge-harness is stateless MCP calls. Record as long-term research note, not actionable backlog |
+| Separate primitive / skill | Persistent memory + SQL-backed search agent (→ potential `forge_recall` primitive or new skill), inspectable/editable artifacts (already done via three-tier documents), compounding context (already running via hive-mind-persist) | Not forge_coordinate scope. Each deserves its own plan when concrete need surfaces |
+
+### Configuration File Design Decisions (forge_coordinate US-01.5)
+
+The config file for forge_coordinate went through two rounds of scope review before landing on its v1 schema. Record here for future reference when adding new fields or designing v2 config modes.
+
+**Rejected in R23 critic review (scope creep, never shipped):**
+
+1. **`phaseGates: boolean`** — Required manual acknowledgment between phases. **Rejected because:** would introduce a new `status: "blocked"` trigger that conflicts with existing semantics (blocked = dep failed or INCONCLUSIVE). No unblock mechanism defined. **Replaced in R4 by:** the richer `phaseBoundaryBehavior` enum (`auto-advance` / `halt-and-notify` / `halt-hard`) which uses the existing `halted` status and optionally emits a synthetic blocking ReplanningNote. **Revisit if:** a multi-phase gating workflow needs per-phase policy (e.g., "halt after PH-02 but auto-advance after PH-01")
+2. **`excludePaths: string[]`** — Glob-exclude stories from dispatch. **Rejected because:** no concrete brain-dump grounding, would change `assessPhase` classification semantics (what does "excluded" mean — done? skipped? blocked?). **Revisit if:** a concrete workflow need surfaces, e.g., selective re-runs of specific story subtrees
+
+**Rejected in R4 by user as unsuitable for Max-plan supervised runs:**
+
+3. **`budgetUsd: number`** — Stop coordinate when aggregated prior-run cost exceeds N USD. **Rejected because:** Max-plan users have no hard cost ceiling; halting mid-phase creates work rather than saving it. Brief is called once per cycle, not hot-path — cost aggregation is nearly free but the halt behavior is user-hostile for supervised runs. **Revisit if:** forge-harness is deployed in pay-per-token contexts (enterprise API billing, multi-tenant SaaS), or for nightly/unsupervised batch runs where a human isn't watching
+4. **`maxTimeMs: number`** — Stop coordinate when wall-clock elapsed since `startTimeMs` exceeds N ms. **Rejected because:** supervised users accept long runs; interrupting mid-phase loses context. **Revisit if:** CI/CD contexts where hung processes need a hard timeout, or shared-compute environments with time quotas
+5. **`escalationThresholds: { consecutiveInconclusive, consecutiveFail }`** — Halt phase after N consecutive ambiguous/failing stories. **Rejected because:** defensive automation hides signal the human would catch live. If 3 stories in a row fail, either the plan is broken or the implementer is stuck — either way, a human should intervene on the plan, not rely on a halt. **Revisit if:** unsupervised/nightly runs where auto-halt is the ONLY failure circuit breaker
+
+**v1 schema (shipped in PH-04 US-01.5):** `storyOrdering`, `phaseBoundaryBehavior`, `briefVerbosity`, `observability.{logLevel, writeAuditLog, writeRunRecord}`. Purpose: **output shaping and observability control**, not resource capping. Designed for supervised power-user workflows (dogfood development, plan-driven solo work, interactive sessions).
+
+**Lesson for future config fields:** before proposing a field, ask "who actually wants this on? For what concrete workflow?" Fields that exist to guard against unsupervised runs are dead weight in a supervised context, and vice versa. A config file schema should be opinionated about its target deployment mode.
+
 ---
 
 ## Cross-Cutting Infrastructure
@@ -240,181 +276,3 @@ interface ReplanningNote {
 - Critic failure: block (design doc line 94) vs degrade (code plan.ts:162-168) — REC-8 dual-mode proposed
 - Cost tracking: PROVISIONAL per design doc line 327 — verify Claude API token exposure
 - Large codebase fallback: scanCodebase exists but no explicit handling for huge repos
-
----
-
-## Scope Boundary Decisions
-
-> **Rule:** Multi-turn LLM + human approval loops + indeterminate duration → **skill**. Mechanical signal aggregation on per-project state in a single shot → **forge primitive**. Cross-project scope → **ecosystem infrastructure** (not a primitive).
->
-> Apply this rule first, debate taste second. It has correctly classified all 8 current tools: `/prd` (skill), `/prototype` (skill), `/recall` (skill), `/project-index` (skill), `forge_plan` (primitive), `forge_generate` (primitive), `forge_evaluate` (primitive), `forge_coordinate` (primitive).
-
-### forge memory → External (skill + infrastructure)
-
-**Decision:** Memory retrieval with LLM-powered relevance ranking belongs as a `/recall` skill, not a forge primitive. Forge primitives remain $0 in advisory mode. Composition happens at the Claude Code session level (session calls `/recall`, then passes the context brief to forge primitives as input).
-
-**Why:** Cross-project scope (`.forge/runs/` across all projects → centralized SQL index) violates per-project primitive boundary. LLM-driven query expansion + relevance ranking violates NFR-C01 ($0 advisory mode). The working agent stays stateless per P56.
-
-**What stays inside forge:** Project-local history (`.forge/runs/`, `.forge/audit/`) and `graduateFindings` (PH-03 US-04) — both are mechanical, per-project, and fit the primitive contract. The graduation output feeds the external skill's KB, closing the loop without coupling.
-
-**Revisit if:** A concrete compose-need emerges where forge_generate must auto-inject P-patterns without session-level intervention. At that point, add a narrow $0 `forge_recall` primitive that does lexical-only retrieval (no LLM).
-
-**Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part B
-
-### UI prototype workflow → External (skill + forge types)
-
-**Decision:** Interactive UI prototype generation (LLM-powered, human-in-the-loop iteration, Playwright rendering) belongs as a `/prototype` skill. The output artifact is schematized in forge-harness types (`PrototypeArtifact`) so downstream primitives can consume it.
-
-**Why:** Fails 5/6 of the primitive invariant checks (needs LLM calls, multi-turn, indeterminate duration, visual verification, stateful across iterations). Matches `/prd` shape exactly: interactive upstream artifact generator that feeds forge primitives.
-
-**Integration points (post-coordinate):**
-- `forge_plan`: optional `prototypeArtifactPath` input
-- `forge_generate`: three-tier → four-tier doc assembly (optional)
-- `forge_evaluate`: optional `mode: "design-fidelity"` (Playwright pixel-diff)
-
-**Revisit if:** We ship autonomous mode (v2) and want the prototype loop to be programmatically callable. Even then, it's more likely a multi-step orchestration than a single primitive.
-
-**Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part C
-
-### Three-tier durability model (memory architecture)
-
-| Tier | Location | Role | Durability |
-|------|----------|------|-----------|
-| **T1 — Ephemeral per-project** | `.forge/runs/`, `.forge/audit/` (gitignored) | Raw records, canonical source | Local disk only |
-| **T2 — Indexed per-user** | `~/.forge-memory/index.db` (SQLite) | Cross-project query index, derived | Rebuildable from T1 |
-| **T3 — Durable cross-user** | `hive-mind-persist/` (git-tracked) | Ratified patterns (P1..P56+) | Versioned, shared |
-
-Key principle: **files canonical, SQL derived.** DB corruption is a non-event (`forge-indexer rebuild` regenerates). Graduation from T2→T3 requires human ratification to prevent pattern inflation.
-
-**Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part A + Part B
-
-### forge_evaluate mock-mode affordance → Post-coordinate follow-up
-
-**Decision:** Add an env-var mock gate (and optional fixture replay path) to `forge_evaluate` coherence/divergence modes. Not in forge_coordinate v1; filed as a post-S7 standalone plan after forge_coordinate ships. Do **not** fold into the S7 prompt — S7 is strictly divergence measurement against the 80-item baseline; infra mocking is a separate concern that deserves its own plan.
-
-**Why:** `server/tools/evaluate.ts` coherence handler path goes `trackedCallClaude → callClaude → @anthropic-ai/sdk` with **no mock gate anywhere**. Consequences:
-
-1. The standing "API calls only when no mock" rule **cannot be satisfied** for coherence/divergence today — a caller either burns live credits or skips the tool entirely.
-2. The `/double-critique`-as-`forge_plan`-test-harness calibration loop (see auto-memory `project_calibration_loop.md`) will hit this same wall every time it tries to evaluate forge_coordinate artifacts against the PRD.
-3. PH-04 integration tests (`PH04-US-03`) that exercise `forge_evaluate` indirectly will need a fixture path OR must document a live-API-key CI secret.
-
-**Evidence:** lucky-iris hit `401 OAuth authentication_error` during forge_coordinate S2 (2026-04-09) trying to run `forge_evaluate(mode: "coherence")` against the fresh master plan + phase plans. Grep confirmed the ungated call path. Pivoted to Option B (hand-authored markdown coherence report) — cost $0, produced 0 CRITICAL / 0 MAJOR / 3 MINOR verdict with full REQ/NFR/SC coverage — but the infra gap is now a known blocker for any future coherence/divergence use.
-
-**Options enumerated:**
-
-- **(a)** **Env-var mock gate on `client.messages.create`**. Example: when `FORGE_EVALUATE_MOCK=1`, the SDK call is replaced with a canned response matching the handler's expected JSON shape. Fastest path; works for any PRD/plan input. Weakness: canned responses can't exercise real coherence logic — the mock is purely a "did the orchestration wiring work?" test.
-- **(b)** **Fixture replay path keyed by PRD+plan hash**. Pre-record specific coherence/divergence responses for specific input artifact sets; hash the inputs, look up the fixture, return the recorded response. Stronger than (a) for calibration fixtures (you can replay a real Anthropic response byte-for-byte). Weakness: higher setup cost; fixtures go stale when PRDs change.
-- **(c)** **Accept the live-API cost; document a CI secret requirement**. Status quo + documentation. Cheapest to implement, most expensive to operate, leaks credits on every run.
-
-**Leaning disposition:** **(a) + (b) combined.** (a) provides fast unit-test coverage and unblocks the "rule compliance" concern with a single env-var flip. (b) provides calibration-grade replay for the specific double-critique test harness loop. (c) is rejected because it locks the project into burning credits on every `/double-critique` run.
-
-**Owner / timing:** Standalone plan **after** forge_coordinate v1 ships (post-S7 divergence measurement). Sequence: (1) ship S7 → (2) file a new `.ai-workspace/plans/{date}-forge-evaluate-mock-mode.md` plan → (3) scope + double-critique + ship.
-
-**Revisit if:** Any S3-S7 forge_coordinate session discovers a hard block where PH-04 integration tests require mock support before the standalone follow-up can ship. In that case, smallest viable env-var gate goes in as a prerequisite commit, not a full mock/fixture layer.
-
-**Related memory:** `project_calibration_loop.md` in forge-harness auto-memory — describes the planned re-enablement of double-critique as a forge_plan test harness post-forge_coordinate; this infra gap is the primary enabler.
-
----
-
-### Public packaging → Monorepo
-
-**Decision:** Ship one public GitHub repo containing forge-harness MCP server + skills (`/prd`, `/prototype`, `/recall`) + indexer CLI + docs + examples. One-command install via `setup.sh`.
-
-**Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part C
-
----
-
-## Configuration File Design Decisions
-
-> Rationale for the `.forge/coordinate.config.json` schema shipped in forge_coordinate PH-04 US-01.5. Documents which fields landed in v1, which were rejected, and why — so future revisits have the full context and don't re-litigate settled scope.
-
-### The 4 fields that landed
-
-`.forge/coordinate.config.json` is an **optional, project-local, output-shaping** config. When absent or empty, it must be byte-identical to current behavior (NFR-C10). Four fields, all optional:
-
-| Field | Values | Default | Role |
-|---|---|---|---|
-| `storyOrdering` | `topological` / `depth-first` / `small-first` | `topological` | Reorders `topoSort` output within the valid Kahn topo order. Never violates dependency constraints |
-| `phaseBoundaryBehavior` | `auto-advance` / `halt-and-notify` / `halt-hard` | `auto-advance` | Controls what brief.status becomes when a phase completes. `halt-hard` additionally emits a brief-only synthetic blocking ReplanningNote, cleared via `haltClearedByHuman: true` input arg (idempotent, no persisted state) |
-| `briefVerbosity` | `concise` / `detailed` | `concise` | Shapes brief.recommendation string length (detailed adds rationale + caveats + alternatives) |
-| `observability.{logLevel,writeAuditLog,writeRunRecord}` | `debug`/`info`/`warn`/`silent` + booleans | `info` + `true` + `true` | Gates console + audit + run-record writes. **WARNING:** `writeRunRecord: false` voids NFR-C03 (crash recovery) — loader emits P45 warning and prepends `"WARNING: crash recovery disabled."` to brief.recommendation |
-
-**Common theme:** every landed field shapes the **output** of advisory-mode coordinate (what gets logged, how verbose the brief is, what story order is used for presentation). None of them cap resources, gate execution, or modify state. This is consistent with the Intelligent Clipboard pattern: coordinate is a read-only brief assembler, and the config file tunes presentation of the brief.
-
-### The 5 fields that were rejected
-
-All rejected fields are documented here with the rationale that killed them — so future work doesn't re-add them without reading the reasons.
-
-#### `budgetUsd` — rejected (resource cap)
-
-**Proposal:** Let users set a phase-wide dollar budget in the config file.
-
-**Why rejected:** Unsuitable for Max-plan supervised runs. A resource cap that halts mid-phase creates work instead of saving it — the human supervising the run is already watching costs live and would rather see the overrun than have coordinate abort. The existing MCP input arg `budgetUsd` remains accepted per-call (useful for automated/CI scenarios), but removing it from the config file prevents the "accidentally set a global low cap and forgot about it" footgun.
-
-**Promotion criteria:** A documented use case where project-wide cost enforcement is needed. Currently zero — every real forge-harness user is on Max plan with live supervision.
-
-#### `maxTimeMs` — rejected (resource cap)
-
-**Proposal:** Wall-clock budget enforced at config level.
-
-**Why rejected:** Same as `budgetUsd` — supervised runs don't benefit from mid-flight termination. Also vulnerable to clock jumps (NTP sync, DST). Remains accepted as MCP input arg.
-
-**Promotion criteria:** Same as `budgetUsd`.
-
-#### `escalationThresholds` — rejected (defensive automation)
-
-**Proposal:** Config field like `{ plateauCount: 3, maxIterations: 10 }` to auto-escalate stories that hit those thresholds.
-
-**Why rejected:** Hides signal the supervising human would catch live. The forge_generate iteration loop already escalates via its own EscalationReason enum (plateau, max-iterations, baseline-failed, etc.) — adding a second layer of defensive escalation creates confusing double-triggers and makes "why did this story stop?" harder to diagnose. Better to let the per-tool thresholds stay where they are and surface them unmodified to the human.
-
-**Promotion criteria:** Shipping autonomous mode (v2). Autonomous mode needs configurable escalation because there's no live human to catch signal — at that point, config-level thresholds become load-bearing.
-
-#### `phaseGates` — rejected (replaced by richer alternative)
-
-**Proposal:** Boolean `phaseGates: true/false` to halt at phase boundaries.
-
-**Why rejected:** Boolean is too coarse — users want different behaviors at phase boundaries (auto-advance vs halt vs halt-with-blocker). Replaced by the richer `phaseBoundaryBehavior` enum with three values, which subsumes the boolean's intent while allowing nuanced control.
-
-**Promotion criteria:** None — this proposal was wholly absorbed into `phaseBoundaryBehavior`.
-
-#### `excludePaths` — rejected (no concrete grounding)
-
-**Proposal:** Array of glob patterns to exclude from story path analysis.
-
-**Why rejected:** No concrete use case surfaced during design. Changing classification semantics based on path globs would also tangle `storyOrdering` logic with file-system concerns, muddying the Kahn topo sort's invariants. Without a grounded need, the feature would be speculative abstraction.
-
-**Promotion criteria:** A real workflow where path-based exclusion solves a real problem. Currently none.
-
-### Design principle (derived from these rejections)
-
-**Config fields in advisory-mode coordinate should shape output, not gate execution.** If a proposal caps a resource, defends against a failure mode, or modifies state, it doesn't belong in the config file — it belongs either in MCP input args (per-call control) or in a separate escalation primitive (autonomous mode v2). This principle held for all 5 rejected fields and can be applied to future proposals to avoid re-litigation.
-
-**Full implementation spec:** `.ai-workspace/plans/2026-04-09-forge-coordinate-implementation.md` PH-04 US-01.5 and the `Config File Schema` reference section.
-
-## Build/Release Rigor
-
-### Local-dist freshness incident + postinstall decision (2026-04-09)
-
-**Incident:** S3 dogfood halted at PH01-US-00a because a client Claude Code session calling `forge_generate` received the Phase-0 `"forge_generate for \"${storyId}\": not yet implemented. Phase 3 required."` stub string, despite `server/tools/generate.ts` being fully implemented and unit-tested for weeks. Expanding the audit to the other three tools showed `dist/tools/generate.js` was a 14-line Phase-0 stub while `server/tools/generate.ts` was a ~200-line real handler using `assembleGenerateResultWithContext`. `dist/tools/coordinate.js` also returned a ghost string, but in that case the source (`server/tools/coordinate.ts`) is still a legitimate pre-PH-01 stub — the dist was not stale, it was correctly reflecting an intentionally unimplemented handler.
-
-**Root cause:** `dist/` has been gitignored since the initial commit — it was **never** checked into git at any point. Each contributor builds dist/ locally via `npm run build`. Nothing forced that build to stay fresh when `server/tools/*.ts` was edited. Between the last local `tsc` run (~Apr 6) and the S3 kickoff (Apr 9), `server/tools/generate.ts` had been rewritten end-to-end, but no `npm run build` was run on the contributor's machine, so the MCP client session at Apr 9 still loaded the stale Phase-0 stub from disk. Critically, **none of the existing unit tests caught this** because every test in `server/**/*.test.ts` imports the TypeScript source directly via vitest's TS transformer — they never boot the compiled `dist/index.js` through the MCP stdio transport. The failure mode was structurally invisible to the test suite.
-
-**What the original "never check in build artifacts" rule would not have prevented:** this incident. That rule was already satisfied; the bug still happened. The real missing invariant was: **any artifact the MCP server loads at startup must be regenerated automatically on every `npm install`, and must be exercised through the real transport boundary at least once in CI before being trusted.**
-
-**Fix applied in PR `fix/dist-rebuild-and-postinstall`:**
-
-1. **`package.json postinstall` now chains `npm run build`** — every `npm install` rebuilds dist/ from current source. Any contributor who pulls master and runs `npm install` immediately has a fresh dist/; no separate build step to forget. The existing `scripts/install-hooks.cjs` call is preserved via `&&` chaining.
-2. **New MCP stdio smoke test at `server/smoke/mcp-surface.test.ts`** — spawns `node dist/index.js` as a subprocess, connects via `@modelcontextprotocol/sdk/client/stdio.js`, calls `listTools()` and `callTool()` on all four primitives. Asserts every response body is non-empty and does NOT match `/not yet implemented/i`, with a documented exemption for `forge_coordinate` (source is still a stub until PH-01 ships). Also asserts `forge_generate`'s listTools schema has ≥5 input properties — the stub schema had 1 (`storyId`), the real schema has 14, so schema-level drift is caught even before callTool runs. Runtime ~0.7s.
-3. **New CI step `dist/ drift guard`** — a grep-based belt-and-suspenders check that fails the build if any `dist/**/*.js` file contains `"not yet implemented"` outside the two allowed paths (`dist/tools/coordinate.js` and `dist/smoke/`). Redundant with the vitest smoke test on the happy path, but catches the failure mode where the smoke test is skipped, disabled, or broken. Runs on both `ubuntu-latest` and `windows-latest` in the existing matrix.
-
-**Design rule (ratified by this incident):** Every primitive must be exercised through its real transport boundary in CI before being considered shipped. Vitest handler tests that import `server/tools/*.ts` directly are **necessary but not sufficient** — they cannot see stdio framing bugs, JSON-RPC serialization drift, `.mcp.json` wiring mistakes, or stale compiled artifacts. When a new primitive is added (or the coordinator flips from stub to real in PH-01), its smoke-test entry must be added / updated in the same PR. The CI drift guard and the vitest smoke test together enforce this mechanically.
-
-**Verification dance after this PR merges:** The user must run `git pull && npm install` on their working copy (not just `git pull`) — the `npm install` is what triggers the new `postinstall` hook that regenerates dist/. After that, restart the Claude Code session (MCP servers load once at session start), then make a throwaway `forge_generate({storyId: "SMOKE-TEST"})` call to confirm the running MCP process is serving the rebuilt dist/. Only after that throwaway call returns a non-stub response should S3 work resume.
-
-**Lesson for future primitives:** A test suite that is 100% green while the shipped artifact is a 14-line stub is a canonical F46-class "loud data, silent dashboard" failure. The fix is not more tests inside the same layer — it's a test at the next layer out. For an MCP server, that layer is the stdio transport boundary. For a CLI, it would be the process-spawn boundary. For a library, it would be the published package. **Dogfood-from-S1 is the enforcement mechanism** — if every primitive's S1 session must make a real client call to its own MCP tool, incidents like this one surface in hours instead of days.
-
-**Related:**
-- `server/smoke/mcp-surface.test.ts` — the smoke test
-- `.github/workflows/ci.yml` — drift guard + named steps
-- `package.json` — postinstall chain
-- 2026-04-09 S3 mailbox thread (`forge-plan ↔ lucky-iris` on S3 blocker) — full incident trail

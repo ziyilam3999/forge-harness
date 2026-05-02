@@ -78,13 +78,31 @@ The executor chooses the exact shape of the whitelist and the exact ignore patte
 ## Checkpoint
 
 - [x] Plan drafted (planner)
-- [ ] Brief delivered to lucky-iris
-- [ ] Executor acks and starts
-- [ ] AC-1..AC-12 pass locally on executor's branch
-- [ ] PR opened with `plan-refresh: no-op` (or fresh signal)
-- [ ] AC-13 passes (CI green)
-- [ ] Stateless review PASS
-- [ ] Merged + released
-- [ ] Plan updated to reflect shipped reality (planner, post-merge)
+- [x] Brief delivered to lucky-iris
+- [x] Executor acked and started
+- [x] AC-11 blocker surfaced + amended mid-flight (commit 3 on PR branch, not parallel planner edit)
+- [x] AC-1..AC-12 pass locally on executor's branch
+- [x] PR #207 opened with `plan-refresh: no-op`
+- [x] AC-13 passes (CI green — ubuntu 29s, windows 1m10s, smoke-gate 6s)
+- [x] Stateless review PASS (0 bugs, 3 non-blocking enhancements)
+- [x] Merged + released (squash `2e9cf4fe31183416af031588d39aaec79b99178d`, tag `v0.30.3`)
+- [x] Plan updated to reflect shipped reality (planner, post-merge)
 
-Last updated: 2026-04-14T22:40:00+08:00 — drafted after v0.30.2 ship, pending delivery to lucky-iris.
+## Shipped reality
+
+- **PR:** https://github.com/ziyilam3999/forge-harness/pull/207
+- **Merge commit:** `2e9cf4fe31183416af031588d39aaec79b99178d` (squash)
+- **Release:** v0.30.3 — https://github.com/ziyilam3999/forge-harness/releases/tag/v0.30.3
+- **Final shape chosen by executor:**
+  - `.gitignore` line 5 replaced with allowlist-by-exception: `.ai-workspace/*` + `!.ai-workspace/plans/` + `!.ai-workspace/audits/`. Cleaner than the denylist the plan suggested — new subdirs stay ignored by default.
+  - `package.json` `files:` array: `["dist/","server/","scripts/","schema/","README.md","CHANGELOG.md"]` (6 entries; `package.json` is implicitly always published so it was omitted).
+- **Commits on the PR (3):** `cd5e6ad` files whitelist → `84ae8dd` gitignore relaxation → `58837c1` AC-11 plan amendment. Ordering constraint respected.
+- **Side effect:** 42 previously-hidden plan/audit files are now tracked. `git add -f` friction gone.
+- **AC-11 amendment:** legit. 40 `@typescript-eslint/no-explicit-any` errors exist on master independent of this PR. Rewritten as "no new errors vs master" to prevent F7 "fix two things in one PR, break both." Fix tracked as task #34 (separate PR).
+- **Unblock timeline:** blocker raised 23:00 → planner unblock 23:05 (5 min) → correction mail 23:08 → closure 23:20. Zero retries burned, blocker-priority mailbox + auto_schedule_wakeup worked as designed across sessions.
+
+## Learnings folded back
+
+Captured in global CLAUDE.md (Planner/Executor Workflow section, "second end-to-end run" subsection, applied by lucky-iris mid-flight): (1) blocker-priority mail + `auto_schedule_wakeup: true` is the stop-condition escape hatch across sessions; (2) plan reality sync rides the executor's PR branch as a new commit, never a parallel planner edit on master; (3) absolute tool-output ACs are suspicious by default — planner must run the tool against current master BEFORE writing "exits 0"; (4) executor ack must include dirty-worktree pre-flight.
+
+Last updated: 2026-04-14T23:25:00+08:00 — shipped v0.30.3, all AC ✓, plan synced to reality by planner post-merge.

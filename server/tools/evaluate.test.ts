@@ -468,7 +468,7 @@ describe("handleStoryEval — v0.36.0 Phase B spec-generator integration", () =>
     expect(mockedGenerateSpec).not.toHaveBeenCalled();
   });
 
-  it("swallows spec-generator failure and still writes the RunRecord (verdict not masked)", async () => {
+  it("F4 — surfaces spec-generator failure as typed warnings on BOTH the run record and the MCP top-level response (verdict not masked)", async () => {
     mockedGenerateSpec.mockRejectedValueOnce(new Error("synthetic spec-gen crash"));
     mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
 
@@ -478,13 +478,36 @@ describe("handleStoryEval — v0.36.0 Phase B spec-generator integration", () =>
       projectPath: "/some/path",
     });
 
+    // Eval verdict still surfaced — the doc-gen hiccup MUST NOT mask it.
     expect(result.isError).toBeUndefined();
     expect(mockedGenerateSpec).toHaveBeenCalledTimes(1);
     expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
     const record = mockedWriteRunRecord.mock.calls[0][1];
-    // verdict still surfaced, generatedDocs absent
     expect(record.evalVerdict).toBe("PASS");
-    expect(record.generatedDocs).toBeUndefined();
+
+    // F4 fix — `generatedDocs` is now synthesised as a structurally-incomplete
+    // envelope (specPath:"") carrying the failure warnings. Previously this
+    // was silently `undefined` — the bug. The envelope is the on-disk surface
+    // for the warnings; the MCP top-level `specGenWarnings` is the parallel
+    // surface (P64 producer/consumer seam).
+    expect(record.generatedDocs).toBeDefined();
+    expect(record.generatedDocs!.specPath).toBe("");
+    expect(record.generatedDocs!.warnings).toHaveLength(2);
+
+    const onDiskKinds = record.generatedDocs!.warnings.map((w) => w.kind);
+    expect(onDiskKinds).toContain("spec-gen-failed");
+    expect(onDiskKinds).toContain("spec-gen-skipped-on-pass");
+
+    const failedWarning = record.generatedDocs!.warnings.find(
+      (w) => w.kind === "spec-gen-failed",
+    );
+    expect(failedWarning).toBeDefined();
+    if (failedWarning && failedWarning.kind === "spec-gen-failed") {
+      expect(failedWarning.message).toBe("synthetic spec-gen crash");
+    }
+
+    // P64 — the MCP top-level surface MUST carry the same warnings.
+    expect(result.specGenWarnings).toEqual(record.generatedDocs!.warnings);
   });
 });
 

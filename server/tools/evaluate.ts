@@ -379,6 +379,15 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
     // `writeRunRecord`).
     let generatedDocs: NonNullable<RunRecord["generatedDocs"]> | undefined;
     if (report.verdict === "PASS") {
+      // F4 fix — when the spec-generator throws, mint typed warnings that
+      // surface on BOTH the on-disk run record's `generatedDocs.warnings`
+      // AND the MCP top-level `specGenWarnings` (P64 producer/consumer seam,
+      // P44 loud-failure). Previously the catch path here logged to stderr
+      // only, leaving consumers unable to distinguish "spec-gen ran cleanly"
+      // from "spec-gen exploded silently" — the bug macbook-monday filed
+      // against US-08+. The new warnings are appended to whatever the
+      // spec-generator itself produced (e.g. `no-vocabulary`,
+      // `stripped-unknown-identifier`).
       try {
         // v0.36.x grounding: surface the story's affectedPaths to the
         // spec-generator so it can extract a source-vocabulary and ground
@@ -400,14 +409,40 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
           contracts: spec.contracts,
           warnings: spec.warnings ?? [],
         };
-        // v0.38.0 I3: capture warnings reference for the top-level response.
-        // Same array as `generatedDocs.warnings` so the MCP top-level field
-        // is byte-identical to the on-disk record.
-        storyEvalSpecGenWarnings = generatedDocs.warnings;
       } catch (err) {
+        // F4 fix — un-swallow: previously this catch only logged to stderr,
+        // leaving `TECHNICAL-SPEC.md` silently stale on every PASS where
+        // generation threw. Now we mint a typed `spec-gen-failed` warning
+        // and synthesise a `generatedDocs` envelope to carry it on disk.
+        // The envelope is also a placeholder for the ADR extractor below
+        // (its `adrPaths` populates onto this same envelope). Consumers
+        // detect the failure via either (a) the typed warning kind on
+        // `generatedDocs.warnings` or (b) the structural marker
+        // (`specPath === ""` + spec-gen-failed warning).
+        const message = err instanceof Error ? err.message : String(err);
         console.error(
-          `forge_evaluate: spec-generator failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+          `forge_evaluate: spec-generator failed (continuing with warning surfaced): ${message}`,
         );
+        // Structural marker: PASS + specPath:"" + `spec-gen-failed` is an
+        // incomplete run record. The `spec-gen-skipped-on-pass` warning
+        // makes the structural-incompleteness explicit so consumers don't
+        // have to infer it from `specPath === ""`.
+        const failureWarnings: SpecGeneratorWarning[] = [
+          { kind: "spec-gen-failed", message },
+          {
+            kind: "spec-gen-skipped-on-pass",
+            message:
+              "PASS verdict but spec-generator threw; TECHNICAL-SPEC.md was NOT regenerated for this story",
+          },
+        ];
+        generatedDocs = {
+          specPath: "",
+          adrPaths: [], // populated below by Phase C's ADR extractor
+          genTimestamp: new Date().toISOString(),
+          genTokens: { inputTokens: 0, outputTokens: 0 },
+          contracts: [],
+          warnings: failureWarnings,
+        };
       }
 
       // v0.36.0 Phase C (AC-C1..C6): canonicalise any subagent-staged ADR
@@ -424,26 +459,19 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
         });
         if (generatedDocs) {
           generatedDocs.adrPaths = adr.newAdrPaths;
-        } else if (adr.newAdrPaths.length > 0) {
-          // spec-generator failed but ADR-extractor produced canonical files.
-          // Synthesise a minimal generatedDocs so the ADR work is still
-          // surfaced on the RunRecord. Empty adrPaths here means "nothing
-          // to record" — leave generatedDocs undefined so the existing
-          // contract holds (a spec-gen failure with no ADRs ⇒ no
-          // generatedDocs field).
-          generatedDocs = {
-            specPath: "",
-            adrPaths: adr.newAdrPaths,
-            genTimestamp: new Date().toISOString(),
-            genTokens: { inputTokens: 0, outputTokens: 0 },
-            contracts: [],
-            warnings: [],
-          };
         }
       } catch (err) {
         console.error(
           `forge_evaluate: adr-extractor failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
         );
+      }
+
+      // v0.38.0 I3 + F4 fix: capture warnings reference for the top-level
+      // response. Same array as `generatedDocs.warnings` so the MCP
+      // top-level field is byte-identical to the on-disk record. P64
+      // producer/consumer seam — both surfaces carry the same warning set.
+      if (generatedDocs) {
+        storyEvalSpecGenWarnings = generatedDocs.warnings;
       }
     }
 

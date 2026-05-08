@@ -49,7 +49,7 @@ vi.mock("../lib/spec-generator.js", () => ({
 }));
 
 vi.mock("../lib/adr-extractor.js", () => ({
-  processStory: vi.fn(() => ({ newAdrPaths: [], appendedNoDecisionsRow: false, indexPath: "" })),
+  processStory: vi.fn(() => ({ newAdrPaths: [], appendedNoDecisionsRow: false, indexPath: "", canonicalized: [] })),
 }));
 
 vi.mock("../lib/run-context.js", async () => {

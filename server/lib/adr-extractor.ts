@@ -133,6 +133,19 @@ export interface AdrExtractorResult {
   appendedNoDecisionsRow: boolean;
   /** Absolute path to the regenerated INDEX.md. */
   indexPath: string;
+  /**
+   * v0.40.x I1 — per-stub canonicalization triples surfaced to the
+   * MCP response so the calling agent can stage + commit the canonical
+   * ADR file as a follow-up without `git status`-discovering the path.
+   *
+   * - `from`: absolute path to the staging stub that was consumed.
+   * - `to`: absolute path to the canonicalized `docs/decisions/ADR-NNNN-*.md`.
+   * - `adrId`: the canonical `"ADR-NNNN"` identifier.
+   *
+   * Empty array when the call produced zero new ADRs (no staging stubs OR
+   * stubs already canonicalized in a prior call).
+   */
+  canonicalized: Array<{ from: string; to: string; adrId: string }>;
 }
 
 interface StubFrontMatter {
@@ -552,6 +565,7 @@ export function processStory(input: AdrExtractorInput): AdrExtractorResult {
   }
 
   const newAdrPaths: string[] = [];
+  const canonicalized: Array<{ from: string; to: string; adrId: string }> = [];
   if (stagingStubs.length > 0) {
     let nextNum = nextAdrNumber(decisionsDir);
     for (const stub of stagingStubs) {
@@ -562,6 +576,15 @@ export function processStory(input: AdrExtractorInput): AdrExtractorResult {
       const rendered = renderAdrFile({ adr, storyId, date: today, fm: stub.fm });
       writeFileSync(outPath, rendered, "utf-8");
       newAdrPaths.push(outPath);
+      // v0.40.x I1 — capture the (from → to) triple before the staging dir
+      // is removed below. `from` is the staging stub that was just consumed;
+      // `to` mirrors the canonical destination newAdrPaths got; `adrId` is
+      // the four-digit ADR-NNNN identifier (matches INDEX.md's first column).
+      canonicalized.push({
+        from: join(stagingDir, stub.filename),
+        to: outPath,
+        adrId: `ADR-${pad4(adr)}`,
+      });
     }
     // Delete staging files + the per-story dir. Leaves the parent
     // `.forge/staging/adr/` in place for other concurrent stories.
@@ -603,6 +626,7 @@ export function processStory(input: AdrExtractorInput): AdrExtractorResult {
     newAdrPaths,
     appendedNoDecisionsRow,
     indexPath,
+    canonicalized,
   };
 }
 

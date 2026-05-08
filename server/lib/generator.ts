@@ -55,7 +55,13 @@ export const ADR_CAPTURE_INSTRUCTIONS =
   "write a stub at `.forge/staging/adr/<storyId>/<short-slug>.md` with front-matter " +
   "{title, story, context, decision, consequences, alternatives}. " +
   "forge-harness's adr-extractor will canonicalize them on PASS. " +
-  "If you made no qualifying decisions, write nothing — that is a valid outcome.";
+  "If you made no qualifying decisions, write nothing — that is a valid outcome.\n\n" +
+  "If you wrote a staging ADR, the forge_evaluate PASS path canonicalizes it into " +
+  "`docs/decisions/ADR-NNNN-*.md` and deletes the staging stub. The canonical path is " +
+  "returned on the MCP response in the top-level `adrCanonicalized` field — an array of " +
+  "`{from, to, adrId}` triples, one per ADR created. Read that field after PASS, then " +
+  "stage the new ADR file(s) and commit them as a follow-up commit (the canonicalization " +
+  "happens AFTER your story's commit, so the new ADR is initially untracked).";
 
 export function buildAdrCapture(): AdrCaptureGuidance {
   return {

@@ -55,6 +55,7 @@ vi.mock("../lib/adr-extractor.js", () => ({
     newAdrPaths: [],
     appendedNoDecisionsRow: false,
     indexPath: `${input.projectPath}/docs/decisions/INDEX.md`,
+    canonicalized: [],
   })),
 }));
 
@@ -508,6 +509,114 @@ describe("handleStoryEval — v0.36.0 Phase B spec-generator integration", () =>
 
     // P64 — the MCP top-level surface MUST carry the same warnings.
     expect(result.specGenWarnings).toEqual(record.generatedDocs!.warnings);
+  });
+});
+
+// ── v0.40.x I1: surface canonicalized ADR triples on response ──
+
+import { processStory as processAdrStoryMock } from "../lib/adr-extractor.js";
+const mockedProcessAdrStory = vi.mocked(processAdrStoryMock);
+
+describe("handleStoryEval — v0.40.x I1 adrCanonicalized response field", () => {
+  it("populates `adrCanonicalized` on story-mode PASS when adr-extractor returned canonicalized triples", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    mockedProcessAdrStory.mockReturnValueOnce({
+      newAdrPaths: ["/some/path/docs/decisions/ADR-0007-some-slug-US-01.md"],
+      appendedNoDecisionsRow: false,
+      indexPath: "/some/path/docs/decisions/INDEX.md",
+      canonicalized: [
+        {
+          from: "/some/path/.forge/staging/adr/US-01/some-slug.md",
+          to: "/some/path/docs/decisions/ADR-0007-some-slug-US-01.md",
+          adrId: "ADR-0007",
+        },
+      ],
+    });
+
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.adrCanonicalized).toBeDefined();
+    expect(result.adrCanonicalized).toHaveLength(1);
+    expect(result.adrCanonicalized![0]).toEqual({
+      from: "/some/path/.forge/staging/adr/US-01/some-slug.md",
+      to: "/some/path/docs/decisions/ADR-0007-some-slug-US-01.md",
+      adrId: "ADR-0007",
+    });
+  });
+
+  it("populates `adrCanonicalized` as an empty array on story-mode PASS when no staging stubs existed", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    // Default mock returns canonicalized: [] — the no-staging-stubs case.
+
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.adrCanonicalized).toBeDefined();
+    expect(result.adrCanonicalized).toEqual([]);
+  });
+
+  it("omits `adrCanonicalized` on story-mode FAIL (adr-extractor not invoked)", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(
+      makeEvalReport({
+        verdict: "FAIL",
+        criteria: [{ id: "AC-01", status: "FAIL", evidence: "broken" }],
+      }),
+    );
+
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.adrCanonicalized).toBeUndefined();
+    // Sanity — adr-extractor should NOT have been called on a FAIL verdict.
+    expect(mockedProcessAdrStory).not.toHaveBeenCalled();
+  });
+
+  it("omits `adrCanonicalized` on coherence-mode responses (scope guard — story-mode-only)", async () => {
+    mockedCallClaude.mockResolvedValueOnce(
+      makeCallResult({ gaps: [], summary: "All aligned." }),
+    );
+
+    const result = await handleEvaluate({
+      evaluationMode: "coherence",
+      prdContent: "Build a thing",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.adrCanonicalized).toBeUndefined();
+  });
+
+  it("omits `adrCanonicalized` on divergence-mode responses (scope guard — story-mode-only)", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(
+      makeEvalReport({
+        verdict: "PASS",
+        criteria: [{ id: "AC-01", status: "PASS", evidence: "ok" }],
+      }),
+    );
+    mockedCallClaude.mockResolvedValueOnce(
+      makeCallResult({ reverse: [], summary: "No reverse divergences." }),
+    );
+
+    const result = await handleEvaluate({
+      evaluationMode: "divergence",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.adrCanonicalized).toBeUndefined();
   });
 });
 

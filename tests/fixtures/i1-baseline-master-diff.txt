@@ -1,0 +1,77 @@
+## I1+I4 Baseline against master (bfd68f7)
+
+Per P17 / Plan AC-2: capture exit code AND failure reason for each new test
+on master BEFORE the I1+I4 fix lands. Demonstrates the tests are
+delta-class — they fail on master, pass on the I1+I4 branch.
+
+Master baseline ref: `bfd68f7` (post-F4 merge — `fix(evaluate): un-swallow
+spec-gen failures and gate PASS-incomplete records (F4) (#537)`)
+
+Baseline run command: `npx vitest run server/tools/evaluate.test.ts -t "I1 adrCanonicalized"`
+Baseline exit code: 1 (test failures)
+
+────────────────────────────────────────────────────────────────────────────
+I1 — `handleStoryEval — v0.40.x I1 adrCanonicalized response field` (5 tests)
+────────────────────────────────────────────────────────────────────────────
+
+PASS on master (3 tests — sanity guards that hold pre-fix because they
+assert ABSENCE):
+  - omits `adrCanonicalized` on story-mode FAIL (adr-extractor not invoked)
+  - omits `adrCanonicalized` on coherence-mode responses (scope guard — story-mode-only)
+  - omits `adrCanonicalized` on divergence-mode responses (scope guard — story-mode-only)
+
+FAIL on master (2 tests — assert PRESENCE of the new field that doesn't yet exist):
+
+  1. populates `adrCanonicalized` on story-mode PASS when adr-extractor returned canonicalized triples
+     AssertionError: expected undefined to be defined
+       at server/tools/evaluate.test.ts:543:37
+       expect(result.adrCanonicalized).toBeDefined();
+
+  2. populates `adrCanonicalized` as an empty array on story-mode PASS when no staging stubs existed
+     AssertionError: expected undefined to be defined
+       at server/tools/evaluate.test.ts:563:37
+       expect(result.adrCanonicalized).toBeDefined();
+
+Master test totals: 2 failed | 3 passed | 47 skipped (52)
+
+────────────────────────────────────────────────────────────────────────────
+I4 — `ADR_CAPTURE_INSTRUCTIONS — v0.40.x I4 post-PASS canonicalization paragraph` (4 tests)
+────────────────────────────────────────────────────────────────────────────
+
+Baseline run command: `npx vitest run server/lib/generator.test.ts -t "I4 post-PASS canonicalization"`
+Baseline exit code: 1 (test failures)
+
+PASS on master (1 test — pre-existing four-field paragraph still byte-identically present):
+  - preserves the original four-field staging-stub instructions byte-identically before the new paragraph
+
+FAIL on master (3 tests — assert PRESENCE of the new instruction text):
+
+  1. references the I1 `adrCanonicalized` response field by name
+     AssertionError: expected '<orig-text>' to contain 'adrCanonicalized'
+       at server/lib/generator.test.ts:1059:38
+
+  2. instructs the calling agent to commit the canonical ADR as a follow-up
+     AssertionError: expected '<orig-text>' to match /follow-?up commit/i
+       at server/lib/generator.test.ts:1065:38
+
+  3. buildAdrCapture() forwards the updated instructions to the brief consumer
+     AssertionError: expected '<orig-text>' to contain 'adrCanonicalized'
+       at server/lib/generator.test.ts:1083:35
+
+Master test totals: 3 failed | 1 passed | 72 skipped (76)
+
+────────────────────────────────────────────────────────────────────────────
+Provenance
+────────────────────────────────────────────────────────────────────────────
+
+Captured 2026-05-08 by I1+I4 implementer subagent. Reproduce by:
+
+  git worktree add /tmp/i1-baseline bfd68f7
+  cp server/tools/evaluate.test.ts /tmp/i1-baseline/server/tools/
+  cp server/lib/generator.test.ts /tmp/i1-baseline/server/lib/
+  cd /tmp/i1-baseline && ln -s ../forge-harness/node_modules node_modules
+  npx vitest run server/tools/evaluate.test.ts -t "I1 adrCanonicalized"
+  npx vitest run server/lib/generator.test.ts -t "I4 post-PASS canonicalization"
+
+Both runs exit 1 with the failures above. After I1+I4 lands on the feature
+branch, both runs exit 0 — see AC-6 vitest-full output in the PR body.

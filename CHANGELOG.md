@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.40.5](https://github.com/ziyilam3999/forge-harness/compare/v0.40.4...v0.40.5) (2026-05-08)
+
+### Bug Fixes
+
+- **anthropic:** read OAuth credentials from macOS Keychain when `~/.claude/.credentials.json` is absent (F6). I8 (v0.40.4) assumed the credentials file is the universal contract; on macOS Claude Code stores OAuth in Keychain, so every macOS Claude Max user got false-no-creds and fell through to the I6 placeholder-body path even when properly logged in. F6 adds a platform-conditional fallback inside `readOAuthToken()`: when the file read fails AND `process.platform === "darwin"`, shell out to the built-in `/usr/bin/security find-generic-password -s "Claude Code-credentials" -a $USER -w` and parse the JSON-encoded blob with the same `claudeAiOauth.{accessToken,expiresAt}` shape as the file. Native macOS toolchain, zero npm deps; Linux/Windows behavior unchanged. Adds new `spec-gen-creds-keychain-only` typed warning on `SpecGeneratorWarning` (P50 additive variant) emitted from `spec-generator.ts` when `shellOnly && darwin && Keychain entry exists` so the operator gets actionable advice ("set ANTHROPIC_API_KEY to bypass") rather than the misleading "log in to Claude Code" copy. `KEYCHAIN_SERVICE_NAME` exported from `anthropic.ts` and imported into `spec-generator.ts` so the service-name string lives at one source-of-truth (F49 mitigation). Found by macbook-monday during v0.40.4 dogfood (audit thread `forge-harness-audit-us-11`). Plan: `.ai-workspace/plans/2026-05-08-f6-i8-macos-keychain.md`. 4 reviewer rounds applied (P1 stateless, P2 comparative, P3 cairn-grounded, P4 mechanical-sweep), 4-0 ship-it. Tests: +8 cases on `anthropic.test.ts` (1052 → 1060) covering darwin happy path, throw, ETIMEDOUT, empty string, malformed JSON, non-darwin skip, getCredentialSource, and the KEYCHAIN_SERVICE_NAME export contract.
+
 ## [0.40.4](https://github.com/ziyilam3999/forge-harness/compare/v0.40.3...v0.40.4) (2026-05-08)
 
 ### Bug Fixes

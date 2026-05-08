@@ -21,9 +21,11 @@
 
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { userInfo } from "node:os";
 import { dirname, resolve } from "node:path";
 import { idempotentWrite } from "./idempotent-write.js";
 import type { EvalReport } from "../types/eval-report.js";
+import { KEYCHAIN_SERVICE_NAME } from "./anthropic.js";
 import { RunContext, trackedCallClaude } from "./run-context.js";
 import {
   buildSourceVocabulary,
@@ -685,6 +687,50 @@ export async function generateSpecForStory(
   // shell-only marker still belongs in the array — both signals are true).
   if (shellOnly) {
     warnings.push({ kind: "spec-gen-shell-only", message: shellOnlyMessage });
+
+    // F6 (v0.40.5) — macOS-only diagnostic. When the run fell through to
+    // shell-only on darwin, do a cheap exit-code-only probe of macOS
+    // Keychain to distinguish "no creds at all" from "creds exist in
+    // Keychain but forge can't read them" (locked, prompt-timeout, ACL
+    // mismatch). The latter case gets a typed `spec-gen-creds-keychain-only`
+    // warning telling the operator to set ANTHROPIC_API_KEY to bypass
+    // (rather than the misleading "log in to Claude Code" advice — they
+    // already are).
+    //
+    // Single-locus per F49: KEYCHAIN_SERVICE_NAME is imported from
+    // anthropic.ts (the OAuth read locus) so the service-name string lives
+    // at one source-of-truth.
+    //
+    // F45 escape: if the existence-probe ITSELF throws unexpectedly (not
+    // just non-zero exit — e.g. /usr/bin/security missing on a stripped-down
+    // macOS install), fall through to emitting only `spec-gen-shell-only`.
+    // Loud failure preserved via the existing shell-only warning.
+    if (process.platform === "darwin") {
+      let keychainEntryExists = false;
+      try {
+        execFileSync(
+          "/usr/bin/security",
+          ["find-generic-password", "-s", KEYCHAIN_SERVICE_NAME, "-a", userInfo().username],
+          { stdio: "ignore", timeout: 1000 },
+        );
+        // Exit 0 → entry exists. Our reader couldn't get a usable token
+        // from it (else we wouldn't be in shellOnly), so creds are
+        // present-but-unreadable.
+        keychainEntryExists = true;
+      } catch {
+        // Non-zero exit OR probe itself threw → entry truly missing or
+        // unprobable. Emit only spec-gen-shell-only (existing behavior).
+      }
+      if (keychainEntryExists) {
+        warnings.push({
+          kind: "spec-gen-creds-keychain-only",
+          message:
+            `macOS Keychain entry exists for "${KEYCHAIN_SERVICE_NAME}" but forge-harness ` +
+            `could not read it (locked, prompt-timeout, or ACL mismatch). ` +
+            `Set ANTHROPIC_API_KEY to bypass.`,
+        });
+      }
+    }
   }
 
   // Merge into front-matter `stories[]` by id.

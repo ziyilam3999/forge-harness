@@ -39,6 +39,16 @@ vi.mock("node:fs", () => ({
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
 }));
 
+// F6 (v0.40.5) — macOS Keychain fallback inside readOAuthToken() shells out
+// to `/usr/bin/security` via `execFileSync`. Hoist a child_process mock so
+// AC-D's seven new cases can stub it per-case (happy blob, throw, ETIMEDOUT,
+// empty string, malformed JSON). Default: throws ENOENT — i.e. on non-darwin
+// platforms or hosts without /usr/bin/security, the helper sees nothing.
+const mockExecFileSync = vi.fn();
+vi.mock("node:child_process", () => ({
+  execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
+}));
+
 /** Build a stream-handle stub whose `finalMessage()` resolves to `message`. */
 function streamHandle(message: {
   content: Array<{ type: "text"; text: string }>;
@@ -66,6 +76,13 @@ beforeEach(async () => {
     const err = new Error("ENOENT") as NodeJS.ErrnoException;
     err.code = "ENOENT";
     throw err;
+  });
+  // Default: Keychain probe throws (entry missing / non-darwin / no
+  // /usr/bin/security). Tests that exercise the Keychain fallback override
+  // per-case with `mockExecFileSync.mockImplementationOnce(...)`.
+  mockExecFileSync.mockReset();
+  mockExecFileSync.mockImplementation(() => {
+    throw new Error("security: SecKeychainSearchCopyNext: The specified item could not be found");
   });
 });
 
@@ -429,5 +446,169 @@ describe("I8 — callClaude skips retry when ANTHROPIC_API_KEY is set (AC-G prob
 
     // No retry — file re-read can't help the API-key path.
     expect(mockStream).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── F6 (v0.40.5) — macOS Keychain fallback in readOAuthToken() ──────────
+//
+// Plan: .ai-workspace/plans/2026-05-08-f6-i8-macos-keychain.md (AC-D).
+//
+// I8 (v0.40.4) assumed `~/.claude/.credentials.json` is the universal
+// contract; on macOS Claude Code stores OAuth in Keychain. F6 adds a
+// platform-conditional fallback: when the file read fails AND
+// `process.platform === "darwin"`, shell out to `/usr/bin/security
+// find-generic-password -s "Claude Code-credentials" -a $USER -w` and
+// parse its stdout the same way the file would have been parsed.
+//
+// Tests use `Object.defineProperty(process, "platform", {...})` because
+// direct assignment to `process.platform` is silently ignored on Node 20+
+// (the property is read-only). Each test snapshots the original value in
+// the inner block and restores it via `afterEach`.
+describe("F6 — readOAuthToken() falls back to macOS Keychain on darwin (AC-D)", () => {
+  const ORIGINAL_PLATFORM = process.platform;
+
+  afterEach(() => {
+    Object.defineProperty(process, "platform", {
+      value: ORIGINAL_PLATFORM,
+      configurable: true,
+    });
+  });
+
+  function setPlatform(platform: NodeJS.Platform): void {
+    Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  }
+
+  /** Helper: build the JSON-encoded blob `security … -w` would print. */
+  function keychainBlob(accessToken: string, expiresAt: number): string {
+    return JSON.stringify({ claudeAiOauth: { accessToken, expiresAt } });
+  }
+
+  it("(i) darwin + Keychain returns valid JSON blob → getClient() uses the parsed token", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    setPlatform("darwin");
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    // File read fails (file absent on macOS). Keychain returns a valid blob.
+    mockExecFileSync.mockImplementationOnce(() =>
+      keychainBlob("oauth-from-keychain", Date.now() + 60 * 60 * 1000),
+    );
+
+    const { getClient } = await import("./anthropic.js");
+    const client = getClient();
+    expect(client).toBeDefined();
+    expect(client).toBeInstanceOf(MockAnthropic);
+    // Producer-side assertion: the security shell-out happened.
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+    const callArgs = mockExecFileSync.mock.calls[0];
+    expect(callArgs[0]).toBe("/usr/bin/security");
+    expect(callArgs[1]).toContain("find-generic-password");
+    expect(callArgs[1]).toContain("Claude Code-credentials");
+    expect(callArgs[1]).toContain("-w");
+  });
+
+  it("(ii) darwin + Keychain execFileSync throws → readOAuthToken returns null (no crash)", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    setPlatform("darwin");
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    mockExecFileSync.mockImplementationOnce(() => {
+      throw new Error("security: SecKeychainSearchCopyNext: not found");
+    });
+
+    const { getClient } = await import("./anthropic.js");
+    expect(() => getClient()).toThrow(/No API credentials found/);
+    // Probe was attempted (consumer-side assertion).
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("(iii) linux/win32 platform → no security invocation observed", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    setPlatform("linux");
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    // File read fails (default ENOENT). On linux we MUST NOT shell out.
+    const { getClient } = await import("./anthropic.js");
+    expect(() => getClient()).toThrow(/No API credentials found/);
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+
+    // Re-check on win32 for completeness.
+    setPlatform("win32");
+    resetClient();
+    expect(() => getClient()).toThrow(/No API credentials found/);
+    expect(mockExecFileSync).not.toHaveBeenCalled();
+  });
+
+  it("(iv) darwin + Keychain returns malformed JSON → null, no crash", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    setPlatform("darwin");
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    // Garbage that is NOT valid JSON.
+    mockExecFileSync.mockImplementationOnce(() => "not-json-at-all-{{{");
+
+    const { getClient } = await import("./anthropic.js");
+    expect(() => getClient()).toThrow(/No API credentials found/);
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("(v) darwin + execFileSync throws ETIMEDOUT → null, no crash", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    setPlatform("darwin");
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    mockExecFileSync.mockImplementationOnce(() => {
+      const err = new Error("Command timed out") as NodeJS.ErrnoException;
+      err.code = "ETIMEDOUT";
+      throw err;
+    });
+
+    const { getClient } = await import("./anthropic.js");
+    expect(() => getClient()).toThrow(/No API credentials found/);
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("(vi) darwin + Keychain returns empty string → null, no crash", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    setPlatform("darwin");
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    // Empty / whitespace-only stdout (locked-but-listed Keychain edge case).
+    mockExecFileSync.mockImplementationOnce(() => "   \n");
+
+    const { getClient } = await import("./anthropic.js");
+    expect(() => getClient()).toThrow(/No API credentials found/);
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("(vii) darwin + Keychain returns valid blob → getCredentialSource() returns 'oauth' (BUDGET marker)", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    setPlatform("darwin");
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    mockExecFileSync.mockImplementationOnce(() =>
+      keychainBlob("oauth-via-keychain", Date.now() + 60 * 60 * 1000),
+    );
+
+    const { getCredentialSource } = await import("./anthropic.js");
+    expect(getCredentialSource()).toBe("oauth");
+  });
+});
+
+// ── F6 — KEYCHAIN_SERVICE_NAME is exported from anthropic.ts ────────────
+//
+// F49 mitigation: spec-generator.ts imports the same constant for its
+// existence-check probe so the service-name string lives at one
+// source-of-truth. Test pins the export.
+describe("F6 — KEYCHAIN_SERVICE_NAME export contract (F49 mitigation)", () => {
+  it("exports the canonical Keychain service name as a string constant", async () => {
+    const mod = await import("./anthropic.js");
+    expect(mod.KEYCHAIN_SERVICE_NAME).toBe("Claude Code-credentials");
   });
 });

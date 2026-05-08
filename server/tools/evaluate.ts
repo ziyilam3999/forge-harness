@@ -5,6 +5,7 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { resolveWindowsBashPath } from "../lib/executor.js";
+import { notifyForgeStateWrite } from "../lib/dashboard-render-loop.js";
 
 /**
  * Compute a deterministic `reverseFindings[].id` from its identifying fields.
@@ -989,6 +990,13 @@ async function handleCriticEval(input: EvaluateInput): Promise<McpResponse> {
 
 export async function handleEvaluate(input: EvaluateInput): Promise<McpResponse> {
   const mode = input.evaluationMode ?? "story";
+
+  // v0.40.2 — wake the dashboard render loop on tool entry. Idempotent:
+  // if the loop is already running for this projectPath this is a no-op.
+  // Uses input.projectPath when provided; otherwise falls back to the
+  // boot-registered default. See `dashboard-render-loop.ts` for the gate
+  // contract and AC-6 for the call-expression invariant.
+  notifyForgeStateWrite(input.projectPath);
 
   try {
     switch (mode) {

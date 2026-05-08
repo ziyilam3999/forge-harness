@@ -24,6 +24,7 @@ import { RunContext, trackedCallClaude } from "../lib/run-context.js";
 import type { ExecutionPlan } from "../types/execution-plan.js";
 import type { MasterPlan } from "../types/master-plan.js";
 import { validateAffectedPaths } from "../lib/affected-paths-validator.js";
+import { notifyForgeStateWrite } from "../lib/dashboard-render-loop.js";
 
 /**
  * Regex patterns that indicate an AC inspects source code rather than
@@ -1318,6 +1319,13 @@ function runAcLintGate(
  * Routes to tier-specific handlers based on documentTier, or falls through to default.
  */
 export async function handlePlan(options: HandlePlanOptions) {
+  // v0.40.2 — wake the dashboard render loop on tool entry. Idempotent:
+  // if the loop is already running for this projectPath this is a no-op.
+  // Uses options.projectPath when provided; otherwise falls back to the
+  // boot-registered default. See `dashboard-render-loop.ts` for the gate
+  // contract and AC-6 for the call-expression invariant.
+  notifyForgeStateWrite(options.projectPath);
+
   switch (options.documentTier) {
     case "master":
       return handleMasterPlan(options);

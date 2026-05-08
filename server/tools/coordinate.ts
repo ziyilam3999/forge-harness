@@ -5,6 +5,7 @@ import type { ReplanningNote } from "../types/coordinate-result.js";
 import { assessPhase, loadCoordinateConfig, type AssessPhaseOptions } from "../lib/coordinator.js";
 import { validateExecutionPlan } from "../validation/execution-plan.js";
 import { writeRunRecord, type RunRecord } from "../lib/run-record.js";
+import { notifyForgeStateWrite } from "../lib/dashboard-render-loop.js";
 
 // ── Zod schema for MCP input (REQ-14) ──────────────────────
 
@@ -58,6 +59,13 @@ type McpResponse = {
 
 export async function handleCoordinate(input: CoordinateInput): Promise<McpResponse> {
   const startTime = Date.now();
+
+  // v0.40.2 — wake the dashboard render loop on tool entry. Idempotent:
+  // if the loop is already running for this projectPath this is a no-op.
+  // Uses input.projectPath when provided; otherwise falls back to the
+  // boot-registered default. See `dashboard-render-loop.ts` for the gate
+  // contract and AC-6 for the call-expression invariant.
+  notifyForgeStateWrite(input.projectPath);
 
   // Validate numeric constraints (Zod handles at MCP boundary;
   // double-check here for direct callers)

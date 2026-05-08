@@ -141,18 +141,38 @@ async function main() {
   await server.connect(transport);
   console.error("forge: MCP server running on stdio");
 
-  // v0.39.0 G1/AC-1/AC-2 — start the periodic dashboard re-render loop.
-  // Anchors on `process.cwd()` because the MCP server is launched from
-  // the project root by every consumer (monday-bot, forge-harness's own
-  // dogfood, etc.); this matches what `progress.ts` and `run-record.ts`
-  // already pass to `renderDashboard()` via their own RunContext.
+  // v0.39.0 G1/AC-1/AC-2 — periodic dashboard re-render loop.
+  // v0.40.2 — gated on real forge state. Prior to v0.40.2 the loop was
+  // started unconditionally on `process.cwd()`, which leaked
+  // `<cwd>/.forge/dashboard.html` into any directory Claude was launched
+  // from (e.g. `~`). The gate now requires either (1) state on disk at
+  // boot OR (2) a state-writing tool call mid-session. Both signals
+  // funnel through `notifyForgeStateWrite()` — single-locus per F66.
+  //
   // Failure to start the loop is non-fatal — the dashboard simply falls
   // back to its pre-v0.39.0 event-driven cadence.
   try {
-    dashboardRenderLoop.start(process.cwd());
+    const cwd = process.cwd();
+    // Register cwd as the default for tool handlers that lack projectPath
+    // (notably `forge_declare_story`, which writes to an in-memory store).
+    dashboardRenderLoop.registerDefaultProjectPath(cwd);
+    if (await dashboardRenderLoop.hasForgeStateOnDisk(cwd)) {
+      // Boot-time wake: cwd already has forge state on disk, so this is
+      // an active forge project. Funnel through the same wake symbol used
+      // by tool handlers so the call site is uniform.
+      dashboardRenderLoop.notifyForgeStateWrite(cwd);
+    } else {
+      // No state at boot. Arm a low-frequency disk watcher that flips
+      // the loop on if state appears later (e.g., another process drops
+      // `.forge/runs/*.json`). The watcher self-disarms when it wakes
+      // the main loop. AC-3a coverage.
+      dashboardRenderLoop.armDormantDiskWatcher(cwd);
+    }
+    // The loop also wakes on any state-writing tool call (each handler
+    // calls `notifyForgeStateWrite()` exactly once — see AC-6).
   } catch (err) {
     console.error(
-      "forge: failed to start dashboard render loop (continuing):",
+      "forge: failed to evaluate dashboard render loop gate (continuing):",
       err instanceof Error ? err.message : String(err),
     );
   }

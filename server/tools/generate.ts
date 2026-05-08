@@ -8,6 +8,7 @@ import {
 import type { EvalReport } from "../types/eval-report.js";
 import { writeActivity } from "../lib/activity.js";
 import { writeRunRecord, type RunRecord } from "../lib/run-record.js";
+import { notifyForgeStateWrite } from "../lib/dashboard-render-loop.js";
 
 // v0.36.0 Phase C (AC-C5): re-export the ADR capture contract so the tool
 // surface is the single import point for clients that want to inspect the
@@ -187,6 +188,12 @@ export async function handleGenerate(input: GenerateInput) {
   const startedAtIso = new Date().toISOString();
   const startedAtMs = Date.now();
   const projectPath = input.projectPath;
+
+  // v0.40.2 — wake the dashboard render loop on tool entry. Idempotent:
+  // if the loop is already running for this projectPath this is a no-op.
+  // See `dashboard-render-loop.ts` for the gate contract and AC-6 for
+  // the call-expression invariant.
+  notifyForgeStateWrite(projectPath);
 
   if (projectPath) {
     await writeActivity(projectPath, {

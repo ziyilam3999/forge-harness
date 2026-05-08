@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-05-08T00:00:00.000Z",
+  "tool": "forge_evaluate",
+  "documentTier": null,
+  "mode": null,
+  "tier": null,
+  "storyId": "US-AC2",
+  "evalVerdict": "PASS",
+  "verdict": "PASS",
+  "metrics": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "critiqueRounds": 0,
+    "findingsTotal": 0,
+    "findingsApplied": 0,
+    "findingsRejected": 0,
+    "validationRetries": 0,
+    "durationMs": 1234,
+    "estimatedCostUsd": 0
+  },
+  "outcome": "success"
+}

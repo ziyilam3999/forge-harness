@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { setDeclaration } from "../lib/declaration-store.js";
+import { notifyForgeStateWrite } from "../lib/dashboard-render-loop.js";
 
 // ── Zod schema for MCP input ────────────────────────────────
 
@@ -76,6 +77,13 @@ export async function handleDeclareStory(input: DeclareStoryInput): Promise<McpR
   }
 
   const declaration = setDeclaration(input.storyId, input.phaseId ?? null);
+
+  // v0.40.2 — wake the dashboard render loop. `forge_declare_story` writes
+  // to an in-memory store (not disk), so the loop's disk-state probe will
+  // never see a declaration. Wake directly using the boot-registered
+  // default project path. See `dashboard-render-loop.ts` for the gate
+  // contract and AC-6 for the call-expression invariant.
+  notifyForgeStateWrite();
 
   const body = {
     kind: "declared" as const,

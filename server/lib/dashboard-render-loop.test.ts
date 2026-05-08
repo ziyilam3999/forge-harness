@@ -29,6 +29,9 @@ import {
   DEFAULT_INTERVAL_MS,
   MIN_PRODUCTION_INTERVAL_MS,
   MAX_PRODUCTION_INTERVAL_MS,
+  hasForgeStateOnDisk,
+  registerDefaultProjectPath,
+  notifyForgeStateWrite,
 } from "./dashboard-render-loop.js";
 
 describe("dashboard-render-loop — production-range gate", () => {
@@ -263,5 +266,110 @@ describe("overlap guard — second tick skipped when prior render still in fligh
     expect(counters.skipped).toBeGreaterThanOrEqual(0);
     // Sum is bounded by 500ms / 50ms = ~10 scheduled invocations + 1.
     expect(counters.ticks + counters.skipped).toBeLessThanOrEqual(15);
+  });
+});
+
+describe("v0.40.2 gate — hasForgeStateOnDisk()", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "forge-gate-disk-"));
+    await __resetForTests();
+  });
+
+  afterEach(async () => {
+    await __resetForTests();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns false when .forge/ does not exist", async () => {
+    expect(await hasForgeStateOnDisk(tempDir)).toBe(false);
+  });
+
+  it("returns false when .forge/ contains only dashboard.html (leaky-leftover)", async () => {
+    await mkdir(join(tempDir, ".forge"), { recursive: true });
+    await writeFile(join(tempDir, ".forge", "dashboard.html"), "<html>stale</html>");
+    expect(await hasForgeStateOnDisk(tempDir)).toBe(false);
+  });
+
+  it("returns false when .forge/ contains only .dashboard-opened (leaky-leftover)", async () => {
+    await mkdir(join(tempDir, ".forge"), { recursive: true });
+    await writeFile(join(tempDir, ".forge", ".dashboard-opened"), "x");
+    expect(await hasForgeStateOnDisk(tempDir)).toBe(false);
+  });
+
+  it("returns false when .forge/runs/ exists but is empty", async () => {
+    await mkdir(join(tempDir, ".forge", "runs"), { recursive: true });
+    expect(await hasForgeStateOnDisk(tempDir)).toBe(false);
+  });
+
+  it("returns false when .forge/audit/ exists but is empty", async () => {
+    await mkdir(join(tempDir, ".forge", "audit"), { recursive: true });
+    expect(await hasForgeStateOnDisk(tempDir)).toBe(false);
+  });
+
+  it("returns true when .forge/runs/*.json exists", async () => {
+    await mkdir(join(tempDir, ".forge", "runs"), { recursive: true });
+    await writeFile(join(tempDir, ".forge", "runs", "x.json"), "{}");
+    expect(await hasForgeStateOnDisk(tempDir)).toBe(true);
+  });
+
+  it("returns true when .forge/audit/*.jsonl exists", async () => {
+    await mkdir(join(tempDir, ".forge", "audit"), { recursive: true });
+    await writeFile(join(tempDir, ".forge", "audit", "x.jsonl"), "{}\n");
+    expect(await hasForgeStateOnDisk(tempDir)).toBe(true);
+  });
+
+  it("returns true when .forge/coordinate-brief.json exists", async () => {
+    await mkdir(join(tempDir, ".forge"), { recursive: true });
+    await writeFile(join(tempDir, ".forge", "coordinate-brief.json"), "{}");
+    expect(await hasForgeStateOnDisk(tempDir)).toBe(true);
+  });
+
+  it("returns true when .forge/activity.json exists", async () => {
+    await mkdir(join(tempDir, ".forge"), { recursive: true });
+    await writeFile(join(tempDir, ".forge", "activity.json"), "{}");
+    expect(await hasForgeStateOnDisk(tempDir)).toBe(true);
+  });
+});
+
+describe("v0.40.2 gate — notifyForgeStateWrite()", () => {
+  beforeEach(async () => {
+    await __resetForTests();
+  });
+
+  afterEach(async () => {
+    await __resetForTests();
+  });
+
+  it("is a no-op when neither argument nor default project path is set", () => {
+    expect(() => notifyForgeStateWrite()).not.toThrow();
+    const counters = __getTickCountForTests();
+    expect(counters.running).toBe(false);
+  });
+
+  it("uses the registered default project path when called without arg", () => {
+    registerDefaultProjectPath("/tmp/forge-gate-default");
+    notifyForgeStateWrite();
+    const counters = __getTickCountForTests();
+    expect(counters.running).toBe(true);
+    void stop();
+  });
+
+  it("starts the loop when called with an explicit project path", () => {
+    notifyForgeStateWrite("/tmp/forge-gate-explicit");
+    const counters = __getTickCountForTests();
+    expect(counters.running).toBe(true);
+    void stop();
+  });
+
+  it("is idempotent — second call with same path is a no-op", () => {
+    notifyForgeStateWrite("/tmp/forge-gate-idempotent");
+    const c1 = __getTickCountForTests();
+    notifyForgeStateWrite("/tmp/forge-gate-idempotent");
+    const c2 = __getTickCountForTests();
+    expect(c1.running).toBe(true);
+    expect(c2.running).toBe(true);
+    void stop();
   });
 });

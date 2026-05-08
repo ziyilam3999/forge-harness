@@ -1,5 +1,6 @@
 /**
  * v0.39.0 G1/AC-1/AC-2 — periodic dashboard re-render loop.
+ * v0.40.2 — gated on real forge state.
  *
  * Why this module exists
  * ──────────────────────
@@ -17,6 +18,26 @@
  * alive. It does NOT fire concurrent renders (a guard skips the next tick
  * if the prior render is still in flight), and it stops cleanly when
  * `stop()` is invoked (graceful shutdown, test teardown).
+ *
+ * v0.40.2 gate
+ * ────────────
+ * Prior to v0.40.2 the loop was started unconditionally from `main()`,
+ * pinned to `process.cwd()`. That leaked `<cwd>/.forge/dashboard.html`
+ * into any directory Claude was launched from (e.g. `~`). The gate now
+ * requires the cwd to be an "active forge project" — at least one of:
+ *
+ *   1. State on disk at MCP server boot:
+ *      - `<cwd>/.forge/runs/` exists AND contains ≥1 `*.json`
+ *      - `<cwd>/.forge/audit/` exists AND contains ≥1 `*.jsonl`
+ *      - `<cwd>/.forge/coordinate-brief.json` exists
+ *      - `<cwd>/.forge/activity.json` exists
+ *   2. State created in this session: any state-writing forge tool
+ *      (`forge_plan`, `forge_generate`, `forge_evaluate`, `forge_coordinate`,
+ *      `forge_declare_story`) is invoked while the MCP server is alive.
+ *
+ * Both signals funnel through one idempotent symbol —
+ * `notifyForgeStateWrite()` — used by the boot probe AND by every
+ * state-writing tool handler. Single-locus per F66.
  *
  * Design choices
  * ──────────────
@@ -36,6 +57,8 @@
  *   long-lived stdio process; per-projectPath multiplexing is unneeded.
  */
 
+import { readdir, stat } from "node:fs/promises";
+import { resolve, join } from "node:path";
 import { renderDashboard } from "./dashboard-renderer.js";
 
 /**
@@ -61,6 +84,22 @@ interface LoopState {
   inFlight: Promise<void> | null;
   projectPath: string | null;
   /**
+   * Default project path registered at MCP server boot — used by
+   * `notifyForgeStateWrite()` when callers omit projectPath
+   * (e.g. `forge_declare_story`, which has no projectPath in its input).
+   * Captured by `registerDefaultProjectPath()`.
+   */
+  defaultProjectPath: string | null;
+  /**
+   * v0.40.2 — dormant-mode disk-state watcher. Low-frequency setInterval
+   * that polls `hasForgeStateOnDisk()` while the main render loop is
+   * dormant. When it observes state, it self-clears and wakes the main
+   * loop. Anchored to AC-3a (state-on-disk appearing AFTER boot must
+   * wake the loop autonomously, without a tool call). Set to null when
+   * not armed.
+   */
+  dormantWatcherTimer: ReturnType<typeof setInterval> | null;
+  /**
    * Tick counter — exposed for tests via `__getTickCountForTests`. Not
    * part of the public API.
    */
@@ -72,9 +111,20 @@ const state: LoopState = {
   timer: null,
   inFlight: null,
   projectPath: null,
+  defaultProjectPath: null,
+  dormantWatcherTimer: null,
   ticks: 0,
   skipped: 0,
 };
+
+/**
+ * v0.40.2 — dormant disk-state watcher poll cadence. Slower than the main
+ * render-loop tick (which is 30s) — every 5s while dormant is plenty,
+ * since the watcher only flips the gate from off to on; the main loop
+ * takes over once flipped. AC-3a's verification window is 35s, so 5s
+ * polling guarantees ≥6 chances to observe state appearing.
+ */
+export const DORMANT_WATCHER_INTERVAL_MS = 5_000;
 
 export interface StartOptions {
   /**
@@ -119,6 +169,9 @@ export function start(projectPath: string, options: StartOptions = {}): void {
   if (state.timer) {
     stop();
   }
+  // The dormant watcher is superseded by the main loop. Disarm
+  // unconditionally so we never run both timers simultaneously.
+  disarmDormantDiskWatcher();
 
   state.projectPath = projectPath;
   state.timer = setInterval(() => {
@@ -166,6 +219,7 @@ export async function stop(): Promise<void> {
     clearInterval(state.timer);
     state.timer = null;
   }
+  disarmDormantDiskWatcher();
   if (state.inFlight) {
     try {
       await state.inFlight;
@@ -174,6 +228,183 @@ export async function stop(): Promise<void> {
     }
   }
   state.projectPath = null;
+}
+
+/**
+ * v0.40.2 — register the project path used by `notifyForgeStateWrite()`
+ * when callers omit it (e.g., `forge_declare_story`, whose input does not
+ * carry projectPath). Called once from `main()` at MCP server boot,
+ * resolving `process.cwd()` to an absolute path (P51).
+ *
+ * Idempotent: calling with the same path is a no-op; calling with a
+ * different path overwrites. Does NOT start the loop — that is the
+ * caller's responsibility (boot probe + tool handlers).
+ */
+export function registerDefaultProjectPath(projectPath: string): void {
+  state.defaultProjectPath = resolve(projectPath);
+}
+
+/**
+ * v0.40.2 — disk-state probe used by the boot-time gate. Returns true
+ * iff `<projectPath>/.forge/` contains any of:
+ *   - `runs/` with ≥1 `*.json`
+ *   - `audit/` with ≥1 `*.jsonl`
+ *   - `coordinate-brief.json`
+ *   - `activity.json`
+ *
+ * Explicitly does NOT count as active:
+ *   - bare `.forge/` containing only `dashboard.html` and/or `.dashboard-opened`
+ *     (the leaky-leftover from the v0.40.1 bug — without this exclusion the
+ *     gate is sticky)
+ *   - empty `runs/` or `audit/` subdirectories
+ *
+ * All I/O failures (ENOENT on `.forge/`, permission errors, etc.) are
+ * treated as "not active" — the gate fails closed.
+ */
+export async function hasForgeStateOnDisk(projectPath: string): Promise<boolean> {
+  const forgeDir = join(resolve(projectPath), ".forge");
+
+  // Single-file markers: presence is sufficient.
+  for (const marker of ["coordinate-brief.json", "activity.json"]) {
+    try {
+      await stat(join(forgeDir, marker));
+      return true;
+    } catch {
+      // missing — try next marker
+    }
+  }
+
+  // runs/*.json — directory must exist AND contain at least one .json file.
+  if (await directoryHasFileMatching(join(forgeDir, "runs"), ".json")) {
+    return true;
+  }
+
+  // audit/*.jsonl — directory must exist AND contain at least one .jsonl file.
+  if (await directoryHasFileMatching(join(forgeDir, "audit"), ".jsonl")) {
+    return true;
+  }
+
+  return false;
+}
+
+async function directoryHasFileMatching(
+  dirPath: string,
+  extension: string,
+): Promise<boolean> {
+  try {
+    const entries = await readdir(dirPath);
+    return entries.some((name) => name.endsWith(extension));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * v0.40.2 — arm a low-frequency disk-state watcher while the main render
+ * loop is dormant. Every `DORMANT_WATCHER_INTERVAL_MS` (5s), checks
+ * `hasForgeStateOnDisk(projectPath)`; on the first true result it
+ * self-disarms and calls `notifyForgeStateWrite(projectPath)` to start
+ * the main loop.
+ *
+ * Why this is needed: AC-3a expects that disk-state appearing AFTER MCP
+ * server boot (e.g. another process drops `.forge/runs/*.json`) wakes
+ * the loop autonomously, without a tool call. The boot probe is a
+ * one-shot snapshot; the dormant watcher fills the gap between boot
+ * and the first tool call.
+ *
+ * Idempotent: arming twice with the same projectPath is a no-op. Arming
+ * with a different path re-targets. Disarmed automatically when the
+ * main loop starts.
+ */
+export function armDormantDiskWatcher(projectPath: string): void {
+  const target = resolve(projectPath);
+  if (state.timer) {
+    // Main loop is already running; no need to watch dormantly.
+    return;
+  }
+  if (state.dormantWatcherTimer && state.projectPath === target) {
+    return;
+  }
+  // Re-target if needed.
+  disarmDormantDiskWatcher();
+  state.projectPath = target;
+  state.dormantWatcherTimer = setInterval(() => {
+    void (async () => {
+      try {
+        if (await hasForgeStateOnDisk(target)) {
+          // State appeared. Promote to full loop AND fire an immediate
+          // render so consumers see the dashboard within the next watcher
+          // tick (not the next +30s main-loop tick). AC-3a's window is
+          // 35s after state appears; the main loop's first tick alone
+          // would race the deadline.
+          disarmDormantDiskWatcher();
+          notifyForgeStateWrite(target);
+          try {
+            await renderDashboard(target);
+          } catch (err) {
+            console.error(
+              "dashboard-render-loop: dormant→active render failed (continuing):",
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+        }
+      } catch {
+        // swallow — watcher must never crash the process
+      }
+    })();
+  }, DORMANT_WATCHER_INTERVAL_MS);
+  if (
+    typeof state.dormantWatcherTimer === "object" &&
+    state.dormantWatcherTimer &&
+    "unref" in state.dormantWatcherTimer
+  ) {
+    (state.dormantWatcherTimer as unknown as { unref: () => void }).unref();
+  }
+}
+
+function disarmDormantDiskWatcher(): void {
+  if (state.dormantWatcherTimer) {
+    clearInterval(state.dormantWatcherTimer);
+    state.dormantWatcherTimer = null;
+  }
+}
+
+/**
+ * v0.40.2 — single wake symbol called from the boot probe AND from every
+ * state-writing tool handler (`forge_plan`, `forge_generate`,
+ * `forge_evaluate`, `forge_coordinate`, `forge_declare_story`).
+ *
+ * Idempotent: if the loop is already running for the same projectPath,
+ * this is a no-op. If the loop is running for a different projectPath,
+ * it is re-targeted (start() with the new path — preserves the prior
+ * "loop alive" invariant). If the loop is not running, it is started.
+ *
+ * `projectPath` is optional. When omitted, falls back to the path
+ * registered at boot via `registerDefaultProjectPath()`. This is the
+ * path that `forge_declare_story` (which has no projectPath in input)
+ * uses to wake the loop — the declaration is process-scoped, not
+ * project-scoped, so the boot-time cwd is the only meaningful anchor.
+ *
+ * Returns silently when no projectPath is available (neither argument
+ * nor registered default). The loop simply stays dormant — no error
+ * is propagated to the caller.
+ */
+export function notifyForgeStateWrite(projectPath?: string): void {
+  const target = projectPath ? resolve(projectPath) : state.defaultProjectPath;
+  if (!target) return;
+  if (state.timer && state.projectPath === target) {
+    return; // already running for this path — nothing to do
+  }
+  // Disarm any dormant-mode disk watcher — the main loop supersedes it.
+  disarmDormantDiskWatcher();
+  try {
+    start(target);
+  } catch (err) {
+    console.error(
+      "dashboard-render-loop: notifyForgeStateWrite failed (continuing):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 /**
@@ -198,6 +429,8 @@ export function __getTickCountForTests(): {
  */
 export async function __resetForTests(): Promise<void> {
   await stop();
+  disarmDormantDiskWatcher();
   state.ticks = 0;
   state.skipped = 0;
+  state.defaultProjectPath = null;
 }

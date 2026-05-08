@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.40.2](https://github.com/ziyilam3999/forge-harness/compare/v0.40.1...v0.40.2) (2026-05-08)
+
+### Bug Fixes
+
+- **dashboard:** gate render loop on real forge state — empty cwd no longer leaks `.forge/dashboard.html`. Loop is dormant unless `<cwd>/.forge/{runs,audit,coordinate-brief.json,activity.json}` exists at boot OR a state-writing tool (`forge_plan`, `forge_generate`, `forge_evaluate`, `forge_coordinate`, `forge_declare_story`) fires mid-session. Auto-open suppressed in non-forge cwds. Bare `.forge/` containing only `dashboard.html` and/or `.dashboard-opened` does NOT count as active. Boot probe and tool handlers funnel through one idempotent `notifyForgeStateWrite()` symbol — single-locus enforcement (F66). (#528)
+- obs: log corrupt run-record timestamps in `readInProgressStoryIds` (#491) (#525)
+- adr-backfill-acceptance.sh: drop dead `mkdir -p tmp` line (#502) (#526)
+- parseCssDeclarations: quote-aware semicolon split (#520) (#527)
+- tighten extractCssRuleBody regex anchor (#519) (#523)
+
 ## [0.40.1](https://github.com/ziyilam3999/forge-harness/compare/v0.40.0...v0.40.1) (2026-05-01)
 
 ### Bug Fixes

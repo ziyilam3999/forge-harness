@@ -193,6 +193,13 @@ export interface RunRecord {
  *     spec-gen failed but the ADR extractor produced canonical paths
  *     downstream). Without this marker the consumer would see PASS + empty
  *     specPath silently. F4 fix.
+ *   - "spec-gen-shell-only": the LLM call inside `generateSpecForStory`
+ *     threw, but the structural shell of `TECHNICAL-SPEC.md` was still
+ *     regenerated successfully — frontmatter `lastUpdated` and the story's
+ *     section anchors are fresh; only the prose body is a byte-stable
+ *     HTML-comment placeholder until LLM creds return. Distinct from
+ *     `spec-gen-failed` (which only fires when `generateSpecForStory` itself
+ *     throws — e.g. the placeholder write failed). I6 fix.
  */
 export type SpecGeneratorWarning =
   | {
@@ -217,6 +224,10 @@ export type SpecGeneratorWarning =
     }
   | {
       kind: "spec-gen-skipped-on-pass";
+      message: string;
+    }
+  | {
+      kind: "spec-gen-shell-only";
       message: string;
     };
 
@@ -250,6 +261,10 @@ export const SpecGeneratorWarningSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("spec-gen-skipped-on-pass"),
+    message: z.string(),
+  }),
+  z.object({
+    kind: z.literal("spec-gen-shell-only"),
     message: z.string(),
   }),
 ]);

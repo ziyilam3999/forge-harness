@@ -224,6 +224,34 @@ describe("GeneratedDocsSchema (AC-10) — warnings is a typed array, default []"
     }
   });
 
+  it("parses a 'spec-gen-shell-only' warning (I6 — partial-regen-without-LLM)", () => {
+    const shellOnly = {
+      kind: "spec-gen-shell-only",
+      message: "Anthropic 401 after retry; refresh token also dead",
+    };
+    const parsed = SpecGeneratorWarningSchema.parse(shellOnly);
+    expect(parsed.kind).toBe("spec-gen-shell-only");
+    if (parsed.kind === "spec-gen-shell-only") {
+      expect(parsed.message).toBe("Anthropic 401 after retry; refresh token also dead");
+    }
+  });
+
+  it("parses a generatedDocs whose warnings array carries a 'spec-gen-shell-only' entry", () => {
+    const shellRun = {
+      specPath: "/abs/docs/generated/TECHNICAL-SPEC.md",
+      adrPaths: [],
+      genTimestamp: "2026-05-08T08:00:00.000Z",
+      genTokens: { inputTokens: 0, outputTokens: 0 },
+      contracts: [],
+      warnings: [
+        { kind: "spec-gen-shell-only", message: "synthetic LLM-unavailable error" },
+      ],
+    };
+    const parsed = GeneratedDocsSchema.parse(shellRun);
+    expect(parsed.warnings).toHaveLength(1);
+    expect(parsed.warnings[0].kind).toBe("spec-gen-shell-only");
+  });
+
   it("parses a generatedDocs whose warnings array carries a 'no-vocabulary' entry", () => {
     const lenient = {
       specPath: "/abs/docs/generated/TECHNICAL-SPEC.md",

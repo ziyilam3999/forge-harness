@@ -777,3 +777,123 @@ describe("spec-generator — agent-first header (AC-1a-2, AC-1a-3)", () => {
     expect(dateLines.length).toBe(1);
   });
 });
+
+// ── I6: shell-only path when synth() throws ─────────────────────────────
+
+describe("spec-generator — I6 shell-only path (LLM unavailable)", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  // Synthesizer stub that always throws — simulates I8's retry exhausted
+  // (refresh-token also dead, network out, no Claude Code session).
+  const throwingSynth = async (): Promise<SynthesisResponse> => {
+    throw new Error("AuthenticationError: 401 Unauthorized after retry");
+  };
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-shell-only-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("does NOT throw when synth() throws — returns successfully with shell-only warning (AC-2 P64 two-surface)", async () => {
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: throwingSynth,
+    });
+
+    // Surface 1 (in-process / consumer-facing): result.warnings carries the
+    // typed `spec-gen-shell-only` entry. The plumbing in evaluate.ts copies
+    // this array onto `generatedDocs.warnings` AND `specGenWarnings` (P64).
+    const shellOnlyWarnings = result.warnings.filter(
+      (w) => w.kind === "spec-gen-shell-only",
+    );
+    expect(shellOnlyWarnings).toHaveLength(1);
+    const w = shellOnlyWarnings[0];
+    if (w.kind === "spec-gen-shell-only") {
+      expect(w.message).toContain("AuthenticationError");
+    }
+
+    // Surface 2 (on-disk file): the spec was still written to docs/generated
+    // and its `## story:` section carries the byte-stable HTML-comment
+    // placeholder body. F4's `spec-gen-failed` warning is NOT present
+    // because `generateSpecForStory` itself returned successfully.
+    expect(existsSync(result.specPath)).toBe(true);
+    const text = readFileSync(result.specPath, "utf-8");
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).toContain("## story: US-01");
+    expect(text).toContain(
+      "<!-- forge: placeholder body — LLM unavailable; see warnings -->",
+    );
+    // Frontmatter `lastUpdated` and the story entry refreshed deterministically.
+    expect(text).toContain('id: "US-01"');
+    // `spec-gen-failed` is the F4 "generateSpecForStory itself threw" marker;
+    // we did NOT throw here, so it must be absent.
+    const failedKinds = result.warnings.filter((w) => w.kind === "spec-gen-failed");
+    expect(failedKinds).toHaveLength(0);
+
+    // Tokens are zero (no LLM call succeeded).
+    expect(result.genTokens).toEqual({ inputTokens: 0, outputTokens: 0 });
+    // No contracts inferred (synth never returned).
+    expect(result.contracts).toEqual([]);
+  });
+
+  it("idempotency (AC-F): two consecutive shell-only runs produce byte-identical files", async () => {
+    const r1 = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: throwingSynth,
+    });
+    const text1 = readFileSync(r1.specPath, "utf-8");
+
+    // Force a wall-clock gap so any per-run timestamp would differ.
+    await new Promise((r) => setTimeout(r, 30));
+
+    const r2 = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: throwingSynth,
+    });
+    const text2 = readFileSync(r2.specPath, "utf-8");
+
+    // Byte-identical — `idempotentWrite` short-circuits because the placeholder
+    // body has no per-run state. This is the "70% regen + placeholder is
+    // better than 0% regen + stale doc" outcome operator wanted, AND the
+    // git-history-stable path that prevents per-PASS dated-banner churn.
+    expect(text2).toBe(text1);
+
+    // Both runs surfaced the warning (consumer sees the cause every time).
+    expect(r1.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
+    expect(r2.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
+  });
+
+  it("truncates a long error message to ~200 chars to keep the warning compact", async () => {
+    const longErr = "x".repeat(500);
+    const longThrowingSynth = async (): Promise<SynthesisResponse> => {
+      throw new Error(longErr);
+    };
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: longThrowingSynth,
+    });
+    const w = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
+    expect(w).toBeDefined();
+    if (w && w.kind === "spec-gen-shell-only") {
+      // 200 char window + truncation marker
+      expect(w.message.length).toBeLessThan(longErr.length);
+      expect(w.message).toContain("…(truncated)");
+    }
+  });
+});

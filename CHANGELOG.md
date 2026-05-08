@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.40.3](https://github.com/ziyilam3999/forge-harness/compare/v0.40.2...v0.40.3) (2026-05-08)
+
+### Bug Fixes
+
+- **evaluate:** un-swallow spec-generator failures and gate PASS-incomplete records (#537). `forge_evaluate` was silently swallowing exceptions thrown by `generateSpecForStory()` to stderr only, then synthesizing a fallback `generatedDocs` envelope with hardcoded zeros + empty warnings. Result: `TECHNICAL-SPEC.md` would silently freeze on every PASS run while consumers saw clean run records. Two new typed `SpecGeneratorWarning` kinds (`spec-gen-failed`, `spec-gen-skipped-on-pass`) now surface on **both** the on-disk run record's `generatedDocs.warnings` AND the MCP top-level `specGenWarnings` (P64 producer/consumer seam coverage). Discriminated union extended additive-optionally per P50; existing consumers see no breaking change. Reported by macbook-monday during US-11 dogfood; their original W3-short-circuit hypothesis was disproven (no W3 pre-LLM guard exists) and the corrected fix shape (un-swallow + warn) shipped instead.
+- **dashboard:** host-aware auto-open marker for cross-machine portability (#536). The `.forge/.dashboard-opened` marker was project-scoped only — when an operator hand-copied `.forge/` between machines (e.g. Windows → macOS), the stale marker silently suppressed dashboard auto-open on the new host even with `FORGE_DASHBOARD_AUTO_OPEN=1`. Marker body now carries `host=<os.hostname()>\nopened=<iso>`; on read, suppress only when the parsed host matches the current host. Legacy markers (no `host=` line) treat as foreign → open once + rewrite in new format. Single structured stderr log `forge.dashboard.marker.legacy_rewrite` per legacy rewrite for ops visibility.
+
+### Features
+
+- **evaluate:** surface canonicalized ADR paths on the response + brief instruction (#538). `forge_evaluate` story-mode response now includes optional `adrCanonicalized?: Array<{from, to, adrId}>` listing the canonicalized ADR paths the PASS path moved from staging into `docs/decisions/ADR-NNNN-*.md`. Calling agents no longer have to `git status` to discover the canonical file before staging the follow-up commit. Field is set only in story-mode evaluate (not coherence-mode or dispute-mode); additive-optional per P50, backward-compat. `ADR_CAPTURE_INSTRUCTIONS` in every forge_generate brief now references the field by name and instructs agents to commit the canonical ADR as a follow-up — closes the "second commit needed" process gap macbook-monday flagged in US-11. Co-shipped to avoid the lying-string transient.
+
+### Documentation
+
+- audit-ritual dashboard-event reference (#535). New `docs/audit-ritual.md` defines exactly which forge primitives ARE dashboard events. `forge_generate ✓`, `forge_evaluate ✓`, `forge_coordinate ✓`, `forge_reconcile ✓`, `forge_plan ✓`, `forge_declare_story ✓`, `forge_status ✗`, `forge_lint_refresh ✗`. Closes the audit-ritual ambiguity macbook-monday hit during US-11.
+- cross-machine state portability guide (#534). New `docs/cross-machine-portability.md` classifies every `.forge/` artifact as Portable / Portable-but-transient / Regenerable / NOT portable, documents the recommended migration recipe, and cross-references the host-aware dashboard marker fix.
+
+### Triage outcome
+
+This release implements the macbook-monday US-11 audit feedback (mails dated 2026-05-08, thread `forge-harness-audit-us-11`). Final tally across 9 items: **5 ship-it** (F2/F3/F4/I1/I3/I4 — 4 PRs above), **1 defer** (I2 `briefScope` flag — issue #539), **2 drop** (F1 merged into I4 brief append; I5 covered by doc-snippet alternative without new public surface), **1 merged-into-another** (F1 → I4). Reviewer chain: P1 stateless / P2 comparative / P3 cairn-grounded / P4 mechanical-sweep, all background subagents per Rule 2.
+
 ## [0.40.2](https://github.com/ziyilam3999/forge-harness/compare/v0.40.1...v0.40.2) (2026-05-08)
 
 ### Bug Fixes

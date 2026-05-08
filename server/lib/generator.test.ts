@@ -3,6 +3,8 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  ADR_CAPTURE_INSTRUCTIONS,
+  buildAdrCapture,
   buildBrief,
   buildFixBrief,
   computeScore,
@@ -1047,5 +1049,37 @@ describe("persistGenerateBrief", () => {
     const content = JSON.parse(await readFile(join(briefsDir, files[0]), "utf-8"));
     expect(content.action).toBe("fix");
     expect(content.fixBrief.guidance).toBe("Fix the test");
+  });
+});
+
+// ── v0.40.x I4: ADR_CAPTURE_INSTRUCTIONS post-PASS canonicalization paragraph ──
+
+describe("ADR_CAPTURE_INSTRUCTIONS — v0.40.x I4 post-PASS canonicalization paragraph", () => {
+  it("references the I1 `adrCanonicalized` response field by name", () => {
+    expect(ADR_CAPTURE_INSTRUCTIONS).toContain("adrCanonicalized");
+  });
+
+  it("instructs the calling agent to commit the canonical ADR as a follow-up", () => {
+    // String-presence check on the post-PASS guidance — keeps the brief
+    // content stable without freezing the exact wording.
+    expect(ADR_CAPTURE_INSTRUCTIONS).toMatch(/follow-?up commit/i);
+  });
+
+  it("preserves the original four-field staging-stub instructions byte-identically before the new paragraph", () => {
+    // The original instructions paragraph must remain present as a contiguous
+    // substring — additive change, not a rewrite.
+    expect(ADR_CAPTURE_INSTRUCTIONS).toContain(
+      "Before declaring story complete, for each architectural decision matching one of the 4 triggers below, " +
+        "write a stub at `.forge/staging/adr/<storyId>/<short-slug>.md` with front-matter " +
+        "{title, story, context, decision, consequences, alternatives}. " +
+        "forge-harness's adr-extractor will canonicalize them on PASS. " +
+        "If you made no qualifying decisions, write nothing — that is a valid outcome.",
+    );
+  });
+
+  it("buildAdrCapture() forwards the updated instructions to the brief consumer", () => {
+    const guidance = buildAdrCapture();
+    expect(guidance.instructions).toBe(ADR_CAPTURE_INSTRUCTIONS);
+    expect(guidance.instructions).toContain("adrCanonicalized");
   });
 });

@@ -90,6 +90,16 @@ describe("adr-extractor — happy path (AC-C1, AC-C2, AC-C3)", () => {
 
     // AC-C5 telemetry: no-decisions row was NOT appended on a story with stubs
     expect(result.appendedNoDecisionsRow).toBe(false);
+
+    // v0.40.x I1: canonicalized triple captures (from, to, adrId) for the
+    // calling agent. `from` points at the (now-deleted) staging stub; `to`
+    // mirrors `newAdrPaths[0]`; `adrId` is the four-digit identifier.
+    expect(result.canonicalized.length).toBe(1);
+    expect(result.canonicalized[0].from).toBe(
+      join(tmp, ".forge", "staging", "adr", "US-01", "use-sqlite.md"),
+    );
+    expect(result.canonicalized[0].to).toBe(adrPath);
+    expect(result.canonicalized[0].adrId).toBe("ADR-0001");
   });
 });
 
@@ -109,6 +119,8 @@ describe("adr-extractor — no-decisions story (AC-C1, AC-C4 INDEX dedup)", () =
     });
     expect(r1.newAdrPaths.length).toBe(0);
     expect(r1.appendedNoDecisionsRow).toBe(true);
+    // v0.40.x I1: no staging stubs ⇒ empty canonicalized triples.
+    expect(r1.canonicalized).toEqual([]);
 
     // INDEX.md has exactly one US-99 no-decisions row
     let indexText = readFileSync(r1.indexPath, "utf-8");

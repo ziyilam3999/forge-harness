@@ -184,6 +184,26 @@ type McpResponse = {
    * Empty array when no warnings; absent on non-story modes.
    */
   specGenWarnings?: SpecGeneratorWarning[];
+  /**
+   * v0.40.x I1 — canonicalized ADR triples surfaced on story-mode PASS
+   * responses so the calling agent can stage + commit the canonical ADR
+   * file(s) without `git status`-discovering the path.
+   *
+   * Each entry carries:
+   *   - `from`: absolute path of the staging stub that was consumed
+   *     (`.forge/staging/adr/<storyId>/<short-slug>.md`).
+   *   - `to`: absolute path of the canonical
+   *     `docs/decisions/ADR-NNNN-*-<storyId>.md` produced this call.
+   *   - `adrId`: the canonical four-digit ADR identifier
+   *     (e.g. `"ADR-0007"`).
+   *
+   * Field is set ONLY in story-mode responses (the `processAdrStory` call
+   * site); coherence-mode and divergence-mode handlers do not populate it.
+   * Empty array when story-mode ran but produced zero new ADRs (no staging
+   * stubs or non-PASS verdict). Additive optional per P50 — backward-compat,
+   * no version bump.
+   */
+  adrCanonicalized?: Array<{ from: string; to: string; adrId: string }>;
 };
 
 // ── Shared helpers ────────────────────────────────────────
@@ -360,6 +380,14 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
   // v0.38.0 I3 — captured for the top-level MCP response field.
   let storyEvalSpecGenWarnings: SpecGeneratorWarning[] | undefined;
 
+  // v0.40.x I1 — captured for the top-level MCP response field. Populated
+  // ONLY by story-mode PASS runs that called `processAdrStory`. Stays
+  // `undefined` on non-PASS verdicts and when projectPath is missing — in
+  // both cases the field is omitted from the response (additive optional).
+  let storyEvalAdrCanonicalized:
+    | Array<{ from: string; to: string; adrId: string }>
+    | undefined;
+
   // Write run record with the four REQ-01 v1.1 additive fields populated.
   // canonicalizeEvalReport sorts criteria by (id, evidence) so two runs
   // with the same criteria in different input orders produce byte-identical
@@ -460,6 +488,13 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
         if (generatedDocs) {
           generatedDocs.adrPaths = adr.newAdrPaths;
         }
+        // v0.40.x I1 — surface the (from → to → adrId) triples on the MCP
+        // top-level response so the calling agent can stage + commit the
+        // canonical ADR file(s) as a follow-up. Always set (even when
+        // empty) so consumers can rely on field presence on story-mode PASS.
+        // The data is the same one-pass derivation `processStory` already
+        // built — no recomputation here.
+        storyEvalAdrCanonicalized = adr.canonicalized;
       } catch (err) {
         console.error(
           `forge_evaluate: adr-extractor failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
@@ -529,10 +564,20 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
   const specGenWarnings: SpecGeneratorWarning[] =
     storyEvalSpecGenWarnings ?? [];
 
-  return {
+  // v0.40.x I1 — surface the canonicalized ADR triples at the top level of
+  // the response when story-mode PASS ran the adr-extractor. Field is
+  // omitted (not set to []) on non-PASS verdicts so consumers can use
+  // field presence as a "did the canonicalizer run?" signal. Coherence-mode
+  // and divergence-mode handlers do NOT set this field — see McpResponse
+  // type doc.
+  const response: McpResponse = {
     content: [{ type: "text", text: JSON.stringify(report, null, 2) }],
     specGenWarnings,
   };
+  if (storyEvalAdrCanonicalized !== undefined) {
+    response.adrCanonicalized = storyEvalAdrCanonicalized;
+  }
+  return response;
 }
 
 // ── Coherence Mode Handler ────────────────────────────────

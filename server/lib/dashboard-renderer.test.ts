@@ -895,8 +895,8 @@ describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
     const calls: Array<{ op: string; args: unknown[] }> = [];
     const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     const io: AutoOpenIo = {
-      stat: async (p) => {
-        calls.push({ op: "stat", args: [p] });
+      readMarker: async (p) => {
+        calls.push({ op: "readMarker", args: [p] });
         throw enoent; // marker absent → proceed
       },
       openExternal: async (target) => {
@@ -906,6 +906,7 @@ describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
       writeFile: async (p, d, e) => {
         calls.push({ op: "writeFile", args: [p, d, e] });
       },
+      hostnameOf: () => "test-host",
     };
 
     await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
@@ -919,9 +920,10 @@ describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
     const calls: Array<{ op: string; args: unknown[] }> = [];
     const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     const io: AutoOpenIo = {
-      stat: async () => { throw enoent; },
+      readMarker: async () => { throw enoent; },
       openExternal: async (target) => { calls.push({ op: "openExternal", args: [target] }); },
       writeFile: async (p, d, e) => { calls.push({ op: "writeFile", args: [p, d, e] }); },
+      hostnameOf: () => "test-host",
     };
 
     await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
@@ -933,15 +935,16 @@ describe("maybeAutoOpenBrowser — marker-on-spawn (#281)", () => {
   });
 });
 
-describe("maybeAutoOpenBrowser — stat catch narrowing (#283 + #291)", () => {
+describe("maybeAutoOpenBrowser — marker read catch narrowing (#283 + #291)", () => {
   useAutoOpenEnvGate();
 
-  it("non-ENOENT stat error (e.g. EPERM) skips open and does NOT call openExternal or writeFile", async () => {
+  it("non-ENOENT marker-read error (e.g. EPERM) skips open and does NOT call openExternal or writeFile", async () => {
     const calls: Array<{ op: string }> = [];
     const io: AutoOpenIo = {
-      stat: async () => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); },
+      readMarker: async () => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); },
       openExternal: async () => { calls.push({ op: "openExternal" }); },
       writeFile: async () => { calls.push({ op: "writeFile" }); },
+      hostnameOf: () => "test-host",
     };
 
     await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
@@ -958,14 +961,15 @@ describe("maybeAutoOpenBrowser — stat catch narrowing (#283 + #291)", () => {
     // After the #291 widening (`if (code !== "ENOENT")`), undefined
     // also skips because undefined !== "ENOENT".
     const io: AutoOpenIo = {
-      stat: async () => { throw new Error("mystery stat failure"); },
+      readMarker: async () => { throw new Error("mystery read failure"); },
       openExternal: async () => { calls.push({ op: "openExternal" }); },
       writeFile: async () => { calls.push({ op: "writeFile" }); },
+      hostnameOf: () => "test-host",
     };
 
     await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
 
-    // No io other than stat must have been touched.
+    // No io other than readMarker must have been touched.
     expect(calls.length).toBe(0);
   });
 });
@@ -987,14 +991,141 @@ describe("maybeAutoOpenBrowser — env gate (#295)", () => {
   it("env var unset → no io calls at all (early return)", async () => {
     const calls: Array<{ op: string }> = [];
     const io: AutoOpenIo = {
-      stat: async () => { calls.push({ op: "stat" }); },
+      readMarker: async () => { calls.push({ op: "readMarker" }); return ""; },
       openExternal: async () => { calls.push({ op: "openExternal" }); },
       writeFile: async () => { calls.push({ op: "writeFile" }); },
+      hostnameOf: () => { calls.push({ op: "hostnameOf" }); return "test-host"; },
     };
 
     await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
 
     expect(calls.length).toBe(0);
+  });
+});
+
+describe("maybeAutoOpenBrowser — host-aware marker (F2)", () => {
+  // F2 fix (2026-05-08): the `.dashboard-opened` marker travels with `.forge/`
+  // when operators hand-copy state between machines. A bare-timestamp marker
+  // silently suppresses auto-open on the new host. The fix stamps the marker
+  // body with `host=<os.hostname()>` and gates suppression on host-match;
+  // legacy bare-timestamp markers are treated as foreign + rewritten in the
+  // new format. One structured stderr line per legacy-rewrite for telemetry.
+  useAutoOpenEnvGate();
+
+  it("AC-3 host-match: marker carrying current host suppresses auto-open (no openExternal call)", async () => {
+    const calls: Array<{ op: string }> = [];
+    const io: AutoOpenIo = {
+      readMarker: async () => "host=mac-current\nopened=2026-05-08T12:00:00.000Z\n",
+      openExternal: async () => { calls.push({ op: "openExternal" }); },
+      writeFile: async () => { calls.push({ op: "writeFile" }); },
+      hostnameOf: () => "mac-current",
+    };
+
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
+
+    // Same-host marker — open MUST be suppressed (the historical behavior).
+    expect(calls.some((c) => c.op === "openExternal")).toBe(false);
+    expect(calls.some((c) => c.op === "writeFile")).toBe(false);
+  });
+
+  it("AC-4 host-mismatch: marker from a different host opens the dashboard AND rewrites the marker with current host", async () => {
+    const calls: Array<{ op: string; args: unknown[] }> = [];
+    const io: AutoOpenIo = {
+      readMarker: async () =>
+        "host=windows-old\nopened=2026-05-01T08:00:00.000Z\n",
+      openExternal: async (target) => { calls.push({ op: "openExternal", args: [target] }); },
+      writeFile: async (p, d, e) => { calls.push({ op: "writeFile", args: [p, d, e] }); },
+      hostnameOf: () => "mac-current",
+    };
+
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
+
+    // Open AND rewrite, in that order.
+    const opOrder = calls.map((c) => c.op);
+    expect(opOrder).toEqual(["openExternal", "writeFile"]);
+
+    // The rewritten marker carries the CURRENT host (not the foreign one).
+    const writeArgs = calls.find((c) => c.op === "writeFile")!.args;
+    const writtenBody = String(writeArgs[1]);
+    expect(writtenBody).toContain("host=mac-current");
+    expect(writtenBody).not.toContain("host=windows-old");
+    // And it carries an `opened=` line with an ISO timestamp.
+    expect(writtenBody).toMatch(/opened=\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("AC-5 legacy-format: bare-timestamp marker (v0.40.2 and earlier) opens, rewrites, AND emits one structured stderr telemetry line", async () => {
+    const calls: Array<{ op: string; args: unknown[] }> = [];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const legacyBody = "2026-05-01T08:00:00.000Z";
+    const io: AutoOpenIo = {
+      readMarker: async () => legacyBody,
+      openExternal: async (target) => { calls.push({ op: "openExternal", args: [target] }); },
+      writeFile: async (p, d, e) => { calls.push({ op: "writeFile", args: [p, d, e] }); },
+      hostnameOf: () => "mac-current",
+    };
+
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
+
+    // Open + rewrite happened.
+    expect(calls.map((c) => c.op)).toEqual(["openExternal", "writeFile"]);
+
+    // The rewritten marker is in the new host-stamped format.
+    const writtenBody = String(calls.find((c) => c.op === "writeFile")!.args[1]);
+    expect(writtenBody).toContain("host=mac-current");
+    expect(writtenBody).toMatch(/opened=\d{4}-\d{2}-\d{2}T/);
+
+    // Exactly ONE structured telemetry line emitted, JSON-grep-friendly.
+    const telemetryCalls = errorSpy.mock.calls.filter((args) =>
+      typeof args[0] === "string" &&
+      (args[0] as string).startsWith("forge.dashboard.marker.legacy_rewrite:"),
+    );
+    expect(telemetryCalls).toHaveLength(1);
+    // Payload is parseable JSON with the expected keys.
+    const payloadText = (telemetryCalls[0][0] as string).slice(
+      "forge.dashboard.marker.legacy_rewrite: ".length,
+    );
+    const payload = JSON.parse(payloadText) as { oldTimestamp: string; newHost: string };
+    expect(payload.oldTimestamp).toBe(legacyBody);
+    expect(payload.newHost).toBe("mac-current");
+  });
+
+  it("F2 host-stamped marker on first open (cold start, no marker present) writes the new format with current host", async () => {
+    // ENOENT branch — marker absent → first open. Must write the new format,
+    // NOT the legacy bare-timestamp format. Guards against a regression where
+    // the writer drops `host=` for first-write-on-virgin-state.
+    const calls: Array<{ op: string; args: unknown[] }> = [];
+    const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    const io: AutoOpenIo = {
+      readMarker: async () => { throw enoent; },
+      openExternal: async (target) => { calls.push({ op: "openExternal", args: [target] }); },
+      writeFile: async (p, d, e) => { calls.push({ op: "writeFile", args: [p, d, e] }); },
+      hostnameOf: () => "mac-current",
+    };
+
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
+
+    const writtenBody = String(calls.find((c) => c.op === "writeFile")!.args[1]);
+    expect(writtenBody).toContain("host=mac-current");
+    expect(writtenBody).toMatch(/opened=\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("F2 cold-start (ENOENT) does NOT emit the legacy_rewrite telemetry line (only legacy bodies trigger it)", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    const io: AutoOpenIo = {
+      readMarker: async () => { throw enoent; },
+      openExternal: async () => {},
+      writeFile: async () => {},
+      hostnameOf: () => "mac-current",
+    };
+
+    await maybeAutoOpenBrowser(FIXTURE_PROJECT_ROOT, io);
+
+    const telemetryCalls = errorSpy.mock.calls.filter((args) =>
+      typeof args[0] === "string" &&
+      (args[0] as string).startsWith("forge.dashboard.marker.legacy_rewrite:"),
+    );
+    expect(telemetryCalls).toHaveLength(0);
   });
 });
 

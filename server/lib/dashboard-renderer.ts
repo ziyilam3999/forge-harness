@@ -30,6 +30,7 @@
 
 import { writeFile, rename, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { hostname } from "node:os";
 import { join, basename } from "node:path";
 import type {
   PhaseTransitionBrief,
@@ -1528,15 +1529,24 @@ export async function writeDashboardHtml(
  * Injectable I/O seam for the auto-open path — separate from `DashboardIo`
  * so tests that mock the atomic-write contract don't have to stub the
  * auto-open-only fields. Production callers use `DEFAULT_AUTO_OPEN_IO`.
+ *
+ * `readMarker` returns the marker file body as a UTF-8 string OR throws an
+ * error with `code === "ENOENT"` when the marker is absent. The host-aware
+ * gate (F2) parses the body to extract the `host=` line; existence-only
+ * stat was insufficient because the marker body now carries hostname state.
+ *
+ * `hostnameOf` is a 0-arg getter (test seam) so unit tests can deterministically
+ * assert host-match vs host-mismatch behavior without mocking `node:os` globally.
  */
 export interface AutoOpenIo {
-  stat: (path: string) => Promise<void>;
+  readMarker: (path: string) => Promise<string>;
   openExternal: (target: string) => Promise<void>;
   writeFile: (path: string, data: string, encoding: "utf-8") => Promise<void>;
+  hostnameOf: () => string;
 }
 
 const DEFAULT_AUTO_OPEN_IO: AutoOpenIo = {
-  stat: (p) => stat(p).then(() => undefined),
+  readMarker: (p) => readFile(p, "utf-8"),
   openExternal: (target) =>
     new Promise<void>((resolve, reject) => {
       const child =
@@ -1552,10 +1562,46 @@ const DEFAULT_AUTO_OPEN_IO: AutoOpenIo = {
       child.once("error", (err) => reject(err));
     }),
   writeFile: (p, d, e) => writeFile(p, d, e),
+  hostnameOf: () => hostname(),
 };
 
 /**
- * Open the dashboard in the user's default browser — env-gated, one-shot.
+ * Parse the marker body and extract the host token (or `null` for legacy /
+ * malformed bodies). The marker format (F2, 2026-05-08+):
+ *
+ *     host=<os.hostname()>
+ *     opened=<iso-timestamp>
+ *
+ * Legacy markers (v0.40.2 and earlier) carried only the ISO timestamp on a
+ * single line. Those bodies have no `host=` prefix → returns `null` so the
+ * caller can treat them as foreign + rewrite in the new format.
+ *
+ * Whitespace-tolerant: leading/trailing whitespace on each line is stripped
+ * before the prefix check. Empty bodies → `null`.
+ */
+function parseMarkerHost(body: string): string | null {
+  for (const line of body.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("host=")) {
+      const value = trimmed.slice("host=".length).trim();
+      return value.length > 0 ? value : null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Build the new-format marker body for a given host + ISO timestamp.
+ * Single locus per F66 — every writer goes through this helper so the
+ * format stays consistent across first-write + legacy-rewrite paths.
+ */
+function formatMarkerBody(host: string, openedIso: string): string {
+  return `host=${host}\nopened=${openedIso}\n`;
+}
+
+/**
+ * Open the dashboard in the user's default browser — env-gated, host-aware,
+ * one-shot per host.
  *
  * Gates (both must hold):
  *   1. `FORGE_DASHBOARD_AUTO_OPEN=1` in the environment (opt-in; default off
@@ -1563,16 +1609,33 @@ const DEFAULT_AUTO_OPEN_IO: AutoOpenIo = {
  *      spawn a browser). The env var is re-read on each invocation — toggling
  *      `FORGE_DASHBOARD_AUTO_OPEN` mid-process takes effect on the next call
  *      (per-invocation check, not a startup-time snapshot). Issue #303.
- *   2. Marker `.forge/.dashboard-opened` must be absent. First successful
- *      open writes the marker; subsequent renders are no-ops. Delete the
- *      marker to re-open the tab (e.g. after closing it accidentally).
+ *   2. Marker `.forge/.dashboard-opened` must be absent OR carry a `host=`
+ *      line that does NOT match `os.hostname()`. First successful open
+ *      writes the marker stamped with the current host; subsequent renders
+ *      on the same host are no-ops. Delete the marker to re-open the tab
+ *      (e.g. after closing it accidentally).
+ *
+ * Host-aware gate (F2, 2026-05-08+): the marker body now carries
+ * `host=<hostname>\nopened=<iso>\n` instead of a bare ISO timestamp. When
+ * the parsed host matches the current host the open is suppressed (the
+ * historical behavior for same-host renders). When the parsed host differs
+ * — or the marker uses the legacy ISO-only format with no `host=` line —
+ * the marker is treated as foreign, the dashboard opens, and the marker is
+ * rewritten in the new format. This unblocks operators who hand-copy
+ * `.forge/` between machines as part of cross-machine migration: the
+ * stale marker no longer suppresses auto-open on the new host.
+ *
+ * Legacy-format compatibility: markers without a `host=` line (the
+ * v0.40.2-and-earlier format) trigger one open + rewrite. A single
+ * structured stderr line `forge.dashboard.marker.legacy_rewrite: {...}`
+ * is emitted per legacy-rewrite for ops visibility (adoption telemetry).
  *
  * The marker is only written AFTER the child process emits its `"spawn"`
  * event — if the spawn fails (e.g. `xdg-open` missing on a headless box),
  * no marker lands and the next render re-attempts. Issue #281.
  *
- * The `stat` catch treats **only** `ENOENT` as "marker absent, proceed to
- * open". Any other error — including errors without a `code` property —
+ * The marker-read catch treats **only** `ENOENT` as "marker absent, proceed
+ * to open". Any other error — including errors without a `code` property —
  * is logged and the render skips auto-open for this tick. This prevents
  * EPERM/EIO (or a non-Node-FS rejection) from being silently re-interpreted
  * as "no marker yet" and re-opening a tab on every render. Issue #283 +
@@ -1594,9 +1657,25 @@ export async function maybeAutoOpenBrowser(
   if (process.env.FORGE_DASHBOARD_AUTO_OPEN !== "1") return;
 
   const markerPath = join(projectPath, ".forge", ".dashboard-opened");
+  const currentHost = io.hostnameOf();
+
+  // Tracks whether this open is a legacy-format rewrite — if so, emit one
+  // structured stderr telemetry line after the rewrite succeeds.
+  let legacyRewriteBody: string | null = null;
+
   try {
-    await io.stat(markerPath);
-    return;
+    const body = await io.readMarker(markerPath);
+    const markerHost = parseMarkerHost(body);
+    if (markerHost === currentHost) {
+      // Same-host marker — historical no-op path (open suppressed).
+      return;
+    }
+    if (markerHost === null) {
+      // Legacy ISO-only or malformed body — treat as foreign + rewrite.
+      // Stash the original body for the telemetry line below.
+      legacyRewriteBody = body;
+    }
+    /* host mismatch (foreign machine) OR legacy-format → open + rewrite */
   } catch (err) {
     // Defensive typeof guard per #300: a non-object throw (`throw "string"`,
     // `throw null`, or `throw 42`) must not trigger a property read on a
@@ -1612,7 +1691,7 @@ export async function maybeAutoOpenBrowser(
       // marker state safely; skip open". This matches the spirit of
       // #283 (#291 widening) + #300 (defensive typeof guard).
       console.error(
-        "forge: dashboard auto-open stat failed (continuing):",
+        "forge: dashboard auto-open marker read failed (continuing):",
         err instanceof Error ? err.message : String(err),
       );
       return;
@@ -1623,7 +1702,20 @@ export async function maybeAutoOpenBrowser(
   try {
     const dashboardPath = join(projectPath, ".forge", "dashboard.html");
     await io.openExternal(dashboardPath);
-    await io.writeFile(markerPath, new Date().toISOString(), "utf-8");
+    const openedIso = new Date().toISOString();
+    await io.writeFile(markerPath, formatMarkerBody(currentHost, openedIso), "utf-8");
+    if (legacyRewriteBody !== null) {
+      // Single structured stderr line per legacy-rewrite event for
+      // adoption telemetry. JSON-shaped payload so ops greppers can
+      // parse without ad-hoc regexes. The `oldTimestamp` field carries
+      // the legacy body verbatim (whitespace-trimmed) — typically the
+      // ISO timestamp from v0.40.2-and-earlier markers.
+      const payload = JSON.stringify({
+        oldTimestamp: legacyRewriteBody.trim(),
+        newHost: currentHost,
+      });
+      console.error(`forge.dashboard.marker.legacy_rewrite: ${payload}`);
+    }
   } catch (err) {
     console.error(
       "forge: dashboard auto-open failed (continuing):",

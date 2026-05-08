@@ -200,6 +200,14 @@ export interface RunRecord {
  *     HTML-comment placeholder until LLM creds return. Distinct from
  *     `spec-gen-failed` (which only fires when `generateSpecForStory` itself
  *     throws — e.g. the placeholder write failed). I6 fix.
+ *   - "spec-gen-creds-keychain-only": macOS-only diagnostic. Emitted
+ *     alongside `spec-gen-shell-only` when the run fell through to no-creds
+ *     on darwin AND a Keychain entry for "Claude Code-credentials" exists
+ *     but `readOAuthToken()` could not read a usable blob from it (locked
+ *     Keychain, prompt-timeout, ACL mismatch, malformed JSON). Tells the
+ *     operator their creds are present-but-unreadable rather than missing —
+ *     the actionable path is to set `ANTHROPIC_API_KEY` to bypass, not to
+ *     "log in to Claude Code" (they already are). F6 fix in v0.40.5.
  */
 export type SpecGeneratorWarning =
   | {
@@ -228,6 +236,10 @@ export type SpecGeneratorWarning =
     }
   | {
       kind: "spec-gen-shell-only";
+      message: string;
+    }
+  | {
+      kind: "spec-gen-creds-keychain-only";
       message: string;
     };
 
@@ -265,6 +277,10 @@ export const SpecGeneratorWarningSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("spec-gen-shell-only"),
+    message: z.string(),
+  }),
+  z.object({
+    kind: z.literal("spec-gen-creds-keychain-only"),
     message: z.string(),
   }),
 ]);

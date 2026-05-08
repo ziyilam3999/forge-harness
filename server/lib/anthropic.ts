@@ -1,9 +1,29 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
+
+/**
+ * F6 (v0.40.5) — macOS Keychain service name for Claude Code's OAuth blob.
+ *
+ * CONTRACT: Keychain entry name pinned to "Claude Code-credentials" as of
+ * Claude Code (macOS) on 2026-05-03 (cdat from macbook-monday's a9d0 host,
+ * verified again in worktree probe 2026-05-08 — blob is JSON-encoded with
+ * the same `claudeAiOauth.{accessToken,expiresAt}` shape as
+ * `~/.claude/.credentials.json`).
+ *
+ * If Claude Code renames the entry in a future release, this constant must
+ * follow; symptom would be silent fall-through to no-creds on macOS.
+ *
+ * EXPORTED so spec-generator.ts can use the same string for its emit-point
+ * existence-check probe — single source-of-truth per F49 (no dual-locus
+ * drift between the read in this file and the existence-check in
+ * spec-generator.ts).
+ */
+export const KEYCHAIN_SERVICE_NAME = "Claude Code-credentials";
 // Raised from 8192 → 32000 in v0.32.7 after monday-bot hit truncation on the
 // planner call site (not just the corrector fixed in v0.32.6). Sonnet 4
 // supports 64K output tokens; 32000 covers every full-plan/findings payload
@@ -33,27 +53,83 @@ export function getCredentialSource(): CredentialSource {
 }
 
 /**
- * Read the Claude OAuth access token from ~/.claude/.credentials.json.
- * Returns null if the file doesn't exist, is invalid, or the token is *strictly*
- * expired. Per I8 (2026-05-08), we no longer pre-emptively reject tokens that
- * are merely close to expiry — Claude Code's main process refreshes the file
- * just-in-time, so deferring to the file's `expiresAt` strictly is correct.
- * If a token issued seconds-ago expires mid-call, the 401-retry path in
- * `callClaude` re-reads the file (which Claude Code may have refreshed) and
- * retries once.
+ * F6 (v0.40.5) — macOS Keychain fallback for the OAuth blob.
+ *
+ * macOS Claude Code stores the OAuth credentials in Keychain rather than on
+ * disk (`~/.claude/.credentials.json` does not exist on a freshly-logged-in
+ * Mac). When the file read fails AND we are on darwin, shell out to the
+ * built-in `/usr/bin/security` utility and fetch the blob's password value
+ * (the `-w` flag returns just the password, not the metadata wrapper).
+ *
+ * The returned blob is JSON-encoded with the same shape as the file would
+ * have been (verified by worktree probe 2026-05-08 against macbook-monday's
+ * cdat host) — caller does its own JSON.parse + validation.
+ *
+ * Returns the raw blob string on success, `null` on any failure (Keychain
+ * locked, entry missing, ACL mismatch, prompt timeout, non-darwin platform).
+ *
+ * 2000ms timeout: failsafe for the worst-case modal-prompt hang. Cold ACL
+ * lookups on M-series Macs are 30-150ms typical; 2000ms gives ~3x headroom
+ * over the worst-observed pathological APFS case while staying below the
+ * MCP-child user-perceived stall threshold.
+ */
+function readOAuthTokenFromKeychain(): string | null {
+  if (process.platform !== "darwin") return null;
+  try {
+    const username = userInfo().username;
+    return execFileSync(
+      "/usr/bin/security",
+      ["find-generic-password", "-s", KEYCHAIN_SERVICE_NAME, "-a", username, "-w"],
+      { encoding: "utf-8", timeout: 2000 },
+    ).trim();
+  } catch {
+    // F45 escape: empty catch + null sentinel is defensible BECAUSE
+    // spec-generator.ts emits a typed `spec-gen-creds-keychain-only`
+    // warning when this null surfaces alongside a Keychain-entry-exists
+    // probe (P44 loud-failure). Do NOT remove the C-side warning without
+    // re-evaluating this catch.
+    return null;
+  }
+}
+
+/**
+ * Read the Claude OAuth access token. Tries `~/.claude/.credentials.json`
+ * first (Linux / WSL / macOS-with-explicit-file); on darwin, falls back to
+ * macOS Keychain (where current Claude Code stores OAuth — F6 fix in
+ * v0.40.5).
+ *
+ * Returns null if neither source yields a usable token, the JSON is
+ * malformed, or the token is *strictly* expired. Per I8 (2026-05-08), we
+ * no longer pre-emptively reject tokens that are merely close to expiry —
+ * Claude Code's main process refreshes the credential store just-in-time,
+ * so deferring to the stored `expiresAt` strictly is correct. If a token
+ * issued seconds-ago expires mid-call, the 401-retry path in `callClaude`
+ * re-reads the source (which Claude Code may have refreshed) and retries
+ * once.
  */
 function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
+  let raw: string | null = null;
   try {
     const credPath = join(homedir(), ".claude", ".credentials.json");
-    const creds = JSON.parse(readFileSync(credPath, "utf-8"));
+    raw = readFileSync(credPath, "utf-8");
+  } catch {
+    // File absent / unreadable. On darwin, Claude Code stores OAuth in
+    // Keychain instead — try that source before giving up.
+    raw = readOAuthTokenFromKeychain();
+  }
+
+  if (raw === null || raw === "") return null;
+
+  try {
+    const creds = JSON.parse(raw);
     const oauth = creds.claudeAiOauth as { accessToken?: unknown; expiresAt?: unknown } | undefined;
     if (typeof oauth?.accessToken !== "string" || typeof oauth?.expiresAt !== "number") return null;
 
     // Strict-expiry check: only reject tokens that are already past `expiresAt`.
     // The 5-min pre-emptive bail was removed in I8 (v0.40.x) — see plan
     // 2026-05-08-us-12-audit-followups-f5-i6-i7.md. Claude Code refreshes
-    // ~/.claude/.credentials.json just-in-time, so forge should defer to the
-    // file's stamp rather than guess at when the refresh will happen.
+    // the credential store just-in-time, so forge should defer to the
+    // stored stamp rather than guess at when the refresh will happen.
     if (Date.now() > oauth.expiresAt) {
       return null;
     }

@@ -9,13 +9,35 @@ const mockStream = vi.fn();
 // tests that assert `mockCreate` was never called will fail loudly.
 const mockCreate = vi.fn();
 
+// I8 (v0.40.x): callClaude now branches on `err instanceof Anthropic.AuthenticationError`.
+// Expose a real, throwable class as a static on the default mock so production code's
+// `instanceof` check succeeds for AC-G probe 2/3 and so unrelated paths fail through
+// (e.g. instanceof check is `false` for `new Error(...)`).
+class MockAuthenticationError extends Error {
+  status = 401;
+  constructor(message = "401 unauthorized") {
+    super(message);
+    this.name = "AuthenticationError";
+  }
+}
+
+class MockAnthropic {
+  messages = { stream: mockStream, create: mockCreate };
+  static AuthenticationError = MockAuthenticationError;
+}
+
 vi.mock("@anthropic-ai/sdk", () => {
-  return {
-    default: class MockAnthropic {
-      messages = { stream: mockStream, create: mockCreate };
-    },
-  };
+  return { default: MockAnthropic };
 });
+
+// I8 AC-G probe 1 needs to stub the credentials-file read. Hoist the mock so
+// `anthropic.ts`'s top-level `import { readFileSync } from "node:fs"` resolves
+// to this stub. Default behaviour throws ENOENT — tests that rely on creds
+// override `mockReadFileSync.mockImplementationOnce(...)` per case.
+const mockReadFileSync = vi.fn();
+vi.mock("node:fs", () => ({
+  readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
+}));
 
 /** Build a stream-handle stub whose `finalMessage()` resolves to `message`. */
 function streamHandle(message: {
@@ -36,6 +58,15 @@ beforeEach(async () => {
   resetClient();
   mockStream.mockReset();
   mockCreate.mockReset();
+  // Default: any unstubbed credential-file read throws ENOENT (matches a host
+  // with no ~/.claude/.credentials.json). Tests that need OAuth fallback
+  // override per-case with `mockReadFileSync.mockImplementationOnce(...)`.
+  mockReadFileSync.mockReset();
+  mockReadFileSync.mockImplementation(() => {
+    const err = new Error("ENOENT") as NodeJS.ErrnoException;
+    err.code = "ENOENT";
+    throw err;
+  });
 });
 
 afterEach(() => {
@@ -239,5 +270,164 @@ describe("callClaude — isMaxTokensStop fail-safe (#349)", () => {
     const { callClaude: callAgain } = await import("./anthropic.js");
     expect(callAgain).toBe(callClaude);
     expect(LLMOutputTruncatedError).toBeDefined();
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// I8 (v0.40.x) — defer to Claude Code's credentials file. AC-G probes.
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Plan: .ai-workspace/plans/2026-05-08-us-12-audit-followups-f5-i6-i7.md (I8).
+//
+// AC-G covers three observable behaviours:
+//   1. No pre-emptive 5-min bail: a token with 30s of validity is USED, not
+//      rejected. `getClient()` must not throw, and stderr must not carry the
+//      old "expired or expiring soon, skipping" line.
+//   2. 401 retry: when the SDK's first call rejects with an
+//      `Anthropic.AuthenticationError`-shaped error and the second succeeds,
+//      `callClaude` returns the second call's payload and the SDK is invoked
+//      exactly twice.
+//   3. Skip retry on API key: with `ANTHROPIC_API_KEY` set AND a first-401
+//      stub, the original AuthenticationError propagates and the SDK is
+//      invoked exactly once (re-reading a file you don't read can't help).
+describe("I8 — getClient() does not pre-emptively bail on near-expiry tokens (AC-G probe 1)", () => {
+  it("accepts an OAuth token with 30 seconds of validity remaining", async () => {
+    // Force the OAuth fallback path by removing the API key for this test.
+    delete process.env.ANTHROPIC_API_KEY;
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    // Token expires in 30 seconds — under the old 5-min bail this would have
+    // been rejected with "expired or expiring soon, skipping". Strict-expiry
+    // mode (post-I8) accepts it.
+    const expiresAt = Date.now() + 30_000;
+    mockReadFileSync.mockImplementationOnce(() =>
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "oauth-access-token-near-expiry",
+          expiresAt,
+        },
+      }),
+    );
+
+    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const { getClient } = await import("./anthropic.js");
+      const client = getClient(); // Must NOT throw.
+      expect(client).toBeDefined();
+      expect(client).toBeInstanceOf(MockAnthropic);
+
+      // The legacy bail logged "OAuth token expired or expiring soon, skipping"
+      // to stderr before returning null. After I8 there is no pre-emptive
+      // rejection, so that line must never appear.
+      const stderrCalls = stderrSpy.mock.calls.map((c) => String(c[0] ?? ""));
+      expect(stderrCalls.some((line) => line.includes("expired or expiring soon"))).toBe(false);
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+});
+
+describe("I8 — callClaude retries once on AuthenticationError (AC-G probe 2)", () => {
+  it("retries on 401, returning the second call's payload after exactly two invocations", async () => {
+    // Use the API-key branch is NOT what we want here — the retry guard skips
+    // when ANTHROPIC_API_KEY is set. Force OAuth path so the retry runs.
+    delete process.env.ANTHROPIC_API_KEY;
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    // Both `getClient()` calls inside `callClaude` will read the credentials
+    // file; serve a valid token both times.
+    mockReadFileSync.mockImplementation(() =>
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "oauth-access-token",
+          expiresAt: Date.now() + 60 * 60 * 1000,
+        },
+      }),
+    );
+
+    // First stream() invocation: finalMessage() rejects with a 401-shaped
+    // error. Second invocation: resolves normally with text "after-retry".
+    mockStream
+      .mockReturnValueOnce({
+        finalMessage: () => Promise.reject(new MockAuthenticationError()),
+      })
+      .mockReturnValueOnce(
+        streamHandle({
+          content: [{ type: "text", text: "after-retry" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 10, output_tokens: 4 },
+        }),
+      );
+
+    const { callClaude } = await import("./anthropic.js");
+
+    const result = await callClaude({
+      system: "s",
+      messages: [{ role: "user", content: "u" }],
+    });
+
+    expect(result.text).toBe("after-retry");
+    // Two-surface assertion (P64): producer (call count) + consumer (returned text).
+    expect(mockStream).toHaveBeenCalledTimes(2);
+  });
+
+  it("propagates non-401 errors without retrying (e.g. APIConnectionError)", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    mockReadFileSync.mockImplementation(() =>
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "oauth-access-token",
+          expiresAt: Date.now() + 60 * 60 * 1000,
+        },
+      }),
+    );
+
+    // A non-AuthenticationError (e.g. plain TypeError) must NOT trigger the
+    // 401 retry path — pass-through unchanged.
+    const networkErr = new TypeError("connection reset");
+    mockStream.mockReturnValueOnce({
+      finalMessage: () => Promise.reject(networkErr),
+    });
+
+    const { callClaude } = await import("./anthropic.js");
+
+    await expect(
+      callClaude({
+        system: "s",
+        messages: [{ role: "user", content: "u" }],
+      }),
+    ).rejects.toBe(networkErr);
+
+    expect(mockStream).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("I8 — callClaude skips retry when ANTHROPIC_API_KEY is set (AC-G probe 3)", () => {
+  it("propagates the original AuthenticationError without retrying", async () => {
+    // ANTHROPIC_API_KEY is set by the suite-scoped beforeEach.
+    expect(process.env.ANTHROPIC_API_KEY).toBe("sk-test-key");
+
+    const authErr = new MockAuthenticationError("401 invalid key");
+    mockStream.mockReturnValueOnce({
+      finalMessage: () => Promise.reject(authErr),
+    });
+
+    const { callClaude } = await import("./anthropic.js");
+
+    await expect(
+      callClaude({
+        system: "s",
+        messages: [{ role: "user", content: "u" }],
+      }),
+    ).rejects.toBe(authErr);
+
+    // No retry — file re-read can't help the API-key path.
+    expect(mockStream).toHaveBeenCalledTimes(1);
   });
 });

@@ -11,10 +11,6 @@ const DEFAULT_MODEL = "claude-sonnet-4-6";
 // pay nothing extra — the raised ceiling just stops clipping premature.
 const DEFAULT_MAX_TOKENS = 32000;
 
-let client: Anthropic | null = null;
-// Track the OAuth token's expiry so we can evict the cache before it goes stale.
-let clientExpiresAt: number | null = null;
-
 /** v0.35.1 AC-6 — credential-source provenance for the BUDGET widget marker. */
 export type CredentialSource = "api-key" | "oauth" | "unknown";
 
@@ -38,7 +34,13 @@ export function getCredentialSource(): CredentialSource {
 
 /**
  * Read the Claude OAuth access token from ~/.claude/.credentials.json.
- * Returns null if the file doesn't exist, is invalid, or the token is expired.
+ * Returns null if the file doesn't exist, is invalid, or the token is *strictly*
+ * expired. Per I8 (2026-05-08), we no longer pre-emptively reject tokens that
+ * are merely close to expiry — Claude Code's main process refreshes the file
+ * just-in-time, so deferring to the file's `expiresAt` strictly is correct.
+ * If a token issued seconds-ago expires mid-call, the 401-retry path in
+ * `callClaude` re-reads the file (which Claude Code may have refreshed) and
+ * retries once.
  */
 function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
   try {
@@ -47,10 +49,12 @@ function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
     const oauth = creds.claudeAiOauth as { accessToken?: unknown; expiresAt?: unknown } | undefined;
     if (typeof oauth?.accessToken !== "string" || typeof oauth?.expiresAt !== "number") return null;
 
-    // Check expiry — reject if less than 5 minutes remaining
-    const remainingMs = oauth.expiresAt - Date.now();
-    if (remainingMs < 5 * 60 * 1000) {
-      console.error("forge: OAuth token expired or expiring soon, skipping");
+    // Strict-expiry check: only reject tokens that are already past `expiresAt`.
+    // The 5-min pre-emptive bail was removed in I8 (v0.40.x) — see plan
+    // 2026-05-08-us-12-audit-followups-f5-i6-i7.md. Claude Code refreshes
+    // ~/.claude/.credentials.json just-in-time, so forge should defer to the
+    // file's stamp rather than guess at when the refresh will happen.
+    if (Date.now() > oauth.expiresAt) {
       return null;
     }
 
@@ -61,43 +65,43 @@ function readOAuthToken(): { accessToken: string; expiresAt: number } | null {
 }
 
 /**
- * Reset the cached Anthropic client. Intended for tests and key/token
- * rotation scenarios where the module-level singleton needs to be
- * re-initialized with fresh credentials.
+ * Reset any cached client state. Retained as a no-op-flavoured shim for
+ * call-sites that historically reset the module-level singleton (notably the
+ * test suite's `beforeEach`). After I8 (v0.40.x) `getClient()` no longer
+ * memoizes — it re-reads the credentials file on every call — so there is
+ * nothing to evict. Kept as an exported function to avoid churn at all
+ * existing call-sites; its behaviour is now intentionally a no-op.
  */
 export function resetClient(): void {
-  client = null;
-  clientExpiresAt = null;
+  // No-op: there is no cached client state to clear since I8 dropped the
+  // module-level singleton. See `getClient()` below.
 }
 
+/**
+ * Construct a fresh `Anthropic` client. Always re-reads the credentials file
+ * (when falling back to OAuth) so concurrent Claude Code refreshes are picked
+ * up on the very next call — no cache, no eviction window. Construction is
+ * configuration-only (no network), so the per-call cost is negligible.
+ *
+ * Precedence (unchanged from prior behaviour):
+ *   1. `ANTHROPIC_API_KEY` env var
+ *   2. `~/.claude/.credentials.json` (Claude Code OAuth)
+ */
 export function getClient(): Anthropic {
-  // Evict cache if the OAuth token is expiring within 5 minutes
-  if (client && clientExpiresAt !== null && Date.now() >= clientExpiresAt - 5 * 60 * 1000) {
-    client = null;
-    clientExpiresAt = null;
-  }
-  if (client) return client;
-
   // 1. Try ANTHROPIC_API_KEY (works with direct API calls and CI)
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (apiKey) {
-    console.error("forge: using ANTHROPIC_API_KEY for auth");
-    client = new Anthropic({ apiKey });
-    clientExpiresAt = null;
-    return client;
+    return new Anthropic({ apiKey });
   }
 
   // 2. Fall back to Claude OAuth token (Claude Code Max subscription).
   //    The OAuth access token from ~/.claude/.credentials.json is accepted by the
   //    Anthropic SDK as authToken for direct API calls (no Claude Code proxy
   //    required). Works for Max-plan users who haven't set ANTHROPIC_API_KEY.
-  //    Token expiry is handled by the cache eviction check above (5-min margin).
+  //    Strict-expiry only — pre-emptive 5-min bail removed in I8.
   const oauthCreds = readOAuthToken();
   if (oauthCreds) {
-    console.error("forge: using Claude OAuth token for auth");
-    client = new Anthropic({ authToken: oauthCreds.accessToken });
-    clientExpiresAt = oauthCreds.expiresAt;
-    return client;
+    return new Anthropic({ authToken: oauthCreds.accessToken });
   }
 
   throw new Error(
@@ -253,10 +257,8 @@ export function extractJson(text: string): unknown {
  * whole helper rather than adding a fragile heuristic.
  */
 export async function callClaude(options: CallClaudeOptions): Promise<CallClaudeResult> {
-  const anthropic = getClient();
   const effectiveMaxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
-
-  const stream = anthropic.messages.stream({
+  const streamArgs = {
     model: options.model ?? DEFAULT_MODEL,
     max_tokens: effectiveMaxTokens,
     system: options.jsonMode
@@ -264,8 +266,38 @@ export async function callClaude(options: CallClaudeOptions): Promise<CallClaude
         "\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown fences, no preamble text, no trailing text. Just the JSON object."
       : options.system,
     messages: options.messages,
-  });
-  const response = await stream.finalMessage();
+  };
+
+  // I8 (v0.40.x): single-retry on 401 AuthenticationError.
+  //
+  // The OAuth access token in ~/.claude/.credentials.json is refreshed
+  // just-in-time by Claude Code's main process. If forge's MCP child read
+  // the file, started a stream, and Anthropic rejected the token mid-call
+  // (because Claude Code refreshed in the meantime), re-reading the file
+  // typically yields a fresh token. Reconstruct a brand-new client (which
+  // re-reads the credentials file in its OAuth fallback path) and retry once.
+  //
+  // We DO NOT retry when ANTHROPIC_API_KEY is set: the file is not in play,
+  // re-reading cannot help, and looping on a bad API key would only paper
+  // over a misconfiguration. Let the original error propagate in that case.
+  //
+  // We DO NOT status-code-sniff: the SDK exposes `Anthropic.AuthenticationError`
+  // (extends `APIError<401>`) precisely for this purpose. See SDK 0.82.0
+  // `core/error.d.ts:36`. Other error kinds (APIConnectionError, RateLimitError,
+  // overloaded, etc.) pass through unchanged — they have their own recovery
+  // semantics that 401-retry would not help.
+  let response: Anthropic.Message;
+  try {
+    response = await getClient().messages.stream(streamArgs).finalMessage();
+  } catch (err) {
+    const isAuthError = err instanceof Anthropic.AuthenticationError;
+    const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
+    if (!isAuthError || hasApiKey) {
+      throw err;
+    }
+    // Fresh client — re-reads ~/.claude/.credentials.json on construction.
+    response = await getClient().messages.stream(streamArgs).finalMessage();
+  }
 
   // Extract text from response content blocks
   const text = response.content

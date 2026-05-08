@@ -182,6 +182,17 @@ export interface RunRecord {
  *   - "no-vocabulary": grounding was lenient because no source vocabulary
  *     could be built (empty/unparseable affectedPaths). The spec was written
  *     verbatim without strips.
+ *   - "spec-gen-failed": the spec-generator call itself threw (LLM error,
+ *     filesystem write failure, schema-validation throw, etc). Was previously
+ *     swallowed silently to stderr — F4 fix surfaces it on both the run
+ *     record's `generatedDocs.warnings` AND the MCP top-level
+ *     `specGenWarnings`. `message` is the truncated `Error.message` for
+ *     consumer triage (no stack — error-class warning, not a debug payload).
+ *   - "spec-gen-skipped-on-pass": the run is structurally incomplete — PASS
+ *     verdict + synthesized-fallback `generatedDocs` (specPath:"" because
+ *     spec-gen failed but the ADR extractor produced canonical paths
+ *     downstream). Without this marker the consumer would see PASS + empty
+ *     specPath silently. F4 fix.
  */
 export type SpecGeneratorWarning =
   | {
@@ -199,6 +210,14 @@ export type SpecGeneratorWarning =
   | {
       kind: "no-vocabulary";
       filesScanned: number;
+    }
+  | {
+      kind: "spec-gen-failed";
+      message: string;
+    }
+  | {
+      kind: "spec-gen-skipped-on-pass";
+      message: string;
     };
 
 /**
@@ -224,6 +243,14 @@ export const SpecGeneratorWarningSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("no-vocabulary"),
     filesScanned: z.number().int().nonnegative(),
+  }),
+  z.object({
+    kind: z.literal("spec-gen-failed"),
+    message: z.string(),
+  }),
+  z.object({
+    kind: z.literal("spec-gen-skipped-on-pass"),
+    message: z.string(),
   }),
 ]);
 

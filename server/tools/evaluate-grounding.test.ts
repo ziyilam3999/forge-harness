@@ -171,7 +171,7 @@ describe("forge_evaluate (story) — v0.38.0 grounding observability surface", (
     expect(record.generatedDocs!.warnings).toEqual(result.specGenWarnings);
   });
 
-  it("AC-6: spec-gen failure path still emits an empty specGenWarnings (field present)", async () => {
+  it("AC-6 / F4: spec-gen failure path surfaces typed warnings on the MCP top-level response", async () => {
     // Force spec-gen to fail.
     const spec = await import("../lib/spec-generator.js");
     vi.mocked(spec.generateSpecForStory).mockRejectedValueOnce(new Error("boom"));
@@ -185,7 +185,20 @@ describe("forge_evaluate (story) — v0.38.0 grounding observability surface", (
       planJson: planJsonNoBuildPrefix(),
       projectPath: "/some/path",
     });
-    expect(result.specGenWarnings).toEqual([]);
+
+    // F4 fix — previously this asserted `[]` (the silent-swallow path).
+    // Now the failure surfaces as `spec-gen-failed` + `spec-gen-skipped-on-pass`.
+    expect(result.specGenWarnings).toBeDefined();
+    expect(result.specGenWarnings!.length).toBeGreaterThanOrEqual(2);
+    const kinds = result.specGenWarnings!.map((w) => w.kind);
+    expect(kinds).toContain("spec-gen-failed");
+    expect(kinds).toContain("spec-gen-skipped-on-pass");
+
+    // Both surfaces carry the same warnings (P64).
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const record = mockedWriteRunRecord.mock.calls[0][1];
+    expect(record.generatedDocs).toBeDefined();
+    expect(record.generatedDocs!.warnings).toEqual(result.specGenWarnings);
   });
 
   it("AC-9: detectSharedBuildPrefix is invoked + result is byte-stable across calls", async () => {

@@ -195,7 +195,33 @@ describe("GeneratedDocsSchema (AC-10) — warnings is a typed array, default []"
     const noVocab = { kind: "no-vocabulary", filesScanned: 0 };
     const parsed = SpecGeneratorWarningSchema.parse(noVocab);
     expect(parsed.kind).toBe("no-vocabulary");
-    expect(parsed.filesScanned).toBe(0);
+    if (parsed.kind === "no-vocabulary") {
+      expect(parsed.filesScanned).toBe(0);
+    }
+  });
+
+  it("parses a 'spec-gen-failed' warning (F4 — un-swallow)", () => {
+    const failed = {
+      kind: "spec-gen-failed",
+      message: "synthetic crash from generateSpecForStory",
+    };
+    const parsed = SpecGeneratorWarningSchema.parse(failed);
+    expect(parsed.kind).toBe("spec-gen-failed");
+    if (parsed.kind === "spec-gen-failed") {
+      expect(parsed.message).toBe("synthetic crash from generateSpecForStory");
+    }
+  });
+
+  it("parses a 'spec-gen-skipped-on-pass' warning (F4 — PASS-incomplete gate)", () => {
+    const skipped = {
+      kind: "spec-gen-skipped-on-pass",
+      message: "PASS verdict but spec-generator threw",
+    };
+    const parsed = SpecGeneratorWarningSchema.parse(skipped);
+    expect(parsed.kind).toBe("spec-gen-skipped-on-pass");
+    if (parsed.kind === "spec-gen-skipped-on-pass") {
+      expect(parsed.message).toBe("PASS verdict but spec-generator threw");
+    }
   });
 
   it("parses a generatedDocs whose warnings array carries a 'no-vocabulary' entry", () => {

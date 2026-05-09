@@ -6,6 +6,8 @@
  * output that wastes all tokens spent so far.
  */
 
+import { DEFAULT_MODEL } from "./anthropic.js";
+
 /** Hardcoded pricing per million tokens (USD). */
 const PRICING = {
   "claude-sonnet-4-6": { inputPerMillion: 3.0, outputPerMillion: 15.0 },
@@ -42,6 +44,7 @@ export class CostTracker {
   private budgetUsd: number | null;
   private isOAuth: boolean;
   private stalePricingWarned = false;
+  private unknownModelWarned = false;
 
   constructor(options: { budgetUsd?: number; isOAuth?: boolean } = {}) {
     this.budgetUsd = options.budgetUsd ?? null;
@@ -60,6 +63,26 @@ export class CostTracker {
       );
       this.stalePricingWarned = true;
     }
+  }
+
+  /**
+   * P45 (v0.40.6) — warn once per CostTracker instance when the operator-set
+   * FORGE_MODEL (or per-call override) is not in the PRICING table.
+   *
+   * Mirrors `stalePricingWarned` (lines 44, 58) — single-instance latch so
+   * the warning fires exactly once even if many `recordUsage` calls land for
+   * the same unknown model in one run. Estimates remain `null` (P45 + F46:
+   * never silent $0 — operators must distinguish "no PRICING row" from
+   * "actual zero").
+   */
+  private warnUnknownModel(model: string): void {
+    if (this.unknownModelWarned) return;
+    console.error(
+      `forge: model "${model}" is not in the cost-tracking PRICING table ` +
+        `(known: ${Object.keys(PRICING).join(", ")}). ` +
+        `Estimates will be null for this run; calls still proceed.`,
+    );
+    this.unknownModelWarned = true;
   }
 
   /**
@@ -87,12 +110,14 @@ export class CostTracker {
     }
 
     let costUsd: number | null = null;
-    const effectiveModel = model ?? "claude-sonnet-4-6";
+    const effectiveModel = model ?? DEFAULT_MODEL;
     if (isPricingModel(effectiveModel)) {
       const pricing = PRICING[effectiveModel];
       costUsd =
         (inputTokens / 1_000_000) * pricing.inputPerMillion +
         (outputTokens / 1_000_000) * pricing.outputPerMillion;
+    } else {
+      this.warnUnknownModel(effectiveModel);
     }
 
     this.stages.push({

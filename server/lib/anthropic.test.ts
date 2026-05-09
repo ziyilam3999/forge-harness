@@ -21,9 +21,24 @@ class MockAuthenticationError extends Error {
   }
 }
 
+// A1 (v0.40.6) — production code branches on `err instanceof Anthropic.NotFoundError`
+// (404 model_not_found). Expose a real, throwable class as a static on the default
+// mock so the `instanceof` check resolves correctly against test-thrown errors.
+// Without this static, `err instanceof Anthropic.NotFoundError` returns false and
+// the A1 catch silently fails to fire — case (v) would pass the test but not exercise
+// the production path.
+class MockNotFoundError extends Error {
+  status = 404;
+  constructor(message = "404 model_not_found") {
+    super(message);
+    this.name = "NotFoundError";
+  }
+}
+
 class MockAnthropic {
   messages = { stream: mockStream, create: mockCreate };
   static AuthenticationError = MockAuthenticationError;
+  static NotFoundError = MockNotFoundError;
 }
 
 vi.mock("@anthropic-ai/sdk", () => {
@@ -610,5 +625,183 @@ describe("F6 — KEYCHAIN_SERVICE_NAME export contract (F49 mitigation)", () => 
   it("exports the canonical Keychain service name as a string constant", async () => {
     const mod = await import("./anthropic.js");
     expect(mod.KEYCHAIN_SERVICE_NAME).toBe("Claude Code-credentials");
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// α (v0.40.6) — FORGE_MODEL env var override (AC-A, AC-B, AC-C, AC-D)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Plan: .ai-workspace/plans/2026-05-08-forge-model-alpha-a1-implementation.md.
+//
+// `DEFAULT_MODEL` is read at module-load via an IIFE (matches
+// FORGE_CORRECTOR_MAX_TOKENS pattern at plan.ts:336-348). Test the resolution
+// order via `vi.resetModules()` + dynamic re-import after mutating
+// `process.env.FORGE_MODEL`. Pattern matches `plan.test.ts:1313-1389` precedent
+// (direct env mutation with manual save/restore).
+describe("α — FORGE_MODEL env var override (AC-A, AC-B, AC-C)", () => {
+  const ORIGINAL_FORGE_MODEL = process.env.FORGE_MODEL;
+
+  afterEach(() => {
+    if (ORIGINAL_FORGE_MODEL === undefined) {
+      delete process.env.FORGE_MODEL;
+    } else {
+      process.env.FORGE_MODEL = ORIGINAL_FORGE_MODEL;
+    }
+  });
+
+  it("(i) FORGE_MODEL=claude-3-7-sonnet → DEFAULT_MODEL reflects it; messages.stream receives that model", async () => {
+    process.env.FORGE_MODEL = "claude-3-7-sonnet";
+    vi.resetModules();
+    const { DEFAULT_MODEL, callClaude, resetClient } = await import("./anthropic.js");
+    resetClient();
+    expect(DEFAULT_MODEL).toBe("claude-3-7-sonnet");
+
+    mockStream.mockReturnValueOnce(
+      streamHandle({
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 2 },
+      }),
+    );
+
+    await callClaude({ system: "s", messages: [{ role: "user", content: "u" }] });
+
+    const sdkArgs = mockStream.mock.calls[0][0];
+    expect(sdkArgs.model).toBe("claude-3-7-sonnet");
+  });
+
+  it("(ii) FORGE_MODEL unset → DEFAULT_MODEL = claude-sonnet-4-6 (AC-B default unchanged)", async () => {
+    delete process.env.FORGE_MODEL;
+    vi.resetModules();
+    const { DEFAULT_MODEL } = await import("./anthropic.js");
+    expect(DEFAULT_MODEL).toBe("claude-sonnet-4-6");
+  });
+
+  it("(iii) FORGE_MODEL='   ' (whitespace-only) → trimmed; default applied", async () => {
+    process.env.FORGE_MODEL = "   ";
+    vi.resetModules();
+    const { DEFAULT_MODEL } = await import("./anthropic.js");
+    expect(DEFAULT_MODEL).toBe("claude-sonnet-4-6");
+  });
+
+  it("(iv) per-call options.model overrides FORGE_MODEL (AC-C)", async () => {
+    process.env.FORGE_MODEL = "claude-3-7-sonnet";
+    vi.resetModules();
+    const { callClaude, resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    mockStream.mockReturnValueOnce(
+      streamHandle({
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 2 },
+      }),
+    );
+
+    await callClaude({
+      system: "s",
+      messages: [{ role: "user", content: "u" }],
+      model: "claude-opus-4-6",
+    });
+
+    const sdkArgs = mockStream.mock.calls[0][0];
+    expect(sdkArgs.model).toBe("claude-opus-4-6");
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// A1 (v0.40.6) — obsolescence-aware loud failure on 404 model_not_found
+// ───────────────────────────────────────────────────────────────────────────
+//
+// AC-H: callClaude re-throws Anthropic.NotFoundError as a loud Error whose
+// message contains the model name verbatim, the docs URL, FORGE_MODEL, and a
+// restart instruction.
+//
+// AC-I: A1 does NOT catch non-404 errors. F6's existing 401-retry logic
+// continues to work (regression-positive). Suite-scoped beforeEach sets
+// ANTHROPIC_API_KEY=sk-test-key; case (vi) MUST `delete` it to actually
+// exercise F6's retry path — established precedent at lines 313, 353, 395.
+describe("A1 — callClaude re-throws NotFoundError with operator guidance (AC-H)", () => {
+  it("(v) Anthropic.NotFoundError thrown by stream → re-thrown with model name + docs URL + FORGE_MODEL + restart guidance", async () => {
+    const notFoundErr = new MockNotFoundError("404 model_not_found");
+    mockStream.mockReturnValueOnce({
+      finalMessage: () => Promise.reject(notFoundErr),
+    });
+
+    const { callClaude } = await import("./anthropic.js");
+
+    let caught: Error | undefined;
+    try {
+      await callClaude({
+        system: "s",
+        messages: [{ role: "user", content: "u" }],
+        model: "claude-deprecated-3",
+      });
+      expect.fail("should have thrown");
+    } catch (e) {
+      caught = e as Error;
+    }
+
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain("claude-deprecated-3");
+    expect(caught!.message).toContain(
+      "https://docs.anthropic.com/en/docs/about-claude/models",
+    );
+    expect(caught!.message).toContain("FORGE_MODEL");
+    expect(caught!.message).toContain("Restart");
+    // The original NotFoundError should NOT propagate as-is — A1 wraps it.
+    expect(caught).not.toBe(notFoundErr);
+
+    // Producer-side assertion: stream invoked exactly once (no retry on 404).
+    expect(mockStream).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("A1 — A1 does NOT catch non-404 errors (AC-I, F6 401-retry regression-positive)", () => {
+  it("(vi) Anthropic.AuthenticationError thrown → A1 doesn't intercept; F6's 401-retry runs", async () => {
+    // F6 retry path requires the OAuth fallback (skips when ANTHROPIC_API_KEY
+    // is set). Suite-scoped beforeEach at :65-87 sets it; established precedent
+    // for this delete: anthropic.test.ts:313, 353, 395.
+    delete process.env.ANTHROPIC_API_KEY;
+    const { resetClient } = await import("./anthropic.js");
+    resetClient();
+
+    // Provide a valid OAuth token for getClient()'s fallback path.
+    mockReadFileSync.mockImplementation(() =>
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "oauth-access-token",
+          expiresAt: Date.now() + 60 * 60 * 1000,
+        },
+      }),
+    );
+
+    // First stream() invocation: rejects with 401. Second: resolves normally.
+    // If A1 incorrectly caught AuthenticationError, the second call would
+    // never happen and the test would fail at the call-count assertion.
+    mockStream
+      .mockReturnValueOnce({
+        finalMessage: () => Promise.reject(new MockAuthenticationError()),
+      })
+      .mockReturnValueOnce(
+        streamHandle({
+          content: [{ type: "text", text: "after-retry" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 10, output_tokens: 4 },
+        }),
+      );
+
+    const { callClaude } = await import("./anthropic.js");
+
+    const result = await callClaude({
+      system: "s",
+      messages: [{ role: "user", content: "u" }],
+    });
+
+    expect(result.text).toBe("after-retry");
+    // Two-surface assertion (P64): producer (call count proves retry ran) +
+    // consumer (returned text proves second call's payload was used).
+    expect(mockStream).toHaveBeenCalledTimes(2);
   });
 });

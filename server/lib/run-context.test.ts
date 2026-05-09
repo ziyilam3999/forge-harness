@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { CallClaudeResult } from "./anthropic.js";
 
-// Mock the anthropic module
+// Mock the anthropic module. `DEFAULT_MODEL` is the α (v0.40.6) export — cost.ts
+// imports it as the fallback when no model is supplied to recordUsage. Without
+// it on the mock, cost.ts throws "No DEFAULT_MODEL export is defined" the moment
+// trackedCallClaude reaches its CostTracker.recordUsage call.
 vi.mock("./anthropic.js", () => ({
   callClaude: vi.fn(),
+  DEFAULT_MODEL: "claude-sonnet-4-6",
 }));
 
 // Mock audit to avoid file I/O

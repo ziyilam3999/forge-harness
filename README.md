@@ -66,6 +66,28 @@ npm test          # Run Vitest suite
 npm run lint      # Run ESLint
 ```
 
+## Troubleshooting
+
+### Max-plan OAuth-tier rate-limit (429)
+
+If you're running forge-harness with Claude Code's Max-plan OAuth login (no `ANTHROPIC_API_KEY` set), high-volume spec regeneration can hit the Max-plan OAuth rate-limit bucket. The OAuth bucket is **separate from the API-key bucket** — it has its own (tighter, undocumented) limits and isn't visible in the Anthropic console.
+
+Symptoms:
+
+- `spec-gen-shell-only` warning with `429 rate_limit_error` in the run record
+- Often co-emitted with a misleading `spec-gen-creds-keychain-only` warning (see [#546](https://github.com/ziyilam3999/forge-harness/issues/546))
+- The failing request_ids do **not** appear in your Anthropic console Logs view — because that console only shows API-key traffic
+
+**Workaround:** set `ANTHROPIC_API_KEY` from a separate API-key identity. The API-key path uses a different rate-limit bucket and bypasses the OAuth tier entirely. API-key traffic is also visible in your Anthropic console for cost tracking.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Get an API key at: https://console.anthropic.com/settings/keys
+
+After setting the env var, restart Claude Code so the forge MCP child picks up the new environment.
+
 ## Architecture
 
 Forge runs as a local MCP server — a Node subprocess that Claude Code (or any MCP client) connects to over stdio. No network calls except `forge_plan`'s LLM round-trip; everything else stays on your machine.

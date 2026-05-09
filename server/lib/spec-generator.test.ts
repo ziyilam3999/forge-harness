@@ -897,3 +897,124 @@ describe("spec-generator — I6 shell-only path (LLM unavailable)", () => {
     }
   });
 });
+
+// #548 (v0.40.7) — Surface Anthropic's `retry-after` header on 429 in the
+// spec-gen-shell-only warning so operators know when it's safe to retry.
+//
+// The SDK exposes `RateLimitError` (extends APIError<429, Headers>) with a
+// `Headers` Web-API instance. Accessor is `.get('retry-after')` —
+// bracket-index is a TS error.
+describe("spec-generator — #548 retry-after surfaced on 429 RateLimitError", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-548-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  // AC-548-1 — RateLimitError with retry-after: N → message contains "retry after Ns".
+  it("AC-548-1: includes retry-after seconds when 429 with header", async () => {
+    // Mock Anthropic.RateLimitError shape — same nominal-typing pattern used
+    // in anthropic.test.ts (static <X>Error = Mock<X>Error precedent).
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const headers = new Headers({ "retry-after": "60" });
+    const rateLimitErr = new Anthropic.default.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+      undefined,
+      headers,
+    );
+    const synthThrowsRateLimit = async (): Promise<SynthesisResponse> => {
+      throw rateLimitErr;
+    };
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: synthThrowsRateLimit,
+    });
+    const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
+    expect(shellOnly).toBeDefined();
+    if (shellOnly && shellOnly.kind === "spec-gen-shell-only") {
+      expect(shellOnly.message).toContain("retry after 60s");
+    }
+  });
+
+  // AC-548-2 — non-RateLimitError synth throw produces message WITHOUT retry-after.
+  it("AC-548-2: non-RateLimitError throw produces message without retry-after", async () => {
+    const synthThrowsGeneric = async (): Promise<SynthesisResponse> => {
+      throw new Error("ENOTFOUND api.anthropic.com");
+    };
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: synthThrowsGeneric,
+    });
+    const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
+    expect(shellOnly).toBeDefined();
+    if (shellOnly && shellOnly.kind === "spec-gen-shell-only") {
+      expect(shellOnly.message).not.toContain("retry after");
+    }
+  });
+
+  // AC-548-2 (no-header coverage) — RateLimitError WITHOUT the header → no suffix.
+  it("AC-548-2: RateLimitError without retry-after header produces unsuffixed message", async () => {
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const headers = new Headers(); // empty — no retry-after
+    const rateLimitNoHeader = new Anthropic.default.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+      undefined,
+      headers,
+    );
+    const synthThrowsNoHeader = async (): Promise<SynthesisResponse> => {
+      throw rateLimitNoHeader;
+    };
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: synthThrowsNoHeader,
+    });
+    const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
+    expect(shellOnly).toBeDefined();
+    if (shellOnly && shellOnly.kind === "spec-gen-shell-only") {
+      expect(shellOnly.message).not.toContain("retry after");
+    }
+  });
+
+  // Non-numeric retry-after value (HTTP-date fallback) — preserved verbatim.
+  it("AC-548-1 (HTTP-date variant): non-integer retry-after is preserved verbatim", async () => {
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const httpDate = "Wed, 21 Oct 2026 07:28:00 GMT";
+    const headers = new Headers({ "retry-after": httpDate });
+    const rateLimitDate = new Anthropic.default.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+      undefined,
+      headers,
+    );
+    const synthThrowsDate = async (): Promise<SynthesisResponse> => {
+      throw rateLimitDate;
+    };
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: synthThrowsDate,
+    });
+    const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
+    if (shellOnly && shellOnly.kind === "spec-gen-shell-only") {
+      expect(shellOnly.message).toContain(`retry after ${httpDate}`);
+    }
+  });
+});

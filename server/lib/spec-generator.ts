@@ -19,6 +19,7 @@
  * The merge is by `id`, not by position.
  */
 
+import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { userInfo } from "node:os";
@@ -637,7 +638,31 @@ export async function generateSpecForStory(
     });
   } catch (err) {
     shellOnly = true;
-    const raw = err instanceof Error ? err.message : String(err);
+    let raw = err instanceof Error ? err.message : String(err);
+
+    // #548 (v0.40.7) — surface Anthropic's `retry-after` header on 429 so
+    // operators know when it's safe to retry. The SDK exposes `RateLimitError`
+    // (extends APIError<429, Headers>) with a `Headers` Web-API instance —
+    // accessor is `.get('retry-after')` (NOT bracket-index — Headers is a
+    // class, not a record).
+    //
+    // The header value per RFC 7231 §7.1.3 is either:
+    //   - integer seconds (most common — Anthropic returns this shape)
+    //   - HTTP-date (RFC 1123) — fallback parse
+    //
+    // We append the parsed/raw value to `raw` BEFORE the truncation step
+    // so the suffix lives inside the warning's visible window.
+    if (err instanceof Anthropic.RateLimitError) {
+      const retryAfter = err.headers?.get("retry-after");
+      if (retryAfter) {
+        const seconds = Number.parseInt(retryAfter, 10);
+        const suffix = Number.isFinite(seconds) && seconds > 0
+          ? ` (retry after ${seconds}s)`
+          : ` (retry after ${retryAfter})`;
+        raw = `${raw}${suffix}`;
+      }
+    }
+
     shellOnlyMessage =
       raw.length > SHELL_ONLY_MESSAGE_MAX
         ? raw.slice(0, SHELL_ONLY_MESSAGE_MAX) + "…(truncated)"

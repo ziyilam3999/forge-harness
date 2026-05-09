@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.40.6](https://github.com/ziyilam3999/forge-harness/compare/v0.40.5...v0.40.6) (2026-05-09)
+
+### Features
+
+- **anthropic:** `FORGE_MODEL` env var to override the default model + obsolescence-aware loud failure on 404 model_not_found (A1). Default unchanged when `FORGE_MODEL` unset. α reads `FORGE_MODEL` at module-load via an IIFE in `anthropic.ts` (mirrors the `FORGE_CORRECTOR_MAX_TOKENS` pattern at `plan.ts:336-348`); whitespace-only values are trimmed and treated as unset (intentional divergence — strictly safer than the corrector's no-trim shape). `DEFAULT_MODEL` is exported and imported by `cost.ts`, killing the live P43 violation at `cost.ts:90` where the literal `"claude-sonnet-4-6"` was duplicated as a default-model fallback. Same export-import shape `KEYCHAIN_SERVICE_NAME` used in F6 v0.40.5. A1 catches `Anthropic.NotFoundError` (typed-class instance check, SDK 0.82.0 `core/error.d.ts:40`) inside `callClaude` and re-throws with operator-actionable guidance (model name verbatim + docs URL + `FORGE_MODEL` reference + restart instruction). Type-disjoint with F6's `AuthenticationError` catch (404 vs 401), so F6's 401-retry path is regression-positive. New `unknownModelWarned` warning method on `CostTracker` follows the `stalePricingWarned` pattern at `cost.ts:44,58` — fires once per instance when an operator-set model is not in the PRICING table; `estimatedCostUsd` stays `null` (P45 + F46 — never silent $0). Architectural choice ratified by Phase-1 4-0 reviewer verdict (option α over β/γ/δ/ε); Phase-2 implementation plan ran a 4-round light reviewer chain (14 implementation-correctness edits across rounds 1, 2, 4; round 3 zero edits — earned convergence). Plan: `.ai-workspace/plans/2026-05-08-forge-model-alpha-a1-implementation.md`. Decision plan: `.ai-workspace/plans/2026-05-08-forge-model-config-decision.md`. Tests: +8 cases (1060 → 1068) — 4 α-cases + 2 A1-cases on `anthropic.test.ts`, 2 cost-cases on `cost.test.ts`. Operators must restart the MCP child to pick up `FORGE_MODEL` changes (F54 trap — module-load read).
+
 ## [0.40.5](https://github.com/ziyilam3999/forge-harness/compare/v0.40.4...v0.40.5) (2026-05-08)
 
 ### Bug Fixes

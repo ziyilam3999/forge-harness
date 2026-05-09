@@ -4,7 +4,35 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir, userInfo } from "node:os";
 
-const DEFAULT_MODEL = "claude-sonnet-4-6";
+/**
+ * α (v0.40.6) — operator-overridable default model for callClaude.
+ *
+ * Default model for callClaude when the caller does not pass `options.model`.
+ *
+ * Resolution order:
+ *   1. FORGE_MODEL env var (if set + non-whitespace, trimmed)
+ *   2. Built-in fallback: claude-sonnet-4-6
+ *
+ * Reading happens at module-load (IIFE) — matches FORGE_CORRECTOR_MAX_TOKENS
+ * (plan.ts:336-348) convention. Operators who change FORGE_MODEL mid-process
+ * must restart the MCP child to pick it up (F54 trap — same as v0.40.x release
+ * transitions, where dist/index.js is rebuilt at install but the parent Claude
+ * Code process must restart for the new code to load).
+ *
+ * EXPORTED so cost.ts can use the same default for its PRICING-table lookup —
+ * single source-of-truth per F49 (no dual-locus drift between API client's
+ * default and cost tracker's fallback). Same export pattern as
+ * KEYCHAIN_SERVICE_NAME (line 26 below, F6 v0.40.5 precedent).
+ *
+ * Whitespace handling: `raw.trim()` treats whitespace-only env values as
+ * unset. INTENTIONAL DIVERGENCE from FORGE_CORRECTOR_MAX_TOKENS (which
+ * doesn't trim). Plan's behavior is strictly safer (catches "   " typo).
+ */
+export const DEFAULT_MODEL: string = (() => {
+  const raw = process.env.FORGE_MODEL;
+  if (raw && raw.trim()) return raw.trim();
+  return "claude-sonnet-4-6";
+})();
 
 /**
  * F6 (v0.40.5) — macOS Keychain service name for Claude Code's OAuth blob.
@@ -366,6 +394,30 @@ export async function callClaude(options: CallClaudeOptions): Promise<CallClaude
   try {
     response = await getClient().messages.stream(streamArgs).finalMessage();
   } catch (err) {
+    // A1 (v0.40.6) — obsolescence-aware loud failure.
+    //
+    // Anthropic API returns 404 model_not_found when the requested model has
+    // been deprecated. Re-throw with operator-actionable guidance instead of
+    // letting the cryptic SDK error bubble up. Terminal for this catch block —
+    // F6's 401-retry path runs only when err is NOT a NotFoundError.
+    //
+    // SDK 0.82.0 exposes `Anthropic.NotFoundError` as a typed class
+    // (extends `APIError<404, Headers>`) at `core/error.d.ts:40`, re-exported
+    // at `index.d.ts:6`, and as a static on the default Anthropic class at
+    // `client.d.ts:202`. NOT to be confused with `BetaNotFoundError`
+    // (interface) or `shared.NotFoundError` (interface) — use the class form
+    // via `Anthropic.NotFoundError` (default namespace static).
+    if (err instanceof Anthropic.NotFoundError) {
+      const modelName = streamArgs.model;
+      throw new Error(
+        `Anthropic API rejected model "${modelName}" — likely deprecated. ` +
+          `Set FORGE_MODEL to a current model: https://docs.anthropic.com/en/docs/about-claude/models. ` +
+          `Forge-harness ships an in-code default that gets bumped each release; ` +
+          `if you set FORGE_MODEL=${modelName} explicitly, that name has been deprecated separately. ` +
+          `Restart the MCP child after the change (F54 trap).`,
+      );
+    }
+
     const isAuthError = err instanceof Anthropic.AuthenticationError;
     const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
     if (!isAuthError || hasApiKey) {

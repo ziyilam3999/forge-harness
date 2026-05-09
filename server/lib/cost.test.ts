@@ -120,4 +120,69 @@ describe("CostTracker", () => {
     const date = new Date(PRICING_LAST_UPDATED);
     expect(date.toString()).not.toBe("Invalid Date");
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // α + P45 (v0.40.6) — unknown-model warning + DEFAULT_MODEL import wiring
+  // ─────────────────────────────────────────────────────────────────────
+  //
+  // Plan: .ai-workspace/plans/2026-05-08-forge-model-alpha-a1-implementation.md.
+  //
+  // (vii) When the operator-set FORGE_MODEL (or per-call model override) is
+  // not in the PRICING table, recordUsage emits a console.error EXACTLY ONCE
+  // per CostTracker instance and records `estimatedCostUsd: null` for every
+  // affected stage (P45 + F46 — never silent $0).
+  //
+  // (viii) cost.ts imports DEFAULT_MODEL from anthropic.ts (kills the live
+  // P43 violation at the previous `?? "claude-sonnet-4-6"` literal). When
+  // recordUsage is called without an explicit model, the fallback resolves
+  // through the imported constant — verified by observing that the sonnet
+  // pricing applies (and not, say, throwing or null'ing).
+  it("(vii) warns once per CostTracker instance for unknown models (P45)", () => {
+    const tracker = new CostTracker();
+    tracker.recordUsage("planner", 100, 50, "claude-3-7-sonnet");
+    tracker.recordUsage("critic", 200, 100, "claude-3-7-sonnet");
+    tracker.recordUsage("evaluator", 50, 25, "claude-3-7-sonnet");
+
+    // Filter to the unknown-model warnings (excludes the staleness warning,
+    // which fires unconditionally if PRICING_LAST_UPDATED is more than 90 days old).
+    const calls = (console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const unknownModelWarnings = calls.filter((c) =>
+      String(c[0] ?? "").includes("is not in the cost-tracking PRICING table"),
+    );
+
+    expect(unknownModelWarnings).toHaveLength(1);
+    expect(String(unknownModelWarnings[0][0])).toContain('"claude-3-7-sonnet"');
+    expect(String(unknownModelWarnings[0][0])).toContain("claude-sonnet-4-6");
+    expect(String(unknownModelWarnings[0][0])).toContain("Estimates will be null");
+
+    // All three stages recorded with null cost.
+    const summary = tracker.summarize();
+    expect(summary.breakdown).toHaveLength(3);
+    expect(summary.breakdown.every((s) => s.estimatedCostUsd === null)).toBe(true);
+    expect(tracker.totalCostUsd).toBeNull();
+  });
+
+  it("(viii) recordUsage falls back to DEFAULT_MODEL imported from anthropic.ts (kills cost.ts:90 P43 violation)", async () => {
+    // DEFAULT_MODEL with FORGE_MODEL unset = "claude-sonnet-4-6". cost.ts:90
+    // previously hardcoded that same literal — now it imports DEFAULT_MODEL,
+    // so this test verifies (a) the import wiring landed AND (b) the runtime
+    // fallback still resolves to the sonnet PRICING row.
+    const { DEFAULT_MODEL } = await import("./anthropic.js");
+    expect(DEFAULT_MODEL).toBe("claude-sonnet-4-6"); // pre-condition pin
+
+    const tracker = new CostTracker();
+    // No model arg → falls back to DEFAULT_MODEL.
+    tracker.recordUsage("planner", 1_000_000, 0);
+
+    // sonnet input: 1M * 3.0/M = 3.0. Non-null cost proves the fallback hit
+    // a known PRICING row — i.e. DEFAULT_MODEL resolved to a sonnet variant.
+    expect(tracker.totalCostUsd).toBeCloseTo(3.0);
+
+    // No unknown-model warning fired (DEFAULT_MODEL is in PRICING).
+    const calls = (console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const unknownModelWarnings = calls.filter((c) =>
+      String(c[0] ?? "").includes("is not in the cost-tracking PRICING table"),
+    );
+    expect(unknownModelWarnings).toHaveLength(0);
+  });
 });

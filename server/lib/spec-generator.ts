@@ -705,7 +705,29 @@ export async function generateSpecForStory(
     // just non-zero exit — e.g. /usr/bin/security missing on a stripped-down
     // macOS install), fall through to emitting only `spec-gen-shell-only`.
     // Loud failure preserved via the existing shell-only warning.
-    if (process.platform === "darwin") {
+    //
+    // #546 (v0.40.7) — narrowing gate. The keychain warning is meaningful
+    // ONLY when the underlying synth() failure was auth-class. If the
+    // failure was an HTTP 4xx (other than 401) or 5xx — e.g. 429 rate-limit,
+    // 500 server error — credentials are FINE; the keychain probe would
+    // emit a misleading "Keychain locked or ACL mismatched" warning that
+    // sends the operator down the wrong diagnostic path.
+    //
+    // Anthropic SDK's `APIError.makeMessage` (verified at
+    // node_modules/@anthropic-ai/sdk/core/error.js:18-29) returns
+    // `${status} ${msg}` when both status and msg are truthy — so a real
+    // 429 produces `err.message = "429 ..."`. The regex `^[45][0-9]{2}\b`
+    // matches HTTP 4xx/5xx prefix (P64 producer/consumer seam asserted in
+    // tests, F65 measurement-discipline grounded against the SDK source).
+    //
+    // 401 (AuthenticationError) is excluded from suppression because it IS
+    // auth-class — the keychain probe IS meaningful for 401. The regex
+    // matches all 4xx/5xx including 401, so we explicitly carve 401 out
+    // below to preserve the original F6 path.
+    const isHttp4xxOr5xx = /^[45][0-9]{2}\b/.test(shellOnlyMessage);
+    const is401 = /^401\b/.test(shellOnlyMessage);
+    const suppressKeychainProbe = isHttp4xxOr5xx && !is401;
+    if (process.platform === "darwin" && !suppressKeychainProbe) {
       let keychainEntryExists = false;
       try {
         execFileSync(

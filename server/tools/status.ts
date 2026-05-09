@@ -5,6 +5,79 @@ import { readRunRecords, type PrimaryRecord, type TaggedRunRecord } from "../lib
 import { getDeclaration } from "../lib/declaration-store.js";
 import type { RunRecord } from "../lib/run-record.js";
 
+/**
+ * #544 (v0.40.7) — parse FORGE_SPEC_STALE_DAYS env var.
+ *
+ * Resolution: undefined / empty → 30 fallback. Otherwise parsed integer
+ * ≥ 1, else throw with operator-actionable error (F46 — Silent Numeric
+ * Default avoided; loud failure preserved).
+ *
+ * Exported so tests can drive the parser directly without re-importing
+ * this module (Vitest bundler doesn't support query-string cache-bust).
+ */
+export function parseSpecStaleDays(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return 30;
+  const parsed = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new Error(
+      `FORGE_SPEC_STALE_DAYS must be a positive integer (got "${raw}"). ` +
+        `Set to a number of days >= 1, or unset for the default of 30.`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Module-load IIFE — single-source-of-truth resolution per v0.40.6's
+ * FORGE_MODEL precedent at `server/lib/anthropic.ts:6-7`. F49+P43 risk/
+ * mitigation pair (single locus avoids dual-level enforcement).
+ *
+ * Throws at module load on bad env input — operator sees the failure
+ * before any forge tool dispatches.
+ */
+export const SPEC_STALE_DAYS_THRESHOLD: number = parseSpecStaleDays(
+  process.env.FORGE_SPEC_STALE_DAYS,
+);
+
+const SPEC_REL_PATH = "docs/generated/TECHNICAL-SPEC.md";
+
+/**
+ * Probe `docs/generated/TECHNICAL-SPEC.md` for staleness. Returns the
+ * human-friendly banner string when the file is older than the threshold,
+ * or undefined when fresh / absent / unstattable.
+ *
+ * F45 escape: a `fs.stat` error (broken symlink, permission denied) is
+ * logged to stderr (loud-failure for ops visibility) but does NOT throw —
+ * forge_status is read-only and partial info is always better than a
+ * thrown error.
+ */
+export async function probeSpecStaleness(
+  projectPath: string,
+  thresholdDays: number = SPEC_STALE_DAYS_THRESHOLD,
+  nowFn: () => number = () => Date.now(),
+): Promise<string | undefined> {
+  const specPath = join(projectPath, SPEC_REL_PATH);
+  let mtimeMs: number;
+  try {
+    const s = await stat(specPath);
+    mtimeMs = s.mtimeMs;
+  } catch (err) {
+    // ENOENT (file not generated yet) is expected on a fresh repo —
+    // silent return. Other errors (permission, broken symlink) are loud
+    // for ops visibility.
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code !== "ENOENT") {
+      console.error(
+        `forge_status: stat failed for ${SPEC_REL_PATH} (${code ?? "unknown"}); skipping staleness probe.`,
+      );
+    }
+    return undefined;
+  }
+  const daysSinceUpdate = Math.floor((nowFn() - mtimeMs) / (1000 * 60 * 60 * 24));
+  if (daysSinceUpdate < thresholdDays) return undefined;
+  return `⚠ TECHNICAL-SPEC.md is ${daysSinceUpdate} days old (forge_evaluate to refresh)`;
+}
+
 // ── Zod schema for MCP input ────────────────────────────────
 
 const scopeSchema = z
@@ -90,6 +163,15 @@ export interface StatusOutput {
   };
   corruptedFiles?: string[];
   reason?: string;
+  /**
+   * #544 (v0.40.7) — human-readable banner emitted when
+   * `docs/generated/TECHNICAL-SPEC.md` is older than the
+   * FORGE_SPEC_STALE_DAYS threshold (default 30). Field omitted when
+   * fresh, absent, or stat-error. Additive optional per P50 — agent
+   * consumers can detect staleness via field presence; the string
+   * contains the human-friendly banner for prose surfaces.
+   */
+  staleSpecWarning?: string;
 }
 
 // ── Internal helpers ────────────────────────────────────────
@@ -391,6 +473,10 @@ export async function handleStatus(input: StatusInput): Promise<McpResponse> {
   // Read disk records + detect corruption.
   const { records, corruptedFiles } = await readDiskRecordsWithCorruption(projectPath);
 
+  // #544 — probe TECHNICAL-SPEC.md staleness for cases that return non-empty
+  // bodies. Silent on ENOENT (no spec yet); loud on other stat errors.
+  const staleSpecWarning = await probeSpecStaleness(projectPath);
+
   // Filter to primary records and by scope.
   const primaryAll = records.filter(
     (r): r is PrimaryRecord => r.source === "primary",
@@ -425,6 +511,7 @@ export async function handleStatus(input: StatusInput): Promise<McpResponse> {
       activeRun,
       totals,
       corruptedFiles,
+      ...(staleSpecWarning ? { staleSpecWarning } : {}),
     };
     return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
   }
@@ -436,6 +523,7 @@ export async function handleStatus(input: StatusInput): Promise<McpResponse> {
       generatedAt,
       reason: "no-runs",
       activeRun,
+      ...(staleSpecWarning ? { staleSpecWarning } : {}),
     };
     return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
   }
@@ -447,6 +535,7 @@ export async function handleStatus(input: StatusInput): Promise<McpResponse> {
       generatedAt,
       reason: "scope-miss",
       activeRun,
+      ...(staleSpecWarning ? { staleSpecWarning } : {}),
     };
     return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
   }
@@ -461,6 +550,7 @@ export async function handleStatus(input: StatusInput): Promise<McpResponse> {
     stories,
     activeRun,
     totals,
+    ...(staleSpecWarning ? { staleSpecWarning } : {}),
   };
 
   return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };

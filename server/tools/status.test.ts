@@ -411,3 +411,147 @@ describe("forge_status + forge_declare_story — activeRun (AC-8a)", () => {
     expect(r.isError).toBe(true);
   });
 });
+
+// #544 (v0.40.7) — staleSpecWarning surfaced when docs/generated/TECHNICAL-SPEC.md
+// is older than FORGE_SPEC_STALE_DAYS (default 30). Probe runs on every
+// non-no-forge-dir status response. Field omitted when fresh / absent /
+// stat-error.
+describe("forge_status — #544 staleSpecWarning (TECHNICAL-SPEC.md staleness)", () => {
+  let projectPath: string;
+
+  beforeEach(async () => {
+    projectPath = makeTmpDir();
+    await mkdir(join(projectPath, ".forge", "runs"), { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(projectPath, { recursive: true, force: true });
+  });
+
+  // AC-544-1 — stale spec emits banner.
+  it("AC-544-1: emits staleSpecWarning when TECHNICAL-SPEC.md older than threshold", async () => {
+    const specDir = join(projectPath, "docs", "generated");
+    await mkdir(specDir, { recursive: true });
+    const specPath = join(specDir, "TECHNICAL-SPEC.md");
+    await writeFile(specPath, "# Stale spec\n");
+    // Backdate mtime to 35d ago (> default 30d threshold).
+    const thirtyFiveDaysAgo = Date.now() - 35 * 24 * 60 * 60 * 1000;
+    const utimes = (await import("node:fs/promises")).utimes;
+    await utimes(specPath, new Date(thirtyFiveDaysAgo), new Date(thirtyFiveDaysAgo));
+
+    // Need a record so we land in case-5 (snapshot), not case-3 (no-runs).
+    await writeFile(
+      join(projectPath, ".forge", "runs", "r1.json"),
+      JSON.stringify(makeRecord("US-01", "PASS", new Date().toISOString())),
+    );
+
+    const result = await handleStatus({ projectPath });
+    const body = parseBody(result);
+    expect(body.staleSpecWarning).toBeDefined();
+    expect(body.staleSpecWarning).toContain("TECHNICAL-SPEC.md");
+    expect(body.staleSpecWarning).toContain("days old");
+    expect(body.staleSpecWarning).toMatch(/3[5-9] days old/); // 35-39d window
+  });
+
+  // AC-544-2 — fresh spec → no banner.
+  it("AC-544-2: omits staleSpecWarning when TECHNICAL-SPEC.md is fresh", async () => {
+    const specDir = join(projectPath, "docs", "generated");
+    await mkdir(specDir, { recursive: true });
+    await writeFile(join(specDir, "TECHNICAL-SPEC.md"), "# Fresh spec\n");
+    // Default mtime ≈ now → not stale.
+
+    await writeFile(
+      join(projectPath, ".forge", "runs", "r1.json"),
+      JSON.stringify(makeRecord("US-01", "PASS", new Date().toISOString())),
+    );
+
+    const result = await handleStatus({ projectPath });
+    const body = parseBody(result);
+    expect(body.staleSpecWarning).toBeUndefined();
+  });
+
+  // AC-544-3 — file absent → no banner.
+  it("AC-544-3: omits staleSpecWarning when TECHNICAL-SPEC.md is absent", async () => {
+    // No spec file written. Add a run record so we exercise the snapshot path.
+    await writeFile(
+      join(projectPath, ".forge", "runs", "r1.json"),
+      JSON.stringify(makeRecord("US-01", "PASS", new Date().toISOString())),
+    );
+
+    const result = await handleStatus({ projectPath });
+    const body = parseBody(result);
+    expect(body.staleSpecWarning).toBeUndefined();
+  });
+
+  // AC-544-4 — boot-time validation: bad env value throws via the parser
+  // function (extracted from the IIFE for testability — Vitest's bundler
+  // doesn't support query-string cache-bust, so re-import would not
+  // re-evaluate the module).
+  it("AC-544-4: parseSpecStaleDays('foo') throws operator-actionable error", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(() => parseSpecStaleDays("foo")).toThrow(
+      /FORGE_SPEC_STALE_DAYS must be a positive integer/,
+    );
+  });
+
+  it("AC-544-4: parseSpecStaleDays('-5') throws operator-actionable error", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(() => parseSpecStaleDays("-5")).toThrow(
+      /FORGE_SPEC_STALE_DAYS must be a positive integer/,
+    );
+  });
+
+  it("AC-544-4: parseSpecStaleDays('0') throws (must be >= 1)", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(() => parseSpecStaleDays("0")).toThrow(
+      /FORGE_SPEC_STALE_DAYS must be a positive integer/,
+    );
+  });
+
+  it("AC-544-4: parseSpecStaleDays(undefined) returns default 30", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(parseSpecStaleDays(undefined)).toBe(30);
+  });
+
+  it("AC-544-4: parseSpecStaleDays('') returns default 30 (empty equiv to unset)", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(parseSpecStaleDays("")).toBe(30);
+  });
+
+  it("AC-544-4: parseSpecStaleDays('  60  ') trims and returns 60", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(parseSpecStaleDays("  60  ")).toBe(60);
+  });
+
+  // probeSpecStaleness directly — unit-level test for the helper itself.
+  it("probeSpecStaleness: returns banner when threshold breached", async () => {
+    const { probeSpecStaleness } = await import("./status.js");
+    const specDir = join(projectPath, "docs", "generated");
+    await mkdir(specDir, { recursive: true });
+    const specPath = join(specDir, "TECHNICAL-SPEC.md");
+    await writeFile(specPath, "x");
+    const oldMs = Date.now() - 100 * 24 * 60 * 60 * 1000; // 100d ago
+    const utimes = (await import("node:fs/promises")).utimes;
+    await utimes(specPath, new Date(oldMs), new Date(oldMs));
+
+    // Inject threshold + nowFn for deterministic test.
+    const banner = await probeSpecStaleness(projectPath, 30, () => Date.now());
+    expect(banner).toBeDefined();
+    expect(banner).toMatch(/100 days old/);
+  });
+
+  it("probeSpecStaleness: returns undefined when fresh (below threshold)", async () => {
+    const { probeSpecStaleness } = await import("./status.js");
+    const specDir = join(projectPath, "docs", "generated");
+    await mkdir(specDir, { recursive: true });
+    await writeFile(join(specDir, "TECHNICAL-SPEC.md"), "x");
+    // Fresh: just-written, 0 days old.
+    const banner = await probeSpecStaleness(projectPath, 30);
+    expect(banner).toBeUndefined();
+  });
+
+  it("probeSpecStaleness: returns undefined silently when file absent (ENOENT)", async () => {
+    const { probeSpecStaleness } = await import("./status.js");
+    const banner = await probeSpecStaleness(projectPath, 30);
+    expect(banner).toBeUndefined();
+  });
+});

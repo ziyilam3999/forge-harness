@@ -1089,20 +1089,32 @@ describe("spec-generator — #546 keychain-only narrowing on 4xx/5xx (darwin)", 
   });
 
   // AC-546-2 — regression positive — 401 (auth-class) STILL emits keychain-only.
+  // F1 (v0.41.1) — execFileSyncFn injection seam lets us deterministically
+  // simulate "Keychain entry exists" so we assert keychain-only IS present.
+  // Closes the F64 (Intermediate-Only Test Assertion) gap from v0.41.0.
   it("AC-546-2: 401 auth error still emits spec-gen-creds-keychain-only on darwin (F6 path preserved)", async () => {
     if (process.platform !== "darwin") return;
     const auth401 = async (): Promise<SynthesisResponse> => {
       throw new Error("401 AuthenticationError: invalid bearer");
     };
+    // Stub execFileSync to simulate "entry exists" (success return).
+    const fakeExecFile = (() => Buffer.from("")) as unknown as typeof import("node:child_process").execFileSync;
     const result = await generateSpecForStory({
       projectPath: tmp,
       storyId: "US-01",
       evalReport: makeReport("US-01"),
       ctx,
       synthesize: auth401,
+      execFileSyncFn: fakeExecFile,
     });
     const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
     expect(shellOnly).toBeDefined();
+    // Positive assertion (F1 closure) — gate is OFF for 401, probe ran,
+    // stub returned success, so keychain-only IS present.
+    const keychainOnly = result.warnings.find(
+      (w) => w.kind === "spec-gen-creds-keychain-only",
+    );
+    expect(keychainOnly).toBeDefined();
   });
 
   // AC-546-2 — non-HTTP error (network out) STILL emits keychain-only.
@@ -1111,15 +1123,77 @@ describe("spec-generator — #546 keychain-only narrowing on 4xx/5xx (darwin)", 
     const networkOut = async (): Promise<SynthesisResponse> => {
       throw new Error("ENOTFOUND api.anthropic.com — connection refused");
     };
+    const fakeExecFile = (() => Buffer.from("")) as unknown as typeof import("node:child_process").execFileSync;
     const result = await generateSpecForStory({
       projectPath: tmp,
       storyId: "US-01",
       evalReport: makeReport("US-01"),
       ctx,
       synthesize: networkOut,
+      execFileSyncFn: fakeExecFile,
     });
     const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
     expect(shellOnly).toBeDefined();
+    // Positive assertion (F1 closure) — gate is OFF for non-HTTP, probe ran,
+    // keychain-only IS present.
+    const keychainOnly = result.warnings.find(
+      (w) => w.kind === "spec-gen-creds-keychain-only",
+    );
+    expect(keychainOnly).toBeDefined();
+  });
+
+  // F1 (v0.41.1) — sibling negative-path: when execFileSyncFn THROWS
+  // (entry-absent), keychain-only is correctly NOT emitted even on the
+  // non-suppressed (401) path. Confirms gate-off + probe-ran + entry-absent
+  // → no warning. P64 producer/consumer seam fully asserted.
+  it("AC-546-2 / F1: 401 with entry-absent (stub throws) produces NO keychain-only warning", async () => {
+    if (process.platform !== "darwin") return;
+    const auth401 = async (): Promise<SynthesisResponse> => {
+      throw new Error("401 AuthenticationError: invalid bearer");
+    };
+    const fakeExecFileThrow = ((): Buffer => {
+      throw new Error("entry not found");
+    }) as unknown as typeof import("node:child_process").execFileSync;
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: auth401,
+      execFileSyncFn: fakeExecFileThrow,
+    });
+    const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
+    expect(shellOnly).toBeDefined();
+    const keychainOnly = result.warnings.find(
+      (w) => w.kind === "spec-gen-creds-keychain-only",
+    );
+    expect(keychainOnly).toBeUndefined();
+  });
+
+  // F1 (v0.41.1) — confirm gate-ON path: 4xx synth + execFileSyncFn never
+  // called (probe doesn't run because the gate suppressed it). Asserts
+  // suppression is TRUE pre-emptive, not "probe ran but found nothing."
+  it("AC-546-1 / F1: 4xx synth never invokes execFileSyncFn (probe pre-empted)", async () => {
+    if (process.platform !== "darwin") return;
+    let probeCalled = false;
+    const rateLimit429 = async (): Promise<SynthesisResponse> => {
+      throw new Error(
+        '429 {"type":"error","error":{"type":"rate_limit_error"}}',
+      );
+    };
+    const trackingExecFile = ((): Buffer => {
+      probeCalled = true;
+      return Buffer.from("");
+    }) as unknown as typeof import("node:child_process").execFileSync;
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: rateLimit429,
+      execFileSyncFn: trackingExecFile,
+    });
+    expect(probeCalled).toBe(false);
   });
 
   // AC-546-5 — P64 producer/consumer seam: verify the regex matches real

@@ -522,6 +522,57 @@ describe("forge_status — #544 staleSpecWarning (TECHNICAL-SPEC.md staleness)",
     expect(parseSpecStaleDays("  60  ")).toBe(60);
   });
 
+  // F2 (v0.41.1) — parser strictness. parseInt was permissive on
+  // floats / scientific / junk-suffix / overflow; v0.41.1 tightens via
+  // regex `^[1-9]\d*$` + 36500-day cap (F46 closure).
+
+  it("F2: parseSpecStaleDays('3.5') throws (no silent float truncation)", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(() => parseSpecStaleDays("3.5")).toThrow(
+      /FORGE_SPEC_STALE_DAYS must be a positive integer/,
+    );
+  });
+
+  it("F2: parseSpecStaleDays('1e2') throws (no silent scientific-notation parse)", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(() => parseSpecStaleDays("1e2")).toThrow(
+      /FORGE_SPEC_STALE_DAYS must be a positive integer/,
+    );
+  });
+
+  it("F2: parseSpecStaleDays('30 garbage') throws (no silent prefix-only parse)", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(() => parseSpecStaleDays("30 garbage")).toThrow(
+      /FORGE_SPEC_STALE_DAYS must be a positive integer/,
+    );
+  });
+
+  it("F2: parseSpecStaleDays('01') throws (no leading-zero acceptance)", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(() => parseSpecStaleDays("01")).toThrow(
+      /FORGE_SPEC_STALE_DAYS must be a positive integer/,
+    );
+  });
+
+  it("F2: parseSpecStaleDays('9999999999999999') throws via 100-year sanity cap", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(() => parseSpecStaleDays("9999999999999999")).toThrow(
+      /exceeds the 36500-day \(100-year\) sanity cap/,
+    );
+  });
+
+  it("F2: parseSpecStaleDays('36500') exactly at cap is accepted", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(parseSpecStaleDays("36500")).toBe(36500);
+  });
+
+  it("F2: parseSpecStaleDays('36501') just over cap throws", async () => {
+    const { parseSpecStaleDays } = await import("./status.js");
+    expect(() => parseSpecStaleDays("36501")).toThrow(
+      /exceeds the 36500-day/,
+    );
+  });
+
   // probeSpecStaleness directly — unit-level test for the helper itself.
   it("probeSpecStaleness: returns banner when threshold breached", async () => {
     const { probeSpecStaleness } = await import("./status.js");

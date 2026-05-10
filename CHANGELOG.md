@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.41.1](https://github.com/ziyilam3999/forge-harness/compare/v0.41.0...v0.41.1) (2026-05-10)
+
+Patch release closing the two IMPROVE-NIT findings deferred from v0.41.0's per-task review chain. Reviewed via 4-reviewer plan-chain (sequential bg subagents); EARNED convergence with split verdicts (P1/P2 grounded on risk-cost + industry-norms, P3 on KB-pattern severity, P4 on mechanical sweep). Operator override on the F1 2-2 tie. Plan: `.ai-workspace/plans/2026-05-10-deferred-followups-546-regression-test-and-544-parser-strictness.md`.
+
+### Bug Fixes
+
+- **spec-generator:** add `execFileSyncFn` injection seam to `SpecGeneratorInput` so AC-546-2 regression-positive tests can deterministically assert `spec-gen-creds-keychain-only` presence/absence (F1). Mirrors the existing `synthesize` injection seam pattern. Closes a soft F64 (Intermediate-Only Test Assertion) violation flagged by the v0.41.0 per-task reviewer on PR #554. F64 is a graduated n=3 anti-pattern in the cairn KB with three real forge-harness regressions in the past 2 weeks; the seam closes the producer/consumer assertion gap. New tests (3): positive-presence assertion on 401 + non-HTTP paths (gate-off + probe-ran + stub-success → keychain-only IS present); negative-absence assertion on entry-absent (gate-off + probe-ran + stub-throws → keychain-only IS absent); pre-empt assertion on 4xx (gate-on → execFileSyncFn never called). Production behavior unchanged — default = real `execFileSync`.
+- **status:** strict-validate `FORGE_SPEC_STALE_DAYS` env input + add 36500-day (100-year) sanity cap (F2). v0.41.0 used `Number.parseInt` which silently parsed `'3.5' → 3`, `'1e2' → 1`, `'30 garbage' → 30`, and `'9999999999999999' → 1e16` (which would silently disable the staleness banner forever — operator-confusion footgun). Strict regex `^[1-9]\d*$` rejects floats / scientific / junk-suffix / leading-zero; 36500-day cap catches typo overflow. Closes the F46 (Silent Numeric Default) partial-violation flagged by the per-task reviewer on PR #553. New tests (7): each pathological case throws with operator-actionable error; legitimate values (`'30'`, `'  60  '`, `'36500'` boundary) preserved.
+
+### Triage outcome
+
+This release closes the v0.41.0 deferred-followup arc. F1 (#546 regression-test bulletproofing) shipped after a 2-2 reviewer tie was operator-resolved per the plan's AC-D-VERDICT rule. F2 (#544 parser strictness) shipped on a 3-1 majority. Convergence audit was EARNED — P1 (risk-cost), P2 (industry-norms), P3 (KB-pattern severity), P4 (mechanical truth) each grounded on a disjoint axis; P3 split from P1+P2 on F2, P4 tipped F1 from 2-1-DEFER to 2-2-tie. No reviewer cascade. Operator weighted the bundling discount (monday2 hadn't restarted yet) and ratified bundle-as-v0.41.1.
+
 ## [0.41.0](https://github.com/ziyilam3999/forge-harness/compare/v0.40.6...v0.41.0) (2026-05-10)
 
 Audit-thread closeout from the `forge-harness-audit-us-11` mailbox conversation (macbook-monday → monday2). Four issues bundled into one release; planned + reviewed via /per-task-review-loop in both modes (4-reviewer plan-chain pre-implementation, 1-reviewer per-task post-PR). Plan: `.ai-workspace/plans/2026-05-09-audit-thread-fix-batch-549-546-548-544.md`.

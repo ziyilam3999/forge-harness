@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.41.0](https://github.com/ziyilam3999/forge-harness/compare/v0.40.6...v0.41.0) (2026-05-10)
+
+Audit-thread closeout from the `forge-harness-audit-us-11` mailbox conversation (macbook-monday → monday2). Four issues bundled into one release; planned + reviewed via /per-task-review-loop in both modes (4-reviewer plan-chain pre-implementation, 1-reviewer per-task post-PR). Plan: `.ai-workspace/plans/2026-05-09-audit-thread-fix-batch-549-546-548-544.md`.
+
+### Features
+
+- **status:** emit `staleSpecWarning` field on `forge_status` response when `docs/generated/TECHNICAL-SPEC.md` mtime is older than `FORGE_SPEC_STALE_DAYS` (default 30 days, env-var overridable) (#544 / #553). Field is additive optional per P50 — populated with a human-readable banner (`⚠ TECHNICAL-SPEC.md is N days old (forge_evaluate to refresh)`) when stale, omitted when fresh / absent / stat-error. Module-load IIFE on `FORGE_SPEC_STALE_DAYS` mirrors v0.40.6's `FORGE_MODEL` precedent (F49 + P43 risk/mitigation pair); throws at boot with operator-actionable error on bad input (F46 escape, no silent numeric default). Probe runs in all non-`no-forge-dir` cases (case 2 corrupted, case 3 no-runs, case 4 scope-miss, case 5 snapshot/differential). `parseSpecStaleDays(raw)` extracted from the IIFE for testability — tests drive the parser directly without Vitest bundler hackery. Field shape ratified pre-implementation per Plan §Decision points (separate field over body-prefix, agent-first design default). Operator override on the original "keep deferred" verdict — flipped to ship-it after monday2 confirmed monday-bot's TECHNICAL-SPEC.md was stale on the persistent-429 path.
+
+- **spec-generator:** surface Anthropic's `retry-after` header on 429 `RateLimitError` in the `spec-gen-shell-only` warning body (#548 / #552). When `synth()` throws a 429 with the header set, parse the value (integer-seconds per RFC 7231 §7.1.3 most-common, with HTTP-date RFC 1123 fallback) and append `(retry after Ns)` or `(retry after <date>)` to the warning message BEFORE truncation. Operators previously saw only opaque raw 429 JSON; now they get a concrete retry signal. SDK accessor is `err.headers?.get('retry-after')` (Headers Web API class — bracket-index would be a TS error). Field-shape extension `retryAfterSeconds?: number` deferred to a future additive-optional follow-up if a consumer surfaces parser need.
+
+### Bug Fixes
+
+- **spec-generator:** suppress `spec-gen-creds-keychain-only` warning on 4xx/5xx synth errors (#546 / #554, replaces closed #551). When the underlying synth() failure is HTTP 4xx (non-401) or 5xx — e.g. 429 rate-limit, 500 server error — credentials are FINE; the keychain probe would emit a misleading "Keychain locked or ACL mismatched" warning that sends the operator down the wrong diagnostic path. Narrows the gate at `server/lib/spec-generator.ts:688` block on a regex check against `shellOnlyMessage` (`^[45][0-9]{2}\b` matches HTTP 4xx/5xx prefix). 401 (`AuthenticationError`) is explicitly carved out — keychain probe IS meaningful for auth-class failures (preserves original F6 path). Wild-repro evidence: 2/2 hits on macbook-monday's 2026-05-09 smoke run (`req_011Car5MF8ndJ4KDzMwWvpBn` + `req_011CarTPBD1eTYEU8uHyQo3z`). P64 producer/consumer seam asserted in AC-546-5: regex matches real Anthropic SDK stringification (verified F65 against `node_modules/@anthropic-ai/sdk/core/error.js:18-29` — `APIError.makeMessage` returns `${status} ${msg}` shape). Tests: 5 new (4 behavioral + 1 P64 seam).
+
+### Documentation
+
+- **README:** add Troubleshooting section for Max-plan OAuth-tier 429 workaround (#549 / #550). Documents the OAuth-vs-API-key separate-bucket diagnosis confirmed via operator's 2026-05-09 console.anthropic.com check: Max-plan OAuth has its own (tighter, undocumented) rate-limit bucket invisible to the Anthropic console (which only shows API-key traffic). Workaround: set `ANTHROPIC_API_KEY` from a separate API-key identity to move traffic to the API-key bucket. Cross-references #546 (co-emitted misleading keychain-only warning) for operators tracing the symptom shape.
+
+### Triage outcome
+
+This release closes out the `forge-harness-audit-us-11` mailbox audit thread (macbook-monday → monday2 handoff 2026-05-09). All four operator-asked items shipped: #549 docs (Task 1), #546 fix (Task 2), #548 feat (Task 3), #544 feat (Task 4). #544 was operator-overridden from "keep deferred" to "ship-it" after monday2 surfaced concrete consumer-side staleness pain. Plan-chain (4 stateless reviewers, sequential bg subagents per saved feedback) returned 2 PASS + 2 IMPROVE with EARNED convergence (4 disjoint axes). Per-task review (4 stateless reviewers, sequential bg post-PR) returned 4 PASS with minor IMPROVE-not-cheap items deferred as follow-ups. Out of scope by design: monday-bot #166 (consumer-side fix), AC-quality observation (doctrine reply, separate follow-up if filed), W3-W6 + I2 sanity check (parking confirmed, dropped from monday2 tracking), FORGE_MODEL smokes #1/#2/#4 (operator-action only — F54 trap).
+
 ## [0.40.6](https://github.com/ziyilam3999/forge-harness/compare/v0.40.5...v0.40.6) (2026-05-09)
 
 ### Features

@@ -6,22 +6,39 @@ import { getDeclaration } from "../lib/declaration-store.js";
 import type { RunRecord } from "../lib/run-record.js";
 
 /**
- * #544 (v0.40.7) — parse FORGE_SPEC_STALE_DAYS env var.
+ * #544 (v0.40.7 / v0.41.1 strict-parse) — parse FORGE_SPEC_STALE_DAYS env var.
  *
- * Resolution: undefined / empty → 30 fallback. Otherwise parsed integer
- * ≥ 1, else throw with operator-actionable error (F46 — Silent Numeric
- * Default avoided; loud failure preserved).
+ * Resolution: undefined / empty → 30 fallback. Otherwise STRICT positive-
+ * integer regex `^[1-9]\d*$` (rejects floats, scientific, junk-suffix,
+ * leading-zero, sign prefix), then bounded by 36500-day (100-year) cap.
+ * Else throw with operator-actionable error.
+ *
+ * F46 (Silent Numeric Default) closure: `parseInt`-permissiveness in v0.41.0
+ * silently truncated `'3.5' → 3`, `'1e2' → 1`, `'30 garbage' → 30`, and
+ * `'9999999999999999' → 1e16` (which would silently disable the staleness
+ * banner forever — operator-confusion footgun). Strict regex + 100-year cap
+ * close those holes.
  *
  * Exported so tests can drive the parser directly without re-importing
  * this module (Vitest bundler doesn't support query-string cache-bust).
  */
+const SPEC_STALE_DAYS_MAX = 36500; // 100 years — sanity cap for typo-detection.
+
 export function parseSpecStaleDays(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === "") return 30;
-  const parsed = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(parsed) || parsed < 1) {
+  const trimmed = raw.trim();
+  if (!/^[1-9]\d*$/.test(trimmed)) {
     throw new Error(
       `FORGE_SPEC_STALE_DAYS must be a positive integer (got "${raw}"). ` +
-        `Set to a number of days >= 1, or unset for the default of 30.`,
+        `Set to a whole number of days >= 1 (no leading zeros, decimals, scientific notation, or trailing characters), ` +
+        `or unset for the default of 30.`,
+    );
+  }
+  const parsed = Number(trimmed);
+  if (parsed > SPEC_STALE_DAYS_MAX) {
+    throw new Error(
+      `FORGE_SPEC_STALE_DAYS=${raw} exceeds the ${SPEC_STALE_DAYS_MAX}-day (100-year) sanity cap. ` +
+        `Set a smaller value or unset for the default of 30.`,
     );
   }
   return parsed;

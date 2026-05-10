@@ -105,6 +105,15 @@ export interface SpecGeneratorInput {
   ctx: RunContext;
   /** Override LLM with a deterministic injected synthesizer (for tests). */
   synthesize?: (req: SynthesisRequest) => Promise<SynthesisResponse>;
+  /**
+   * #546 / v0.41.1 — override the macOS Keychain probe's `execFileSync`
+   * for deterministic regression-positive tests. P64 producer/consumer
+   * seam: lets AC-546-2 unit tests assert `keychainOnly` presence/absence
+   * directly instead of inferring from code-reading. Mirrors the
+   * `synthesize` injection-seam pattern above. Default = real
+   * `execFileSync` from `node:child_process` — production behavior unchanged.
+   */
+  execFileSyncFn?: typeof execFileSync;
 }
 
 export interface SpecGeneratorResult {
@@ -754,8 +763,12 @@ export async function generateSpecForStory(
     const suppressKeychainProbe = isHttp4xxOr5xx && !is401;
     if (process.platform === "darwin" && !suppressKeychainProbe) {
       let keychainEntryExists = false;
+      // #546 / v0.41.1 — P64 injection seam. Default to real execFileSync;
+      // tests pass `input.execFileSyncFn` to deterministically simulate
+      // entry-exists (success return) or entry-absent (throw).
+      const execFile = input.execFileSyncFn ?? execFileSync;
       try {
-        execFileSync(
+        execFile(
           "/usr/bin/security",
           ["find-generic-password", "-s", KEYCHAIN_SERVICE_NAME, "-a", userInfo().username],
           { stdio: "ignore", timeout: 1000 },

@@ -88,6 +88,27 @@ Get an API key at: https://console.anthropic.com/settings/keys
 
 After setting the env var, restart Claude Code so the forge MCP child picks up the new environment.
 
+### I pulled but my changes don't seem live (stale `dist/`)
+
+forge-harness ships compiled JavaScript in `dist/`. The MCP server loads `dist/index.js` (per `package.json` `scripts.start`) — source `.ts` files are never executed directly. When you `git pull` after a release, the new TypeScript source lands but `dist/` is left untouched until you rebuild. If you smoke-test before rebuilding, you're testing yesterday's compiled code and the results lie silently.
+
+**Automatic fix (default since the post-merge hook landed):** `npm install` once installs `post-merge` and `post-rewrite` git hooks. They auto-run `npm run build` after every `git pull` (default merge or `--rebase`) when source under `server/` is newer than `dist/`. The hooks no-op in ~50 ms when `dist/` is already fresh, and write an execution marker at `.git/.forge-rebuild-hook-marker` (JSON: `{lastRunAt, lastRebuildAt, trigger}`) so you can verify they fired.
+
+**Manual fallback** (if you skipped `npm install` after pulling, or the hook isn't installed yet):
+
+```bash
+npm run build
+```
+
+**Bypass for one pull** (e.g., A/B-comparing yesterday's `dist/` against today's source):
+
+```bash
+git -c hooks.post-merge=false pull
+git -c hooks.post-rewrite=false pull --rebase  # if you use rebase pull
+```
+
+**After a rebuild, restart your Claude Code session.** The MCP server loads modules once at startup; rebuilding `dist/` on disk doesn't propagate to a running MCP child (the F54 trap, runtime variant). The hook prints a reminder to this effect when it rebuilds.
+
 ## Architecture
 
 Forge runs as a local MCP server — a Node subprocess that Claude Code (or any MCP client) connects to over stdio. No network calls except `forge_plan`'s LLM round-trip; everything else stays on your machine.

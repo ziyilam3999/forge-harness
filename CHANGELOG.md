@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.43.2](https://github.com/ziyilam3999/forge-harness/compare/v0.43.1...v0.43.2) (2026-05-11)
+
+I1-reviewer deferred follow-ups from the v0.43.0 ship. Three small observability / correctness fixes in the `forge_apply_spec_gen` seam. Plan: `.ai-workspace/plans/2026-05-11-v0432-i1-deferred-followups.md`.
+
+### Fixed
+
+* **spec-generator:** `totalCostUsd` in `findAndMergeRunRecord` now SUMS the brief-emit shell-AC cost with the spec-gen leg, instead of clobbering it. Explicit-null and undefined patches are no-ops (reset is intentionally NOT supported).
+* **spec-generator:** `forge_apply_spec_gen` now pre-validates `runId` against `.forge/runs/` before any disk mutation. A syntactically-valid but nonexistent runId returns isError instead of silently mutating `TECHNICAL-SPEC.md` while only logging a warning.
+* **spec-generator:** stale `evalReport` Zod docstring updated to accurately reflect that the field is currently no-op in the apply path (accepted for schema compatibility only).
+
 ## [0.43.1](https://github.com/ziyilam3999/forge-harness/compare/v0.43.0...v0.43.1) (2026-05-11)
 
 MCP-client-visible surfacing fix for the v0.43.0 caller-action directive. Plan: `.ai-workspace/plans/2026-05-11-spec-gen-directive-mcp-content-surfacing.md`. Cairn-stones (to place at /ship): `F-DIRECTIVE-EMITTED-OUTSIDE-CONTENT`, `F-DIRECTIVE-INTO-VOID` (retroactive n=2 recording).

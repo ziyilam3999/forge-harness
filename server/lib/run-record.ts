@@ -241,6 +241,16 @@ export type SpecGeneratorWarning =
   | {
       kind: "spec-gen-creds-keychain-only";
       message: string;
+    }
+  | {
+      // v0.42.0 — emitted when `synth()` resolves successfully but returns
+      // an empty / all-`(none)` sections object (e.g. LLM 200 OK with
+      // `{sections: {}}` JSON-mode partial-success). The spec-generator
+      // SKIPS the file write so existing TECHNICAL-SPEC content is preserved.
+      // Distinct from `spec-gen-shell-only` (synth threw) — the synth call
+      // succeeded but produced nothing usable. Plan AC-1b.
+      kind: "spec-gen-empty-sections";
+      message: string;
     };
 
 /**
@@ -281,6 +291,10 @@ export const SpecGeneratorWarningSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("spec-gen-creds-keychain-only"),
+    message: z.string(),
+  }),
+  z.object({
+    kind: z.literal("spec-gen-empty-sections"),
     message: z.string(),
   }),
 ]);

@@ -88,6 +88,22 @@ Get an API key at: https://console.anthropic.com/settings/keys
 
 After setting the env var, restart Claude Code so the forge MCP child picks up the new environment.
 
+### Spec-generator retry-on-429 + preserve-on-failure invariant (v0.42.0)
+
+When `forge_evaluate` returns PASS, the spec-generator regenerates the story's section of `docs/generated/TECHNICAL-SPEC.md`. v0.42.0 changes the LLM-failure behaviour:
+
+- **No-overwrite invariant.** If the underlying LLM call fails (rate-limit, locked Keychain, any HTTP 4xx/5xx, network blip) OR returns empty / all-`(none)` sections, the spec file is **left untouched**. Existing hand-authored content is preserved. The warnings (`spec-gen-shell-only`, `spec-gen-empty-sections`) still surface on the run record and the MCP response so consumers see the failure cause loudly. Pre-v0.42.0 the failure path overwrote real content with a placeholder body — a silent data-loss bug. There is no env-var kill-switch for the no-overwrite invariant; escape is via revert.
+- **`FORGE_SPEC_RETRY_ON_429`** (default `60`, in seconds) — when set to a non-zero integer, the spec-generator retries an HTTP 429 once, honouring the `Retry-After` header and clamping the sleep to this value. Set to `0` to disable retry entirely. The cap defends against an upstream advertising a multi-minute backoff that would otherwise stall the MCP tool-call past common operator-configured timeouts. The Anthropic SDK's hidden default of 2 internal retries is explicitly disabled (`maxRetries: 0`) so this is the only retry layer in play.
+
+```bash
+# Disable retry-on-429 entirely (recover pre-v0.42.0 behaviour for retries
+# only; the no-overwrite invariant still applies).
+export FORGE_SPEC_RETRY_ON_429=0
+
+# Tighten the cap to 30s for an operator with a stricter MCP timeout budget.
+export FORGE_SPEC_RETRY_ON_429=30
+```
+
 ### I pulled but my changes don't seem live (stale `dist/`)
 
 forge-harness ships compiled JavaScript in `dist/`. The MCP server loads `dist/index.js` (per `package.json` `scripts.start`) — source `.ts` files are never executed directly. When you `git pull` after a release, the new TypeScript source lands but `dist/` is left untouched until you rebuild. If you smoke-test before rebuilding, you're testing yesterday's compiled code and the results lie silently.

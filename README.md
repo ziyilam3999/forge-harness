@@ -104,6 +104,27 @@ export FORGE_SPEC_RETRY_ON_429=0
 export FORGE_SPEC_RETRY_ON_429=30
 ```
 
+### Advanced: tune 429 retry behavior (v0.42.1+)
+
+For environments with multiple concurrent forge-harness consumers (e.g. Claude Code main session + MCP child + monday-bot), the default retry-on-429 may exhaust before the OAuth rate-limit window clears. Three knobs:
+
+- `FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC` (default `30`): seconds to sleep when a 429 response has no `retry-after` header (the common case for Max-plan OAuth). Bounded by `FORGE_SPEC_RETRY_ON_429` cap (default 60).
+- `FORGE_SPEC_RETRY_ON_429_ATTEMPTS` (default `2`): number of retry attempts after the initial call. Set to `1` for v0.42.0 behavior; `0` to disable retry (equivalent to `FORGE_SPEC_RETRY_ON_429=0`). Retries use exponential backoff: retry N (0-indexed) sleeps `min(FALLBACK_SEC * 2^N, cap)` seconds.
+- `FORGE_SPEC_RETRY_ON_429_JITTER_PCT` (default `10`, range `0..50`): random jitter ±N% applied to each sleep. Prevents thundering-herd lockstep across concurrent consumers sharing one OAuth bucket. Set to `0` for deterministic sleeps (testing only).
+
+When retries exhaust on 429, the run record's `generatedDocs.warnings` AND the MCP response's `specGenWarnings` will contain a `spec-gen-rate-limit-exhausted` warning kind with operator-actionable guidance. The `TECHNICAL-SPEC.md` file is preserved (v0.42.0+ no-overwrite invariant) — only the spec regeneration is skipped.
+
+```bash
+# Heavier retry budget for multi-consumer setups (3 retries with 60s base).
+export FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC=60
+export FORGE_SPEC_RETRY_ON_429_ATTEMPTS=3
+export FORGE_SPEC_RETRY_ON_429=240   # raise cap so the 3rd retry (240s) isn't clipped
+
+# Restore exact v0.42.0 behavior (single retry, 1s header-less fallback).
+export FORGE_SPEC_RETRY_ON_429_ATTEMPTS=1
+export FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC=1
+```
+
 ### I pulled but my changes don't seem live (stale `dist/`)
 
 forge-harness ships compiled JavaScript in `dist/`. The MCP server loads `dist/index.js` (per `package.json` `scripts.start`) — source `.ts` files are never executed directly. When you `git pull` after a release, the new TypeScript source lands but `dist/` is left untouched until you rebuild. If you smoke-test before rebuilding, you're testing yesterday's compiled code and the results lie silently.

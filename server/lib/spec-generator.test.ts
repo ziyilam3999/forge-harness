@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -1533,6 +1533,9 @@ describe("spec-generator — v0.42.0 AC-3 retry-on-429", () => {
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       },
+      // v0.42.1 — mid-point jitter (factor 1.0) preserves the v0.42.0
+      // sleep-duration assertion under the new default ±10% jitter.
+      randomFn: () => 0.5,
     });
 
     expect(invocations).toBe(2);
@@ -1547,17 +1550,24 @@ describe("spec-generator — v0.42.0 AC-3b retry-exhaustion → no-overwrite", (
   let tmp: string;
   let ctx: RunContext;
   let savedEnv: string | undefined;
+  let savedAttemptsEnv: string | undefined;
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.0-ac3b-"));
     ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
     savedEnv = process.env.FORGE_SPEC_RETRY_ON_429;
+    savedAttemptsEnv = process.env.FORGE_SPEC_RETRY_ON_429_ATTEMPTS;
     delete process.env.FORGE_SPEC_RETRY_ON_429;
+    // v0.42.1 — pin ATTEMPTS=1 to preserve v0.42.0's "first + one retry"
+    // semantics under the new default of ATTEMPTS=2.
+    process.env.FORGE_SPEC_RETRY_ON_429_ATTEMPTS = "1";
   });
   afterEach(() => {
     rmSync(tmp, { recursive: true, force: true });
     if (savedEnv === undefined) delete process.env.FORGE_SPEC_RETRY_ON_429;
     else process.env.FORGE_SPEC_RETRY_ON_429 = savedEnv;
+    if (savedAttemptsEnv === undefined) delete process.env.FORGE_SPEC_RETRY_ON_429_ATTEMPTS;
+    else process.env.FORGE_SPEC_RETRY_ON_429_ATTEMPTS = savedAttemptsEnv;
   });
 
   it("AC-3b: RateLimitError on BOTH attempts → file bytes preserved + shell-only warning + outputTokens === 0", async () => {
@@ -1585,9 +1595,12 @@ describe("spec-generator — v0.42.0 AC-3b retry-exhaustion → no-overwrite", (
       ctx,
       synthesize: persistentlyThrottled,
       sleepFn: async () => {},
+      // v0.42.1 — mid-point jitter (factor 1.0) keeps any sleep-duration
+      // probes deterministic if added later; harmless here.
+      randomFn: () => 0.5,
     });
 
-    expect(invocations).toBe(2); // first call + one retry
+    expect(invocations).toBe(2); // first call + one retry (ATTEMPTS=1 pinned)
     expect(sha256OrNull(specPath)).toBe(before);
     expect(readFileSync(specPath, "utf-8")).toContain(sentinel);
     expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
@@ -1715,6 +1728,9 @@ describe("spec-generator — v0.42.0 AC-4 FORGE_SPEC_RETRY_ON_429 three modes", 
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       },
+      // v0.42.1 — mid-point jitter (factor 1.0) preserves the v0.42.0 clamp
+      // assertion under default ±10% jitter.
+      randomFn: () => 0.5,
     });
 
     expect(sleepCalls).toEqual([30 * 1000]); // clamped to env cap, not 120s
@@ -1771,6 +1787,9 @@ describe("spec-generator — v0.42.0 AC-5 default-60 cap clamps retry-after: 120
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       },
+      // v0.42.1 — mid-point jitter (factor 1.0) preserves the v0.42.0 clamp
+      // assertion under default ±10% jitter.
+      randomFn: () => 0.5,
     });
     // Default cap 60s clamps the 120s request.
     expect(sleepCalls).toEqual([60 * 1000]);
@@ -1820,5 +1839,577 @@ describe("spec-generator — v0.42.0 AC-2 / AC-11 MCP-level dual-surface warning
     // SAME array that evaluate.ts stamps onto generatedDocs.warnings and
     // specGenWarnings via the P64 producer/consumer seam at evaluate.ts:438).
     expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// v0.42.1 — smarter retry-on-429 + spec-gen-rate-limit-exhausted warning
+// ───────────────────────────────────────────────────────────────────────────
+//
+// All v0.42.1 tests follow P32 (Config-as-Parameter Threading): vi.stubEnv
+// for env vars + vi.unstubAllEnvs() in afterEach so AC-X env settings
+// cannot leak into AC-Y. AC-1..AC-5 set JITTER_PCT=0 for deterministic
+// sleep-duration assertions. randomFn P64 seam used by AC-14.
+
+/** Build a header-less 429 RateLimitError (the Max-plan OAuth common case). */
+async function makeHeaderless429() {
+  const Anthropic = await import("@anthropic-ai/sdk");
+  return new Anthropic.default.RateLimitError(
+    429,
+    { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+    undefined,
+    new Headers({}),
+  );
+}
+
+/** Synth stub: throws `err` on first call, returns valid result thereafter. */
+function flakeyOnce(err: unknown): (req: SynthesisRequest) => Promise<SynthesisResponse> {
+  let n = 0;
+  return async (_req) => {
+    n++;
+    if (n === 1) throw err;
+    return {
+      contracts: [],
+      sections: {
+        "api-contracts": "- `forge_evaluate.report`: ok",
+        "data-models": "- `EvalReport`: ok",
+        invariants: "- ok",
+        "test-surface": "- ok",
+      },
+      tokens: { inputTokens: 100, outputTokens: 50 },
+    };
+  };
+}
+
+describe("spec-generator — v0.42.1 AC-1 header-less 429 fallback default 30s", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac1-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    // Default fallback (unset → 30) + deterministic (jitter 0).
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-1: header-less 429 → sleep called with 30000 ms (not 1000)", async () => {
+    const sleepCalls: number[] = [];
+    const err = await makeHeaderless429();
+    let n = 0;
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        n++;
+        if (n === 1) throw err;
+        return {
+          contracts: [],
+          sections: {
+            "api-contracts": "- `forge_evaluate.report`: ok",
+            "data-models": "- `EvalReport`: ok",
+            invariants: "- ok",
+            "test-surface": "- ok",
+          },
+          tokens: { inputTokens: 100, outputTokens: 200 },
+        };
+      },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+
+    expect(sleepCalls).toEqual([30000]);
+    expect(n).toBe(2);
+    expect(result.genTokens.outputTokens).toBe(200);
+  });
+});
+
+describe("spec-generator — v0.42.1 AC-2 FALLBACK_SEC env honors override", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac2-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-2 (a): FALLBACK_SEC=10 → header-less 429 sleep = 10000 ms", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC", "10");
+    const sleepCalls: number[] = [];
+    const err = await makeHeaderless429();
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: flakeyOnce(err),
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+    expect(sleepCalls).toEqual([10000]);
+  });
+
+  it("AC-2 (b): FALLBACK_SEC=0 → fall back to v0.42.0 legacy 1s sleep (back-compat escape)", async () => {
+    // expBackoff = 0 * 2^0 = 0; Math.min(0, cap) = 0; sleep called with 0ms.
+    // Operators who literally want the v0.42.0 1s behaviour set
+    // FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC=1 explicitly.
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC", "0");
+    const sleepCalls: number[] = [];
+    const err = await makeHeaderless429();
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: flakeyOnce(err),
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+    expect(sleepCalls).toEqual([0]);
+  });
+});
+
+describe("spec-generator — v0.42.1 AC-3 cap clamp wins over FALLBACK_SEC", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac3-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-3: FALLBACK_SEC=120, CAP=60, ATTEMPTS=1, header-less 429 → first sleep = 60000 ms (cap wins) and exactly 1 sleep", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC", "120");
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429", "60");
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_ATTEMPTS", "1");
+
+    const sleepCalls: number[] = [];
+    const err = await makeHeaderless429();
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: flakeyOnce(err),
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+    expect(sleepCalls.length).toBe(1);
+    expect(sleepCalls[0]).toBe(60000);
+  });
+});
+
+describe("spec-generator — v0.42.1 AC-4 ATTEMPTS env controls retry count (3 modes)", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac4-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-4 (a): ATTEMPTS unset (default 2) + persistent 429 → exactly 3 synth invocations", async () => {
+    const err = await makeHeaderless429();
+    let n = 0;
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        n++;
+        throw err;
+      },
+      sleepFn: async () => {},
+    });
+    expect(n).toBe(3);
+  });
+
+  it("AC-4 (b): ATTEMPTS=1 + persistent 429 → exactly 2 synth invocations (v0.42.0 behavior)", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_ATTEMPTS", "1");
+    const err = await makeHeaderless429();
+    let n = 0;
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        n++;
+        throw err;
+      },
+      sleepFn: async () => {},
+    });
+    expect(n).toBe(2);
+  });
+
+  it("AC-4 (c): ATTEMPTS=0 + persistent 429 → exactly 1 synth invocation (no retry)", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_ATTEMPTS", "0");
+    const err = await makeHeaderless429();
+    const sleepCalls: number[] = [];
+    let n = 0;
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        n++;
+        throw err;
+      },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+    expect(n).toBe(1);
+    expect(sleepCalls).toEqual([]);
+  });
+});
+
+describe("spec-generator — v0.42.1 AC-5 exponential backoff between retries", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac5-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-5: ATTEMPTS=2, FALLBACK_SEC=30, CAP=120, 3 header-less throws → sleeps = [30000, 60000]", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_ATTEMPTS", "2");
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC", "30");
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429", "120");
+
+    const err = await makeHeaderless429();
+    const sleepCalls: number[] = [];
+    let n = 0;
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        n++;
+        throw err;
+      },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+    expect(n).toBe(3); // 1 initial + 2 retries
+    expect(sleepCalls).toEqual([30000, 60000]);
+  });
+});
+
+describe("spec-generator — v0.42.1 AC-6 new warning kind spec-gen-rate-limit-exhausted", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac6-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-6: 429 retries exhaust → warnings contain both spec-gen-shell-only AND spec-gen-rate-limit-exhausted", async () => {
+    const err = await makeHeaderless429();
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        throw err;
+      },
+      sleepFn: async () => {},
+    });
+
+    expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
+    const exhausted = result.warnings.find(
+      (w) => w.kind === "spec-gen-rate-limit-exhausted",
+    );
+    expect(exhausted).toBeDefined();
+    if (exhausted && exhausted.kind === "spec-gen-rate-limit-exhausted") {
+      // Typo-resistant phrase match — operator-mitigation template.
+      expect(exhausted.message).toMatch(/concurrent\s+(?:OAuth\s+)?(?:token\s+)?bucket/i);
+    }
+  });
+});
+
+describe("spec-generator — v0.42.1 AC-7 discriminator: non-429 does NOT emit rate-limit-exhausted", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac7-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-7: AuthenticationError (401) on every call → spec-gen-shell-only present, spec-gen-rate-limit-exhausted ABSENT", async () => {
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const authErr = new Anthropic.default.AuthenticationError(
+      401,
+      { type: "error", error: { type: "authentication_error", message: "bad creds" } },
+      undefined,
+      new Headers({}),
+    );
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        throw authErr;
+      },
+      sleepFn: async () => {},
+    });
+
+    expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
+    expect(
+      result.warnings.some((w) => w.kind === "spec-gen-rate-limit-exhausted"),
+    ).toBe(false);
+  });
+});
+
+describe("spec-generator — v0.42.1 AC-8 file preserved across retry-exhaustion paths", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac8-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-8 (a): 429 retry exhaustion (default ATTEMPTS=2) → sha256 unchanged + sentinel preserved", async () => {
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-01", sentinel);
+    const before = sha256OrNull(specPath);
+    const err = await makeHeaderless429();
+
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        throw err;
+      },
+      sleepFn: async () => {},
+    });
+
+    expect(sha256OrNull(specPath)).toBe(before);
+    expect(readFileSync(specPath, "utf-8")).toContain(sentinel);
+  });
+
+  it("AC-8 (b): auth (401) exhaustion → sha256 unchanged + sentinel preserved", async () => {
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-01", sentinel);
+    const before = sha256OrNull(specPath);
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const authErr = new Anthropic.default.AuthenticationError(
+      401,
+      { type: "error", error: { type: "authentication_error", message: "bad creds" } },
+      undefined,
+      new Headers({}),
+    );
+
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        throw authErr;
+      },
+      sleepFn: async () => {},
+    });
+
+    expect(sha256OrNull(specPath)).toBe(before);
+    expect(readFileSync(specPath, "utf-8")).toContain(sentinel);
+  });
+});
+
+describe("spec-generator — v0.42.1 AC-14 jitter math (P64 randomFn seam)", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac14-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    // AC-14 uses non-zero jitter explicitly — DON'T disable it. Pin
+    // FALLBACK_SEC=30 + CAP=120 so the cap doesn't clip the jittered max.
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC", "30");
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429", "120");
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_ATTEMPTS", "1");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-14 (a): JITTER_PCT=10 + randomFn=0.5 (mid-point) → sleep = 30000 (base unchanged)", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "10");
+    const err = await makeHeaderless429();
+    const sleepCalls: number[] = [];
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: flakeyOnce(err),
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+      randomFn: () => 0.5,
+    });
+    expect(sleepCalls).toEqual([30000]);
+  });
+
+  it("AC-14 (b): JITTER_PCT=10 + randomFn=0.0 (min) → sleep = 27000 (base * 0.9)", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "10");
+    const err = await makeHeaderless429();
+    const sleepCalls: number[] = [];
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: flakeyOnce(err),
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+      randomFn: () => 0.0,
+    });
+    // 30 * (1 + (0 - 0.5) * 2 * 0.1) = 30 * 0.9 = 27 → 27000ms
+    expect(sleepCalls.length).toBe(1);
+    expect(sleepCalls[0]).toBeCloseTo(27000, 5);
+  });
+
+  it("AC-14 (c): JITTER_PCT=10 + randomFn=1.0 (max) → sleep = 33000 (base * 1.1)", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "10");
+    const err = await makeHeaderless429();
+    const sleepCalls: number[] = [];
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: flakeyOnce(err),
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+      randomFn: () => 1.0,
+    });
+    // 30 * (1 + (1 - 0.5) * 2 * 0.1) = 30 * 1.1 = 33 → 33000ms
+    expect(sleepCalls.length).toBe(1);
+    expect(sleepCalls[0]).toBeCloseTo(33000, 5);
+  });
+
+  it("AC-14 (d): JITTER_PCT=0 → sleep = exactly 30000 regardless of randomFn (no jitter applied)", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+    const err = await makeHeaderless429();
+    const sleepCalls: number[] = [];
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: flakeyOnce(err),
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+      randomFn: () => 0.0, // would normally produce 27000ms with pct=10
+    });
+    expect(sleepCalls).toEqual([30000]);
+  });
+});
+
+describe("spec-generator — v0.42.1 AC-15 RETRY_ON_429=0 kill-switch precedence over ATTEMPTS", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.1-ac15-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_JITTER_PCT", "0");
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-15: RETRY_ON_429=0 + ATTEMPTS=5 → exactly 1 synth invocation (kill-switch wins)", async () => {
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429", "0");
+    vi.stubEnv("FORGE_SPEC_RETRY_ON_429_ATTEMPTS", "5");
+
+    const err = await makeHeaderless429();
+    const sleepCalls: number[] = [];
+    let n = 0;
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        n++;
+        throw err;
+      },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+
+    expect(n).toBe(1); // NO retry attempted
+    expect(sleepCalls).toEqual([]); // sleep never called
+    expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
+    // The rate-limit-exhausted warning STILL fires because the final error
+    // was a 429 — it's a discriminator on the error class, not on whether
+    // retries actually ran. Operator gets the same diagnostic guidance.
+    expect(
+      result.warnings.some((w) => w.kind === "spec-gen-rate-limit-exhausted"),
+    ).toBe(true);
   });
 });

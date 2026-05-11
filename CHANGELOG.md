@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.42.1](https://github.com/ziyilam3999/forge-harness/compare/v0.42.0...v0.42.1) (2026-05-11)
+
+Operational gap fix: v0.42.0's retry-on-429 exhausts on Max-plan OAuth header-less 429s (1s fallback too short for actual rate-limit window). Surfaced 2026-05-11T07:13Z during AC-8 live smoke. Plan: `.ai-workspace/plans/2026-05-11-spec-gen-retry-headerless-429-fallback.md` (v5, plan-chain GREAT × 4).
+
+### Fixed
+
+- Header-less 429 retry fallback was 1 second (too short); now configurable via `FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC` (default `30`). Anthropic's Max-plan OAuth returns 429 without `retry-after` header (4 of 4 historical cases), so the 1s fallback guaranteed the retry hit the same rate-limit window.
+- Only 1 retry allowed (less than SDK's pre-v0.42.0 `maxRetries=2`); now configurable via `FORGE_SPEC_RETRY_ON_429_ATTEMPTS` (default `2`) with exponential backoff between retries.
+
+### Added
+
+- New env var `FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC` (default `30`): seconds to sleep when 429 has no `retry-after` header. Cap-clamped by `FORGE_SPEC_RETRY_ON_429`.
+- New env var `FORGE_SPEC_RETRY_ON_429_ATTEMPTS` (default `2`): number of retries after the initial call. Exponential backoff: retry N sleeps `min(FALLBACK_SEC * 2^N, CAP)`.
+- New env var `FORGE_SPEC_RETRY_ON_429_JITTER_PCT` (default `10`, range `0..50`): ±N% random jitter to break thundering-herd lockstep when multiple concurrent forge consumers share an OAuth token bucket.
+- New warning kind `spec-gen-rate-limit-exhausted`: emitted alongside `spec-gen-shell-only` when retries exhaust on a 429 (vs other shell-only failures). Contains operator-actionable guidance about concurrent OAuth consumers. Additive-optional per P50 (legacy `spec-gen-shell-only` still present in the same warnings array).
+- New `randomFn` P64 producer/consumer injection seam on `SpecGeneratorInput` for deterministic vitest jitter coverage. Mirrors v0.42.0's `sleepFn` seam.
+
+### Tests
+
+- 12 new vitest tests in `server/lib/spec-generator.test.ts` covering AC-1 (fallback default), AC-2 (env override + back-compat escape), AC-3 (cap clamp), AC-4 (3 modes of ATTEMPTS), AC-5 (exponential backoff `[30000, 60000]`), AC-6 (new warning kind regex match), AC-7 (negative discriminator — non-429 does NOT emit), AC-8 (v0.42.0 no-overwrite invariant preserved under new retry, 2 sub-tests), AC-14 (jitter math 4 sub-tests), AC-15 (kill-switch precedence).
+- 1 new vitest MCP integration test in `server/tools/evaluate.test.ts` for AC-13 (dual-surface emission on disk run record + MCP `specGenWarnings`).
+- Test isolation: `vi.stubEnv` + `vi.unstubAllEnvs()` per P32 — no `process.env` direct mutation. AC-1..AC-5 set `FORGE_SPEC_RETRY_ON_429_JITTER_PCT=0` for deterministic sleep-duration assertions; AC-14 exercises non-zero jitter via injected `randomFn`.
+
 ## [0.42.0](https://github.com/ziyilam3999/forge-harness/compare/v0.41.1...v0.42.0) (2026-05-11)
 
 Silent data-loss bug fix + defense-in-depth retry-on-429. Plan: `.ai-workspace/plans/2026-05-11-spec-generator-preserve-on-synth-failure.md` (v5, plan-chain GREAT × 4). Cairn-stone: `F-FORGE-SPEC-GEN-OVERWRITES-ON-SYNTH-FAILURE`.

@@ -22,6 +22,8 @@
  */
 
 import { z } from "zod";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { EvalReport } from "../types/eval-report.js";
 import {
   applySpecGenResult,
@@ -92,7 +94,7 @@ export const applySpecGenInputSchema = {
     .unknown()
     .optional()
     .describe(
-      "Optional: the eval report from the original brief. Currently observational; not used by the merge logic itself but threaded through for parity with the legacy in-MCP shape.",
+      "Optional: the eval report from the original brief. Accepted for schema compatibility with the legacy in-MCP shape; currently no-op in the apply path (the field is not persisted to the run record). May be threaded into the brief-emit echo in a future revision.",
     ),
   gitSha: z
     .string()
@@ -132,6 +134,33 @@ type McpResponse = {
 export async function handleApplySpecGen(
   input: ApplySpecGenInput,
 ): Promise<McpResponse> {
+  // v0.43.2 (I1 fold) — pre-validate runId before any disk mutation. The Zod
+  // schema only checks shape (4-char lowercase hex); it cannot verify the
+  // runId corresponds to a real brief-emit record. Without this probe, a
+  // syntactically-valid but nonexistent runId would still trigger the spec
+  // file write, with only a log-and-continue warning when findAndMergeRunRecord
+  // (line ~210 below) fails to locate the record. Closing the disk-mutates-
+  // without-observability gap is the v0.43.2 correctness win.
+  const runsDir = join(input.projectPath, ".forge", "runs");
+  let runRecordExists = false;
+  try {
+    const entries = await readdir(runsDir);
+    runRecordExists = entries.some((e) => e.endsWith(`-${input.runId}.json`));
+  } catch {
+    runRecordExists = false;
+  }
+  if (!runRecordExists) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `forge_apply_spec_gen error: no brief-emit run record found for runId=${input.runId} under ${input.projectPath}/.forge/runs/. The runId must be echoed verbatim from a prior forge_evaluate call that emitted a generate-spec-inline directive.`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
   // Reuse the lib-layer merge logic. `applySpecGenResult` is the canonical
   // single locus for: (a) AC-6 race-window hand-author preserve, (b) v0.42.0
   // empty-sections no-overwrite invariant, (c) vocabulary-grounded post-validator.

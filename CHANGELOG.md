@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.45.0](https://github.com/ziyilam3999/forge-harness/compare/v0.44.0...v0.45.0) (2026-05-11)
+
+Adds optional `tokensEstimated?: boolean` field on `applySpecGenInputSchema` so callers like `/forge-execute` v1.1.0 — which compute token usage via byte/4 estimate because Claude Code sessions can't observe their own LLM usage — can mark their token reports as approximate. Threads through to `RunRecord.generatedDocs.tokensEstimated` so cost-audit consumers can label `totalCostUsd` as estimated. Closes PR #755 follow-up (ai-brain). Additive-optional per P50; legacy callers unchanged.
+
+### Added
+
+* **spec-generator:** `applySpecGenInputSchema.tokensEstimated?: boolean` (Zod optional, additive) — caller-side confidence flag. (#567)
+* **spec-generator:** `RunRecord.generatedDocs.tokensEstimated?: boolean` (TS + Zod, additive optional) — threaded onto the persisted run record envelope.
+
+### Notes
+
+* Math in `computeSpecGenCostUsd` is **unchanged** — the flag is a confidence signal for downstream audit, not a cost-discount multiplier.
+* Test count: 1159 → 1162 (+3 new tests covering schema-accepts, threading, backwards-compat).
+
 ## [0.44.0](https://github.com/ziyilam3999/forge-harness/compare/v0.43.2...v0.44.0) (2026-05-11)
 
 Vocabulary post-validator now follows relative-import chains rooted at the story's `affectedPaths`, so identifiers exported by sibling modules but referenced via `import { Foo } from "./bar"` survive the validator instead of being stripped from the LLM-generated TECHNICAL-SPEC content. Triggered by v0.43.1 AC-10 dogfood observation of 25 stripped cross-module identifiers. Plan: `.ai-workspace/plans/2026-05-11-v0440-vocab-follow-imports.md`.

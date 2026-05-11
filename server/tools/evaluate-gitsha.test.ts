@@ -22,6 +22,11 @@ import { execFileSync } from "node:child_process";
 // on PASS and would otherwise reach for the real Anthropic API in this
 // integration-style test (which has no mock for the SDK). Stub it with a
 // no-op deterministic synth so the gitSha capture path stays focused.
+//
+// v0.43.0 — also stub the new `buildSpecGenBrief` / `extractCurrentSectionContent`
+// exports so the directive-flow path (now the default) has the helpers it
+// needs. The tests pin `FORGE_SPEC_CALLER_ACTION=0` to keep exercising the
+// legacy in-MCP path.
 vi.mock("../lib/spec-generator.js", () => ({
   generateSpecForStory: vi.fn(async (input: { projectPath: string; storyId: string }) => ({
     specPath: `${input.projectPath}/docs/generated/TECHNICAL-SPEC.md`,
@@ -29,7 +34,33 @@ vi.mock("../lib/spec-generator.js", () => ({
     genTokens: { inputTokens: 0, outputTokens: 0 },
     contracts: [],
     bodyChanged: true,
+    warnings: [],
   })),
+  buildSpecGenBrief: vi.fn(() => ({
+    storyId: "US-01",
+    runId: "abcd",
+    specPath: "/dev/null",
+    affectedPaths: [],
+    systemPrompt: "",
+    userPrompt: "",
+    vocabularyPrompt: "",
+    diffSummary: "",
+    evalReport: { storyId: "US-01", verdict: "PASS", criteria: [] },
+    expectedSections: ["api-contracts", "data-models", "invariants", "test-surface"],
+    currentSectionContent: {
+      "api-contracts": "",
+      "data-models": "",
+      invariants: "",
+      "test-surface": "",
+    },
+  })),
+  extractCurrentSectionContent: vi.fn(() => ({
+    "api-contracts": "",
+    "data-models": "",
+    invariants: "",
+    "test-surface": "",
+  })),
+  hasHandAuthoredMarker: vi.fn(() => false),
 }));
 
 import { handleEvaluate } from "./evaluate.js";
@@ -73,10 +104,15 @@ describe("AC-2 — evaluate writes git HEAD sha on PASS", () => {
 
   beforeEach(async () => {
     tmpRoot = await mkdtemp(join(tmpdir(), "forge-eval-gitsha-"));
+    // v0.43.0 — pin legacy in-MCP path so this v0.35.x-era test keeps
+    // exercising the flow it was designed for. New directive-flow coverage
+    // lives in evaluate.test.ts.
+    vi.stubEnv("FORGE_SPEC_CALLER_ACTION", "0");
   });
 
   afterEach(async () => {
     await rm(tmpRoot, { recursive: true, force: true });
+    vi.unstubAllEnvs();
   });
 
   it("forge_evaluate captures gitSha on PASS — 40-char hex matches git rev-parse HEAD", async () => {

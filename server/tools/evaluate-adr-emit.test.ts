@@ -50,8 +50,35 @@ vi.mock("../lib/run-record.js", async () => {
   };
 });
 
-// Mock spec-generator (real adr-extractor stays unmocked).
+// Mock spec-generator (real adr-extractor stays unmocked). v0.43.0 — the
+// new directive-flow helpers are also stubbed so the default code path
+// doesn't throw when this test (which pins legacy mode) tries to import them.
 vi.mock("../lib/spec-generator.js", () => ({
+  buildSpecGenBrief: vi.fn(() => ({
+    storyId: "US-08",
+    runId: "abcd",
+    specPath: "/dev/null",
+    affectedPaths: [],
+    systemPrompt: "",
+    userPrompt: "",
+    vocabularyPrompt: "",
+    diffSummary: "",
+    evalReport: { storyId: "US-08", verdict: "PASS", criteria: [] },
+    expectedSections: ["api-contracts", "data-models", "invariants", "test-surface"],
+    currentSectionContent: {
+      "api-contracts": "",
+      "data-models": "",
+      invariants: "",
+      "test-surface": "",
+    },
+  })),
+  extractCurrentSectionContent: vi.fn(() => ({
+    "api-contracts": "",
+    "data-models": "",
+    invariants: "",
+    "test-surface": "",
+  })),
+  hasHandAuthoredMarker: vi.fn(() => false),
   generateSpecForStory: vi.fn(
     async (input: { projectPath: string; storyId: string }) => ({
       specPath: `${input.projectPath}/docs/generated/TECHNICAL-SPEC.md`,
@@ -135,11 +162,16 @@ describe("evaluate — post-PASS ADR-extractor integration (AC-2)", () => {
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "forge-evaluate-adr-"));
     vi.clearAllMocks();
+    // v0.43.0 — these tests assert `result.adrCanonicalized` is populated on
+    // PASS, which only happens on the legacy in-MCP path (the directive flow
+    // does NOT run the ADR extractor inline). Pin the legacy path.
+    vi.stubEnv("FORGE_SPEC_CALLER_ACTION", "0");
   });
 
   afterEach(() => {
     rmSync(tmp, { recursive: true, force: true });
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("populates RunRecord.generatedDocs.adrPaths when a story has a real multi-line stub staged", async () => {

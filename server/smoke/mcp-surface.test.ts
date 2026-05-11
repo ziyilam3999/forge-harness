@@ -79,10 +79,11 @@ describe("MCP surface smoke", () => {
     }
   });
 
-  it("lists all 8 forge tools", async () => {
+  it("lists all 9 forge tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "forge_apply_spec_gen",
       "forge_coordinate",
       "forge_declare_story",
       "forge_evaluate",

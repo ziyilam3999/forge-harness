@@ -32,11 +32,18 @@ import {
   writeRunRecord,
   canonicalizeEvalReport,
   computeSpecGenCostUsd,
+  generateRunId,
   type RunRecord,
   type CriticEvalReport,
   type SpecGeneratorWarning,
 } from "../lib/run-record.js";
-import { generateSpecForStory } from "../lib/spec-generator.js";
+import {
+  buildSpecGenBrief,
+  extractCurrentSectionContent,
+  generateSpecForStory,
+  hasHandAuthoredMarker,
+} from "../lib/spec-generator.js";
+import type { SpecGenBrief } from "../types/evaluate-result.js";
 import { processStory as processAdrStory } from "../lib/adr-extractor.js";
 import {
   buildCriticPrompt,
@@ -178,6 +185,23 @@ type EvaluateInput = {
 type McpResponse = {
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
+  /**
+   * v0.43.0 — caller-action directive for the spec-gen path on story-mode PASS.
+   * When `"generate-spec-inline"`, the calling Claude Code session is expected
+   * to (1) read `specGenBrief.systemPrompt` and `specGenBrief.userPrompt`,
+   * (2) do ONE LLM round-trip with those prompts, (3) call the companion
+   * `forge_apply_spec_gen` MCP tool with the parsed JSON result + `runId`
+   * echoed from the brief. The MCP child does NOT call Anthropic itself.
+   * Absent on non-story modes, non-PASS verdicts, hand-author-marker short-
+   * circuit (AC-3b), and the legacy `FORGE_SPEC_CALLER_ACTION=0` opt-out path.
+   */
+  callerAction?: "generate-spec-inline";
+  /**
+   * v0.43.0 — companion payload for the `callerAction` directive. Contains
+   * everything the caller needs to perform the spec-gen LLM round-trip.
+   * Absent when `callerAction` is absent (same condition set).
+   */
+  specGenBrief?: SpecGenBrief;
   /**
    * v0.38.0 I3 — top-level spec-generator warnings on story-mode responses.
    * Byte-identical to the on-disk run record's `generatedDocs.warnings`.
@@ -380,6 +404,21 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
   // v0.38.0 I3 — captured for the top-level MCP response field.
   let storyEvalSpecGenWarnings: SpecGeneratorWarning[] | undefined;
 
+  // v0.43.0 — captured for the top-level MCP response field. Set when the
+  // PASS-path defaults to the new caller-action directive flow (env var
+  // `FORGE_SPEC_CALLER_ACTION` unset OR not "0") AND no hand-author marker
+  // short-circuit fired (AC-3b).
+  let storyEvalCallerAction: "generate-spec-inline" | undefined;
+  let storyEvalSpecGenBrief: SpecGenBrief | undefined;
+
+  // v0.43.0 — runId reserved at brief-build time and stamped into the run
+  // record filename so the caller's follow-up `forge_apply_spec_gen` call
+  // can locate + append its merge event onto the SAME run record file (AC-14).
+  // Stays undefined on the legacy `FORGE_SPEC_CALLER_ACTION=0` opt-out path
+  // and on hand-author short-circuits — the writeRunRecord call falls back
+  // to its random suffix in those cases.
+  let storyEvalRunId: string | undefined;
+
   // v0.40.x I1 — captured for the top-level MCP response field. Populated
   // ONLY by story-mode PASS runs that called `processAdrStory`. Stays
   // `undefined` on non-PASS verdicts and when projectPath is missing — in
@@ -399,6 +438,12 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
     // binary / non-PASS verdict all simply omit the field.
     const gitSha = captureGitSha(input.projectPath);
 
+    // v0.43.0 — read the caller-action env-var ONCE per call so tests can
+    // mutate `process.env.FORGE_SPEC_CALLER_ACTION` between cases. Default
+    // path is the new directive flow; `FORGE_SPEC_CALLER_ACTION=0` opts back
+    // to the legacy in-MCP `generateSpecForStory` call.
+    const useLegacyInMcpPath = process.env.FORGE_SPEC_CALLER_ACTION === "0";
+
     // v0.36.0 Phase B (AC-B1..B6): synchronously generate or update the
     // story's section in `docs/generated/TECHNICAL-SPEC.md`. Mandated sync
     // (plan §122) so the file exists by the time forge_evaluate returns.
@@ -407,70 +452,159 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
     // `writeRunRecord`).
     let generatedDocs: NonNullable<RunRecord["generatedDocs"]> | undefined;
     if (report.verdict === "PASS") {
-      // F4 fix — when the spec-generator throws, mint typed warnings that
-      // surface on BOTH the on-disk run record's `generatedDocs.warnings`
-      // AND the MCP top-level `specGenWarnings` (P64 producer/consumer seam,
-      // P44 loud-failure). Previously the catch path here logged to stderr
-      // only, leaving consumers unable to distinguish "spec-gen ran cleanly"
-      // from "spec-gen exploded silently" — the bug macbook-monday filed
-      // against US-08+. The new warnings are appended to whatever the
-      // spec-generator itself produced (e.g. `no-vocabulary`,
-      // `stripped-unknown-identifier`).
-      try {
-        // v0.36.x grounding: surface the story's affectedPaths to the
-        // spec-generator so it can extract a source-vocabulary and ground
-        // the LLM. Empty/missing → spec-generator falls back to "(none)".
-        const story = plan.stories.find((s) => s.id === input.storyId);
-        const spec = await generateSpecForStory({
-          projectPath: input.projectPath,
-          storyId: input.storyId,
-          evalReport: report,
-          affectedPaths: story?.affectedPaths,
-          gitSha,
-          ctx,
-        });
-        generatedDocs = {
-          specPath: spec.specPath,
-          adrPaths: [], // populated below by Phase C's ADR extractor
-          genTimestamp: spec.genTimestamp,
-          genTokens: spec.genTokens,
-          contracts: spec.contracts,
-          warnings: spec.warnings ?? [],
-        };
-      } catch (err) {
-        // F4 fix — un-swallow: previously this catch only logged to stderr,
-        // leaving `TECHNICAL-SPEC.md` silently stale on every PASS where
-        // generation threw. Now we mint a typed `spec-gen-failed` warning
-        // and synthesise a `generatedDocs` envelope to carry it on disk.
-        // The envelope is also a placeholder for the ADR extractor below
-        // (its `adrPaths` populates onto this same envelope). Consumers
-        // detect the failure via either (a) the typed warning kind on
-        // `generatedDocs.warnings` or (b) the structural marker
-        // (`specPath === ""` + spec-gen-failed warning).
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(
-          `forge_evaluate: spec-generator failed (continuing with warning surfaced): ${message}`,
-        );
-        // Structural marker: PASS + specPath:"" + `spec-gen-failed` is an
-        // incomplete run record. The `spec-gen-skipped-on-pass` warning
-        // makes the structural-incompleteness explicit so consumers don't
-        // have to infer it from `specPath === ""`.
-        const failureWarnings: SpecGeneratorWarning[] = [
-          { kind: "spec-gen-failed", message },
-          {
-            kind: "spec-gen-skipped-on-pass",
-            message:
-              "PASS verdict but spec-generator threw; TECHNICAL-SPEC.md was NOT regenerated for this story",
-          },
-        ];
-        generatedDocs = {
-          specPath: "",
-          adrPaths: [], // populated below by Phase C's ADR extractor
-          genTimestamp: new Date().toISOString(),
-          genTokens: { inputTokens: 0, outputTokens: 0 },
-          contracts: [],
-          warnings: failureWarnings,
-        };
+      const story = plan.stories.find((s) => s.id === input.storyId);
+
+      if (!useLegacyInMcpPath) {
+        // v0.43.0 NEW PATH (default) — emit the `generate-spec-inline`
+        // directive instead of making a direct Anthropic API call from
+        // the MCP child. AC-1, AC-2, AC-3, AC-3b.
+        //
+        // Step 1 (AC-3b): server-side hand-author marker short-circuit.
+        // Sample on-disk content for the four canonical sub-sections.
+        // If ANY contains the `<!-- hand-authored ` marker, refuse to
+        // emit a directive AND a brief — the caller never gets work.
+        let currentSectionContent: ReturnType<typeof extractCurrentSectionContent>;
+        try {
+          currentSectionContent = extractCurrentSectionContent(
+            input.projectPath,
+            input.storyId,
+          );
+        } catch (err) {
+          // Sampling failure (e.g. malformed spec file) — fall through to
+          // the directive flow rather than blocking. Empty snapshot is
+          // observationally identical to "no prior content".
+          console.error(
+            `forge_evaluate: extractCurrentSectionContent failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+          );
+          currentSectionContent = {
+            "api-contracts": "",
+            "data-models": "",
+            invariants: "",
+            "test-surface": "",
+          };
+        }
+
+        if (hasHandAuthoredMarker(currentSectionContent)) {
+          // AC-3b — refuse to emit a directive; loud warning on BOTH the
+          // on-disk run record's `generatedDocs.warnings` AND the MCP
+          // top-level `specGenWarnings` (P64 dual-surface).
+          generatedDocs = {
+            specPath: "",
+            adrPaths: [], // populated below by Phase C's ADR extractor
+            genTimestamp: new Date().toISOString(),
+            genTokens: { inputTokens: 0, outputTokens: 0 },
+            contracts: [],
+            warnings: [
+              {
+                kind: "spec-gen-short-circuited-hand-author",
+                message:
+                  "TECHNICAL-SPEC.md contains a `<!-- hand-authored ... -->` marker on at least one sub-section of `## story: " +
+                  input.storyId +
+                  "`; forge-harness will not regenerate.",
+              },
+            ],
+            specGenMode: "short-circuited-hand-author",
+          };
+        } else {
+          // No hand-author marker — emit the directive + brief.
+          storyEvalRunId = generateRunId();
+          const briefPayload = buildSpecGenBrief(
+            {
+              projectPath: input.projectPath,
+              storyId: input.storyId,
+              evalReport: report,
+              affectedPaths: story?.affectedPaths,
+              gitSha,
+            },
+            storyEvalRunId,
+          );
+          storyEvalCallerAction = "generate-spec-inline";
+          // The lib-layer payload is structurally compatible with the
+          // wire-shape `SpecGenBrief`. Pin the literal type at the
+          // boundary so the response field carries the readonly tuple.
+          storyEvalSpecGenBrief = {
+            storyId: briefPayload.storyId,
+            runId: briefPayload.runId,
+            specPath: briefPayload.specPath,
+            affectedPaths: briefPayload.affectedPaths,
+            systemPrompt: briefPayload.systemPrompt,
+            userPrompt: briefPayload.userPrompt,
+            vocabularyPrompt: briefPayload.vocabularyPrompt,
+            diffSummary: briefPayload.diffSummary,
+            evalReport: briefPayload.evalReport,
+            expectedSections: [
+              "api-contracts",
+              "data-models",
+              "invariants",
+              "test-surface",
+            ],
+            currentSectionContent: briefPayload.currentSectionContent,
+            gitSha: briefPayload.gitSha,
+          };
+          // Brief-emit event lands in run record with structural marker
+          // (`specGenMode: "caller-action"`) so observability shows the
+          // directive was emitted; the merge event from `forge_apply_spec_gen`
+          // will OVERWRITE this envelope on the same file via the
+          // `findAndMergeRunRecord` path.
+          generatedDocs = {
+            specPath: briefPayload.specPath,
+            adrPaths: [],
+            genTimestamp: new Date().toISOString(),
+            genTokens: { inputTokens: 0, outputTokens: 0 },
+            contracts: [],
+            warnings: [],
+            specGenMode: "caller-action",
+          };
+        }
+      } else {
+        // v0.42.x LEGACY PATH (opt-out) — direct Anthropic API call from the
+        // MCP child via `generateSpecForStory`. F4 fix — when the spec-generator
+        // throws, mint typed warnings that surface on BOTH the on-disk run
+        // record's `generatedDocs.warnings` AND the MCP top-level
+        // `specGenWarnings` (P64 producer/consumer seam, P44 loud-failure).
+        try {
+          const spec = await generateSpecForStory({
+            projectPath: input.projectPath,
+            storyId: input.storyId,
+            evalReport: report,
+            affectedPaths: story?.affectedPaths,
+            gitSha,
+            ctx,
+          });
+          generatedDocs = {
+            specPath: spec.specPath,
+            adrPaths: [], // populated below by Phase C's ADR extractor
+            genTimestamp: spec.genTimestamp,
+            genTokens: spec.genTokens,
+            contracts: spec.contracts,
+            warnings: spec.warnings ?? [],
+            specGenMode: "in-mcp",
+          };
+        } catch (err) {
+          // Un-swallow: PASS verdict + spec-generator threw is surfaced via
+          // typed warnings on the run record + the MCP top-level field.
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(
+            `forge_evaluate: spec-generator failed (continuing with warning surfaced): ${message}`,
+          );
+          const failureWarnings: SpecGeneratorWarning[] = [
+            { kind: "spec-gen-failed", message },
+            {
+              kind: "spec-gen-skipped-on-pass",
+              message:
+                "PASS verdict but spec-generator threw; TECHNICAL-SPEC.md was NOT regenerated for this story",
+            },
+          ];
+          generatedDocs = {
+            specPath: "",
+            adrPaths: [], // populated below by Phase C's ADR extractor
+            genTimestamp: new Date().toISOString(),
+            genTokens: { inputTokens: 0, outputTokens: 0 },
+            contracts: [],
+            warnings: failureWarnings,
+            specGenMode: "in-mcp",
+          };
+        }
       }
 
       // v0.36.0 Phase C (AC-C1..C6): canonicalise any subagent-staged ADR
@@ -537,21 +671,29 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
     // render per-path ✓/✗ existence indicators without re-parsing the plan.
     const affectedPathsSnapshot = targetStory?.affectedPaths;
 
-    await writeRunRecord(input.projectPath, {
-      ...base,
-      storyId: input.storyId,
-      evalVerdict: report.verdict,
-      // v0.38.0 B2 — top-level `verdict` alias of `evalVerdict`. Same string,
-      // additive.
-      verdict: report.verdict,
-      evalReport: canonicalizeEvalReport(report),
-      ...(gitSha ? { gitSha } : {}),
-      ...(generatedDocs ? { generatedDocs } : {}),
-      ...(totalCostUsd !== undefined ? { totalCostUsd } : {}),
-      ...(affectedPathsSnapshot && affectedPathsSnapshot.length > 0
-        ? { affectedPaths: affectedPathsSnapshot }
-        : {}),
-    });
+    await writeRunRecord(
+      input.projectPath,
+      {
+        ...base,
+        storyId: input.storyId,
+        evalVerdict: report.verdict,
+        // v0.38.0 B2 — top-level `verdict` alias of `evalVerdict`. Same string,
+        // additive.
+        verdict: report.verdict,
+        evalReport: canonicalizeEvalReport(report),
+        ...(gitSha ? { gitSha } : {}),
+        ...(generatedDocs ? { generatedDocs } : {}),
+        ...(totalCostUsd !== undefined ? { totalCostUsd } : {}),
+        ...(affectedPathsSnapshot && affectedPathsSnapshot.length > 0
+          ? { affectedPaths: affectedPathsSnapshot }
+          : {}),
+      },
+      // v0.43.0 (AC-14) — when the caller-action directive flow emitted a
+      // runId at brief-build time, pin the run record's filename suffix to
+      // it so the caller's follow-up `forge_apply_spec_gen` invocation
+      // can locate + append its merge event onto the SAME file.
+      storyEvalRunId ? { runId: storyEvalRunId } : undefined,
+    );
   }
 
   // v0.38.0 I3 — surface spec-generator warnings at the top level of the
@@ -576,6 +718,15 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
   };
   if (storyEvalAdrCanonicalized !== undefined) {
     response.adrCanonicalized = storyEvalAdrCanonicalized;
+  }
+  // v0.43.0 — surface the caller-action directive + brief on the response
+  // envelope when the new path emitted them. Absent on the legacy path,
+  // non-PASS verdicts, and hand-author short-circuits.
+  if (storyEvalCallerAction !== undefined) {
+    response.callerAction = storyEvalCallerAction;
+  }
+  if (storyEvalSpecGenBrief !== undefined) {
+    response.specGenBrief = storyEvalSpecGenBrief;
   }
   return response;
 }

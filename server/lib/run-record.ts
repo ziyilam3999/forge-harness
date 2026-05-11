@@ -1,4 +1,4 @@
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
@@ -102,6 +102,21 @@ export interface RunRecord {
      * schema below uses `.default([])` so historical records still parse.
      */
     warnings: SpecGeneratorWarning[];
+    /**
+     * v0.43.0 — discriminator for which spec-gen code path produced this
+     * record. Additive-optional per P50; pre-v0.43.0 records lack this
+     * field. Consumers should treat absence as "in-mcp" (the legacy
+     * assumption). Distinct values:
+     *   - "in-mcp": legacy v0.42.x path; MCP child called Anthropic directly.
+     *   - "caller-action": v0.43.0 default; MCP child emitted a
+     *      `callerAction: "generate-spec-inline"` directive and the caller
+     *      (Claude Code session) generated the spec inline. The merge event
+     *      is appended to the SAME run record by `forge_apply_spec_gen`.
+     *   - "short-circuited-hand-author": evaluate.ts detected a
+     *      `<!-- hand-authored ` marker in the on-disk spec at brief-build
+     *      time. No directive emitted, no LLM call, no overwrite.
+     */
+    specGenMode?: "in-mcp" | "caller-action" | "short-circuited-hand-author";
   };
   metrics: {
     inputTokens: number;
@@ -264,6 +279,18 @@ export type SpecGeneratorWarning =
       // TECHNICAL-SPEC file is preserved when this warning fires.
       kind: "spec-gen-rate-limit-exhausted";
       message: string;
+    }
+  | {
+      // v0.43.0 (AC-3b) — forge_evaluate's PASS path detected a
+      // `<!-- hand-authored ` marker on at least one sub-section of the
+      // story's existing `## story: <id>` block in on-disk TECHNICAL-SPEC.md.
+      // The PASS path refused to emit the `generate-spec-inline` directive
+      // (the caller never gets work) AND refused to call Anthropic
+      // directly on the legacy path. The verdict stays PASS; the existing
+      // file is left UNCHANGED. Surfaced on BOTH the on-disk record's
+      // `generatedDocs.warnings` AND the MCP top-level `specGenWarnings`.
+      kind: "spec-gen-short-circuited-hand-author";
+      message: string;
     };
 
 /**
@@ -314,6 +341,10 @@ export const SpecGeneratorWarningSchema = z.discriminatedUnion("kind", [
     kind: z.literal("spec-gen-rate-limit-exhausted"),
     message: z.string(),
   }),
+  z.object({
+    kind: z.literal("spec-gen-short-circuited-hand-author"),
+    message: z.string(),
+  }),
 ]);
 
 export const GeneratedDocsSchema = z.object({
@@ -326,6 +357,11 @@ export const GeneratedDocsSchema = z.object({
   }),
   contracts: z.array(z.string()),
   warnings: z.array(SpecGeneratorWarningSchema).default([]),
+  // v0.43.0 — additive optional. Legacy records lack the field; consumers
+  // treat absence as "in-mcp".
+  specGenMode: z
+    .enum(["in-mcp", "caller-action", "short-circuited-hand-author"])
+    .optional(),
 });
 
 /**
@@ -385,11 +421,29 @@ export function canonicalizeEvalReport(report: EvalReport): EvalReport {
  * Generate a Windows-safe filename for a run record.
  * Format: {tool}-{timestamp}-{suffix}.json
  * The 4-char hex suffix handles same-millisecond collisions.
+ *
+ * v0.43.0 — when `forcedSuffix` is provided (4-char hex), it replaces the
+ * randomly generated one. This is how `forge_apply_spec_gen` lands its merge
+ * event in the SAME run-record file as the brief-emit event from evaluate.ts
+ * (AC-14 observability atomicity).
  */
-function makeRunFilename(tool: string, timestamp: string): string {
+export function makeRunFilename(
+  tool: string,
+  timestamp: string,
+  forcedSuffix?: string,
+): string {
   const safeDateStr = timestamp.replace(/[:.]/g, "-");
-  const suffix = randomBytes(2).toString("hex");
+  const suffix = forcedSuffix ?? randomBytes(2).toString("hex");
   return `${tool}-${safeDateStr}-${suffix}.json`;
+}
+
+/**
+ * v0.43.0 — generate a fresh 4-char hex run-id. Used by `forge_evaluate`
+ * when it emits a `callerAction: "generate-spec-inline"` directive so the
+ * caller can round-trip the id back through `forge_apply_spec_gen` (AC-14).
+ */
+export function generateRunId(): string {
+  return randomBytes(2).toString("hex");
 }
 
 /**
@@ -408,12 +462,19 @@ function makeRunFilename(tool: string, timestamp: string): string {
 export async function writeRunRecord(
   projectPath: string,
   record: RunRecord,
+  options?: { runId?: string },
 ): Promise<void> {
   try {
     const runsDir = join(projectPath, ".forge", "runs");
     await mkdir(runsDir, { recursive: true });
 
-    const filename = makeRunFilename(record.tool, record.timestamp);
+    // v0.43.0 — when `runId` is provided, the filename suffix uses it
+    // verbatim so brief-emit + merge events share one record file (AC-14).
+    const filename = makeRunFilename(
+      record.tool,
+      record.timestamp,
+      options?.runId,
+    );
     const filePath = join(runsDir, filename);
 
     await writeFile(filePath, JSON.stringify(record, null, 2), "utf-8");
@@ -437,5 +498,68 @@ export async function writeRunRecord(
       "forge: failed to update dashboard post-run-record (continuing):",
       err instanceof Error ? err.message : String(err),
     );
+  }
+}
+
+/**
+ * v0.43.0 — locate the run record whose filename suffix matches `runId`
+ * under `<projectPath>/.forge/runs/`, merge the supplied patch fields
+ * onto it, and rewrite the file in place. This is how `forge_apply_spec_gen`
+ * attaches its merge event to the SAME record that `forge_evaluate` wrote
+ * when it emitted the brief-emit event (AC-14 observability atomicity).
+ *
+ * Returns the resolved file path on success, or `null` when no matching
+ * run record file was found (caller should fall back to creating a fresh
+ * record file rather than dropping the merge event silently).
+ *
+ * Failure to read/parse/write is logged + swallowed (mirrors `writeRunRecord`).
+ */
+export async function findAndMergeRunRecord(
+  projectPath: string,
+  runId: string,
+  patch: {
+    generatedDocs?: NonNullable<RunRecord["generatedDocs"]>;
+    totalCostUsd?: number | null;
+  },
+): Promise<string | null> {
+  try {
+    const runsDir = join(projectPath, ".forge", "runs");
+    let entries: string[];
+    try {
+      entries = await readdir(runsDir);
+    } catch {
+      return null;
+    }
+    // Filename shape: `<tool>-<timestamp>-<suffix>.json`. We match by
+    // suffix == runId (4-char hex). The `.json` extension AND `-` separator
+    // anchor the suffix so a runId substring earlier in the name won't false-match.
+    const target = entries.find((e) => e.endsWith(`-${runId}.json`));
+    if (!target) return null;
+    const filePath = join(runsDir, target);
+    const raw = await readFile(filePath, "utf-8");
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch (err) {
+      console.error(
+        `forge: failed to parse run record ${filePath} for runId=${runId} (continuing):`,
+        err instanceof Error ? err.message : String(err),
+      );
+      return null;
+    }
+    if (patch.generatedDocs !== undefined) {
+      parsed.generatedDocs = patch.generatedDocs;
+    }
+    if (patch.totalCostUsd !== undefined) {
+      parsed.totalCostUsd = patch.totalCostUsd;
+    }
+    await writeFile(filePath, JSON.stringify(parsed, null, 2), "utf-8");
+    return filePath;
+  } catch (err) {
+    console.error(
+      `forge: findAndMergeRunRecord(runId=${runId}) failed (continuing):`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
   }
 }

@@ -46,6 +46,33 @@ vi.mock("../lib/spec-generator.js", () => ({
       { kind: "no-vocabulary", filesScanned: 0 },
     ],
   })),
+  // v0.43.0 — directive-flow helpers (unused on this file since beforeEach
+  // pins FORGE_SPEC_CALLER_ACTION=0, but exported to satisfy module shape).
+  buildSpecGenBrief: vi.fn(() => ({
+    storyId: "US-01",
+    runId: "abcd",
+    specPath: "/dev/null",
+    affectedPaths: [],
+    systemPrompt: "",
+    userPrompt: "",
+    vocabularyPrompt: "",
+    diffSummary: "",
+    evalReport: { storyId: "US-01", verdict: "PASS", criteria: [] },
+    expectedSections: ["api-contracts", "data-models", "invariants", "test-surface"],
+    currentSectionContent: {
+      "api-contracts": "",
+      "data-models": "",
+      invariants: "",
+      "test-surface": "",
+    },
+  })),
+  extractCurrentSectionContent: vi.fn(() => ({
+    "api-contracts": "",
+    "data-models": "",
+    invariants: "",
+    "test-surface": "",
+  })),
+  hasHandAuthoredMarker: vi.fn(() => false),
 }));
 
 vi.mock("../lib/adr-extractor.js", () => ({
@@ -143,10 +170,16 @@ describe("detectSharedBuildPrefix — v0.38.0 B3", () => {
 describe("forge_evaluate (story) — v0.38.0 grounding observability surface", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // v0.43.0 — these tests were written against the legacy in-MCP
+    // `generateSpecForStory` call path. Pin `FORGE_SPEC_CALLER_ACTION=0`
+    // so they keep exercising that path; new directive-flow coverage
+    // lives in dedicated v0.43.0 tests in evaluate.test.ts.
+    vi.stubEnv("FORGE_SPEC_CALLER_ACTION", "0");
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("AC-6: response includes top-level specGenWarnings byte-identical to generatedDocs.warnings on the run record", async () => {

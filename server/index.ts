@@ -8,7 +8,22 @@ import { reconcileInputSchema, handleReconcile } from "./tools/reconcile.js";
 import { lintRefreshInputSchema, handleLintRefresh } from "./tools/lint-refresh.js";
 import { statusInputSchema, handleStatus } from "./tools/status.js";
 import { declareStoryInputSchema, handleDeclareStory } from "./tools/declare-story.js";
+import { applySpecGenInputSchema, handleApplySpecGen } from "./tools/apply-spec-gen.js";
 import * as dashboardRenderLoop from "./lib/dashboard-render-loop.js";
+
+// v0.43.0 (AC-15) — operator-visibility startup log. Emitted to stderr at
+// module-load time so even a non-interactive `node dist/index.js` reveals
+// which spec-gen path is active. Distinct strings for default-on vs opt-out
+// so the log line is grep-able by mode.
+if (process.env.FORGE_SPEC_CALLER_ACTION === "0") {
+  console.error(
+    "forge-harness: spec-gen via legacy in-MCP synth (FORGE_SPEC_CALLER_ACTION=0)",
+  );
+} else {
+  console.error(
+    "forge-harness: spec-gen via caller-action directive enabled (default since v0.43.0); opt back with FORGE_SPEC_CALLER_ACTION=0",
+  );
+}
 
 const server = new McpServer({
   name: "forge",
@@ -134,6 +149,25 @@ server.registerTool(
     annotations: { readOnlyHint: false },
   },
   handleDeclareStory,
+);
+
+server.registerTool(
+  "forge_apply_spec_gen",
+  {
+    title: "Forge Apply Spec-Gen",
+    description:
+      "v0.43.0 — server-side merge half of the spec-gen caller-action directive flow. " +
+      "After forge_evaluate's PASS path returns a `callerAction: \"generate-spec-inline\"` " +
+      "directive plus a `specGenBrief` payload, the calling Claude Code session performs " +
+      "ONE LLM round-trip with the pre-rendered prompts, then invokes this tool with the " +
+      "parsed result + runId. This tool re-samples on-disk TECHNICAL-SPEC.md content (hand-" +
+      "author race-window check), preserves any newly-marked sub-section, merges the caller's " +
+      "sections via the v0.42.0 preserve-invariant code path, and appends the merge event " +
+      "onto the SAME run record file the directive was emitted from. Makes ZERO Anthropic API calls.",
+    inputSchema: applySpecGenInputSchema,
+    annotations: { readOnlyHint: false },
+  },
+  handleApplySpecGen,
 );
 
 async function main() {

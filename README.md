@@ -88,6 +88,74 @@ Get an API key at: https://console.anthropic.com/settings/keys
 
 After setting the env var, restart Claude Code so the forge MCP child picks up the new environment.
 
+### Handling the `generate-spec-inline` directive (v0.43.0+)
+
+Starting in v0.43.0, `forge_evaluate`'s PASS path **does not call Anthropic itself**. Instead it returns a directive asking the calling Claude Code session to do the spec-gen LLM round-trip inline. This sidesteps Max-plan OAuth's header-less anti-abuse 429s entirely — the MCP child no longer hits the Anthropic API for spec-gen.
+
+The MCP response envelope looks like this on a story-mode PASS:
+
+```json
+{
+  "callerAction": "generate-spec-inline",
+  "specGenBrief": {
+    "storyId": "US-13",
+    "runId": "a1b2",
+    "specPath": "/path/to/docs/generated/TECHNICAL-SPEC.md",
+    "affectedPaths": ["src/runMonday.ts"],
+    "systemPrompt": "You are the spec-generator ...",
+    "userPrompt": "## Story\nUS-13\n\n## Eval verdict\nPASS\n...",
+    "vocabularyPrompt": "## Real symbols available\n- `runMonday` ...",
+    "diffSummary": "...git diff --stat output...",
+    "evalReport": { "verdict": "PASS", "criteria": [...] },
+    "expectedSections": ["api-contracts", "data-models", "invariants", "test-surface"],
+    "currentSectionContent": {
+      "api-contracts": "...",
+      "data-models": "...",
+      "invariants": "...",
+      "test-surface": "..."
+    }
+  },
+  "specGenWarnings": [],
+  ...
+}
+```
+
+Six-step caller-side flow:
+
+1. **Detect the directive.** Inspect the response envelope for `result.callerAction === "generate-spec-inline"`. When absent (hand-author short-circuit, non-PASS verdict, or `FORGE_SPEC_CALLER_ACTION=0` opt-out), do nothing — there's no caller work.
+2. **Extract the prompts.** Read `result.specGenBrief.systemPrompt` and `result.specGenBrief.userPrompt`. Both are pre-rendered server-side; do NOT re-assemble.
+3. **Call your LLM.** Send the system + user message to your Anthropic connection (the calling Claude Code session's own, which is the path that works — the MCP child is the one with the OAuth-bucket issue). Request JSON-mode output. The model returns a single JSON object matching this schema:
+   ```json
+   {
+     "contracts": ["forge_evaluate", "forge_generate"],
+     "sections": {
+       "api-contracts": "<markdown>",
+       "data-models": "<markdown>",
+       "invariants": "<markdown>",
+       "test-surface": "<markdown>"
+     }
+   }
+   ```
+4. **Parse the response.** Validate that `sections` contains exactly the four keys from `result.specGenBrief.expectedSections`. Each section is a Markdown bullet list (or the literal string `"(none)"`). Capture the `tokens` your LLM client reports — `{inputTokens, outputTokens}`.
+5. **Call `forge_apply_spec_gen`.** Invoke the MCP tool with `{runId, storyId, projectPath, sections, contracts, tokens, affectedPaths, gitSha}`. The `runId` MUST be the one from the brief (`result.specGenBrief.runId`) so the merge event lands on the same run-record file as the brief-emit event. `affectedPaths` and `gitSha` are echoed from the brief for vocabulary-grounding + front-matter stamping.
+6. **Verify success.** The tool returns `{specPath, warnings, contracts, bodyChanged, runRecordPath}`. Success = `runRecordPath` is non-null AND `warnings` contains no `spec-gen-empty-sections` entries.
+
+**Opt-out: legacy v0.42.x in-MCP synth.** Set `FORGE_SPEC_CALLER_ACTION=0` in the environment that launches the MCP server (e.g., your Claude Code config). The PASS path then calls Anthropic directly via the legacy `generateSpecForStory` code path. Use this only when you have a stable API-key identity (not Max-plan OAuth) and want the simpler one-shot flow. Both v0.42.0's preserve-invariant and v0.42.1's retry-on-429 remain active on the legacy path; both inherit by reuse on the new path's `forge_apply_spec_gen` merge half.
+
+**What gets logged on startup.** The MCP server emits one stderr line at module-load time indicating which path is active:
+
+```
+forge-harness: spec-gen via caller-action directive enabled (default since v0.43.0); opt back with FORGE_SPEC_CALLER_ACTION=0
+```
+
+or (when `FORGE_SPEC_CALLER_ACTION=0`):
+
+```
+forge-harness: spec-gen via legacy in-MCP synth (FORGE_SPEC_CALLER_ACTION=0)
+```
+
+Grep your MCP server logs for these strings to confirm the active mode.
+
 ### Spec-generator retry-on-429 + preserve-on-failure invariant (v0.42.0)
 
 When `forge_evaluate` returns PASS, the spec-generator regenerates the story's section of `docs/generated/TECHNICAL-SPEC.md`. v0.42.0 changes the LLM-failure behaviour:

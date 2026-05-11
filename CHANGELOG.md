@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.43.0](https://github.com/ziyilam3999/forge-harness/compare/v0.42.1...v0.43.0) (2026-05-11)
+
+Architectural fix: the MCP child no longer calls the Anthropic API on the spec-gen path. Plan: `.ai-workspace/plans/2026-05-11-spec-gen-via-caller-action-directive.md` (v5, plan-chain GREAT × 4). Cairn-stone: `F-OAUTH-MCP-CHILD-NOT-ALLOWED-DIRECT-ANTHROPIC-CALL`.
+
+### Fixed
+
+- **header-less 429 functional failure** on `forge_evaluate`'s PASS path. v0.42.x retry-on-429 made the failure safe (preserve-invariant + retry-fallback) but did not actually regenerate `docs/generated/TECHNICAL-SPEC.md` — Anthropic's Max-plan OAuth bucket returns 429 *without* a `Retry-After` header on the access pattern forge-harness was using (0 of 6 historical 429s carried the header). v0.43.0 moves the LLM round-trip out of the MCP child entirely: forge_evaluate's PASS path now returns a `callerAction: "generate-spec-inline"` directive plus a `specGenBrief` payload, and the calling Claude Code session does the LLM call using its own (working) Anthropic connection. The MCP child makes ZERO direct Anthropic API calls on the new default path.
+
+### Added
+
+- New MCP tool **`forge_apply_spec_gen`** — server-side merge half of the directive flow. Accepts the caller's parsed LLM result (`{runId, storyId, projectPath, sections, contracts, tokens}`), re-samples on-disk content (apply-time hand-author-marker race-window check), preserves any newly-marked sub-section, validates the merged content against the source vocabulary, writes the file via the existing v0.42.0 preserve-invariant + `idempotentWrite` code path, and appends the merge event onto the SAME `.forge/runs/forge_evaluate-{timestamp}-{runId}.json` file the directive was emitted from. Zod-validated input — malformed payloads are rejected before any merge work happens.
+- New directive **`callerAction: "generate-spec-inline"`** on the `forge_evaluate` story-mode response envelope. Companion `specGenBrief` field carries 11 required inputs (storyId, runId, specPath, affectedPaths, systemPrompt, userPrompt, vocabularyPrompt, diffSummary, evalReport, expectedSections, currentSectionContent) plus an optional `gitSha` echoed back through `forge_apply_spec_gen({gitSha})` so the spec front-matter's `lastGitSha` field is preserved across the directive round-trip (v0.35.1 AC-2 contract). Sibling to `forge_generate`'s existing `callerAction: "spawn-subagent-and-await"` directive — separate semantics: spec-gen is a single ~5-10K-token LLM call, no subagent spawn needed.
+- New optional field **`specGenMode`** on `RunRecord.generatedDocs` — discriminator with three values (`"in-mcp"` for the legacy path, `"caller-action"` for the new default, `"short-circuited-hand-author"` for the AC-3b refusal path). Additive-optional per P50; pre-v0.43.0 records lack the field and consumers should treat absence as `"in-mcp"`.
+- New env var **`FORGE_SPEC_CALLER_ACTION=0`** — opt-out back to the v0.42.x in-MCP synth path. Default (unset) uses the new directive flow.
+- New warning kind **`spec-gen-short-circuited-hand-author`** — emitted on both the on-disk run record's `generatedDocs.warnings` and the MCP top-level `specGenWarnings` when forge_evaluate detects a `<!-- hand-authored ` marker on at least one sub-section of `## story: <id>` in on-disk TECHNICAL-SPEC.md. Verdict stays PASS; no directive emitted, no caller work, no overwrite.
+- Operator-visibility startup log on `console.error`: `"forge-harness: spec-gen via caller-action directive enabled (default since v0.43.0); opt back with FORGE_SPEC_CALLER_ACTION=0"` (default) or `"forge-harness: spec-gen via legacy in-MCP synth (FORGE_SPEC_CALLER_ACTION=0)"` (opt-out). Grep-able by mode.
+- New `buildSpecGenBrief`, `applySpecGenResult`, `extractCurrentSectionContent`, `hasHandAuthoredMarker`, `findHandAuthoredSections`, `HAND_AUTHORED_MARKER_PREFIX`, `SYSTEM_PROMPT`, `REQUIRED_SECTIONS` exports on `server/lib/spec-generator.ts` — the producer/consumer seam between forge_evaluate (brief-build) and `forge_apply_spec_gen` (merge). `findAndMergeRunRecord` + `generateRunId` + extended `makeRunFilename` on `server/lib/run-record.ts` for atomic observability across the architectural split.
+
+### Changed
+
+- `forge_evaluate`'s PASS path no longer makes a direct Anthropic API call by default — the LLM round-trip is delegated to the caller via the `callerAction: "generate-spec-inline"` directive (sibling pattern to `forge_generate`'s `spawn-subagent-and-await`). Opt back to the legacy v0.42.x in-MCP synth via `FORGE_SPEC_CALLER_ACTION=0`. Both v0.42.0 preserve-invariant and v0.42.1 retry-on-429 remain as defense-in-depth on the legacy path AND inherit via reuse on the new path's apply-side (`applySpecGenResult`).
+- README: new section "Handling the `generate-spec-inline` directive (v0.43.0+)" documenting the 6-step caller-side flow plus the `FORGE_SPEC_CALLER_ACTION=0` opt-out.
+
+### Tests
+
+- New vitest tests under `server/tools/evaluate.test.ts` (AC-1 directive emission, AC-2 zero Anthropic calls on PASS, AC-3 brief required-fields, AC-3b hand-author short-circuit, AC-4 env-var opt-out, AC-14 atomic runId across brief-emit + merge events, AC-15 startup-log assertion).
+- New vitest test file `server/tools/apply-spec-gen.test.ts` (AC-5 v0.42.0 preserve-invariant via the new tool + Zod-validation rejection, AC-6 apply-time hand-author marker preservation race-window).
+
 ## [0.42.1](https://github.com/ziyilam3999/forge-harness/compare/v0.42.0...v0.42.1) (2026-05-11)
 
 Operational gap fix: v0.42.0's retry-on-429 exhausts on Max-plan OAuth header-less 429s (1s fallback too short for actual rate-limit window). Surfaced 2026-05-11T07:13Z during AC-8 live smoke. Plan: `.ai-workspace/plans/2026-05-11-spec-gen-retry-headerless-429-fallback.md` (v5, plan-chain GREAT × 4).

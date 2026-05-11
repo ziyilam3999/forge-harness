@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.44.0](https://github.com/ziyilam3999/forge-harness/compare/v0.43.2...v0.44.0) (2026-05-11)
+
+Vocabulary post-validator now follows relative-import chains rooted at the story's `affectedPaths`, so identifiers exported by sibling modules but referenced via `import { Foo } from "./bar"` survive the validator instead of being stripped from the LLM-generated TECHNICAL-SPEC content. Triggered by v0.43.1 AC-10 dogfood observation of 25 stripped cross-module identifiers. Plan: `.ai-workspace/plans/2026-05-11-v0440-vocab-follow-imports.md`.
+
+### Added
+
+* **spec-generator:** vocabulary scanner now does a depth-bounded BFS over the relative-import graph rooted at `affectedPaths`. New env var `FORGE_VOCAB_IMPORT_DEPTH` (default `2`, range `0..5`) controls follow depth; `0` reverts to v0.43.x behavior.
+* TS NodeNext-aware resolution: `import "./b.js"` resolves to `b.ts` when the TS source exists; falls through to `.js`, `.jsx`, ..., `${path}/index.*`.
+* Cycle-safe via visited set. Skips `node_modules`, bare/aliased imports, and test files.
+* Unresolvable relative imports surface as warnings (operator-visible), never throw.
+
+### Out of scope
+
+* TS `paths` / `baseUrl` alias resolution (deferred — both forge-harness and monday-bot use NodeNext with no aliases).
+* `export * from` re-export following.
+* Cross-package (npm) resolution.
+
 ## [0.43.2](https://github.com/ziyilam3999/forge-harness/compare/v0.43.1...v0.43.2) (2026-05-11)
 
 I1-reviewer deferred follow-ups from the v0.43.0 ship. Three small observability / correctness fixes in the `forge_apply_spec_gen` seam. Plan: `.ai-workspace/plans/2026-05-11-v0432-i1-deferred-followups.md`.

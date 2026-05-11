@@ -159,6 +159,29 @@ describe("forge_apply_spec_gen — Zod input validation (AC-5)", () => {
     const result = schema.safeParse(wellFormed);
     expect(result.success).toBe(true);
   });
+
+  it("accepts an optional tokensEstimated: true field (v0.44.1)", () => {
+    const schema = z.object(applySpecGenInputSchema);
+    const withEstimate = {
+      runId: "a1b2",
+      storyId: "US-01",
+      projectPath: "/tmp/x",
+      sections: {
+        "api-contracts": "(none)",
+        "data-models": "(none)",
+        invariants: "(none)",
+        "test-surface": "(none)",
+      },
+      contracts: [],
+      tokens: { inputTokens: 100, outputTokens: 50 },
+      tokensEstimated: true,
+    };
+    const result = schema.safeParse(withEstimate);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.tokensEstimated).toBe(true);
+    }
+  });
 });
 
 // ── AC-5: preserve-invariant (empty/all-none sections → bytes unchanged) ──
@@ -328,6 +351,74 @@ describe("forge_apply_spec_gen — AC-6 hand-author race-window guard", () => {
     expect(record.generatedDocs!.specPath).toContain("TECHNICAL-SPEC.md");
     expect(record.generatedDocs!.specGenMode).toBe("caller-action");
     expect(record.generatedDocs!.contracts).toEqual(["forge_evaluate"]);
+  });
+
+  it("v0.44.1: tokensEstimated: true threads onto generatedDocs.tokensEstimated", async () => {
+    // Caller-action path where the caller (e.g. /forge-execute v1.1.0)
+    // estimates tokens via byte/4 and marks them as approximate. The flag
+    // must land on the run record's generatedDocs envelope so cost-audit
+    // consumers can mark the totalCostUsd as estimated.
+    rmSync(tmp, { recursive: true, force: true });
+    tmp = mkdtempSync(join(tmpdir(), "forge-apply-spec-gen-tokens-est-"));
+    seedTechSpec(tmp, { handAuthored: false });
+    seedRunRecord(tmp, "abcd");
+
+    const applyResp = await handleApplySpecGen({
+      runId: "abcd",
+      storyId: "US-01",
+      projectPath: tmp,
+      sections: {
+        "api-contracts": "- `est`: caller bullet",
+        "data-models": "- `Est`: caller bullet",
+        invariants: "- caller invariant",
+        "test-surface": "- caller test",
+      },
+      contracts: [],
+      tokens: { inputTokens: 1000, outputTokens: 500 },
+      tokensEstimated: true,
+    });
+    expect(applyResp.isError).toBeUndefined();
+
+    const runsDir = join(tmp, ".forge", "runs");
+    const entries = readdirSync(runsDir) as string[];
+    const recordFile = entries.find((e) => e.endsWith("-abcd.json"));
+    expect(recordFile).toBeDefined();
+    const record = JSON.parse(
+      readFileSync(join(runsDir, recordFile!), "utf-8"),
+    ) as { generatedDocs?: { tokensEstimated?: boolean } };
+    expect(record.generatedDocs?.tokensEstimated).toBe(true);
+  });
+
+  it("v0.44.1: tokensEstimated unset → field absent from generatedDocs (backwards compat)", async () => {
+    rmSync(tmp, { recursive: true, force: true });
+    tmp = mkdtempSync(join(tmpdir(), "forge-apply-spec-gen-no-est-"));
+    seedTechSpec(tmp, { handAuthored: false });
+    seedRunRecord(tmp, "abcd");
+
+    const applyResp = await handleApplySpecGen({
+      runId: "abcd",
+      storyId: "US-01",
+      projectPath: tmp,
+      sections: {
+        "api-contracts": "- `m`: caller bullet",
+        "data-models": "- `M`: caller bullet",
+        invariants: "- caller invariant",
+        "test-surface": "- caller test",
+      },
+      contracts: [],
+      tokens: { inputTokens: 100, outputTokens: 50 },
+      // tokensEstimated intentionally omitted (default = measured tokens)
+    });
+    expect(applyResp.isError).toBeUndefined();
+
+    const runsDir = join(tmp, ".forge", "runs");
+    const entries = readdirSync(runsDir) as string[];
+    const recordFile = entries.find((e) => e.endsWith("-abcd.json"));
+    expect(recordFile).toBeDefined();
+    const record = JSON.parse(
+      readFileSync(join(runsDir, recordFile!), "utf-8"),
+    ) as { generatedDocs?: { tokensEstimated?: boolean } };
+    expect(record.generatedDocs?.tokensEstimated).toBeUndefined();
   });
 
   it("preserves hand-authored sub-section AND overwrites the other three", async () => {

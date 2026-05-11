@@ -18,6 +18,7 @@ import {
   readFileSync,
   writeFileSync,
   mkdirSync,
+  readdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -283,7 +284,7 @@ describe("forge_apply_spec_gen — AC-6 hand-author race-window guard", () => {
     // Assert: both events land in the SAME record file. The filename suffix
     // is the runId.
     const runsDir = join(tmp, ".forge", "runs");
-    const entries = require("node:fs").readdirSync(runsDir) as string[];
+    const entries = readdirSync(runsDir) as string[];
     const recordFile = entries.find(
       (e) => e.startsWith("forge_evaluate-") && e.endsWith(`-${brief.runId}.json`),
     );

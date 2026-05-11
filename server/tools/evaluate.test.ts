@@ -1499,6 +1499,112 @@ describe("v0.43.0 — callerAction directive flow on PASS path", () => {
   });
 });
 
+// ── v0.43.1: directive surfacing inside MCP content[0].text ─────────────────
+//
+// v0.43.0 emitted `callerAction` and `specGenBrief` as siblings of `content`
+// on the outer MCP response envelope. Standard MCP clients (Claude Code
+// included) only expose `content[0].text` to the calling agent, so the
+// directive emitted to a place the agent couldn't see — the AC-11 live smoke
+// (run record `monday-bot/.forge/runs/forge_evaluate-2026-05-11T09-34-10-439Z-bc5b.json`)
+// surfaced this. v0.43.1 merges the directive fields INTO the JSON-stringified
+// `content[0].text` payload while retaining envelope siblings as
+// belt-and-suspenders. These tests pin the post-`JSON.parse(content[0].text)`
+// access path.
+describe("v0.43.1 — directive surfacing inside content[0].text", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default-path (directive flow) for these tests except where AC-4 flips
+    // back to legacy via FORGE_SPEC_CALLER_ACTION=0.
+    vi.stubEnv("FORGE_SPEC_CALLER_ACTION", "");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-1: PASS-path content[0].text JSON includes callerAction + specGenBrief reachable via JSON.parse", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].type).toBe("text");
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.callerAction).toBe("generate-spec-inline");
+    expect(parsed.specGenBrief).toBeDefined();
+    expect(typeof parsed.specGenBrief).toBe("object");
+    expect(typeof parsed.specGenBrief.runId).toBe("string");
+    expect(parsed.specGenBrief.runId.length).toBeGreaterThan(0);
+    expect(typeof parsed.specGenBrief.systemPrompt).toBe("string");
+    expect(parsed.specGenBrief.systemPrompt.length).toBeGreaterThan(0);
+    // Eval-report fields MUST NOT be shadowed by directive fields (spread
+    // order: report first).
+    expect(parsed.storyId).toBe("US-01");
+    expect(parsed.verdict).toBe("PASS");
+    expect(Array.isArray(parsed.criteria)).toBe(true);
+  });
+
+  it("AC-3: specGenWarnings is present in content[0].text JSON (empty array on no warnings)", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect("specGenWarnings" in parsed).toBe(true);
+    expect(Array.isArray(parsed.specGenWarnings)).toBe(true);
+    // Same data as the outer-envelope sibling (belt-and-suspenders).
+    expect(parsed.specGenWarnings).toEqual(result.specGenWarnings);
+  });
+
+  it("AC-4: legacy-path (FORGE_SPEC_CALLER_ACTION=0) content[0].text JSON has NO callerAction or specGenBrief fields", async () => {
+    vi.stubEnv("FORGE_SPEC_CALLER_ACTION", "0");
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect("callerAction" in parsed).toBe(false);
+    expect("specGenBrief" in parsed).toBe(false);
+    // Envelope siblings also absent on legacy path.
+    expect(result.callerAction).toBeUndefined();
+    expect(result.specGenBrief).toBeUndefined();
+    // Eval-report fields still present.
+    expect(parsed.storyId).toBe("US-01");
+    expect(parsed.verdict).toBe("PASS");
+  });
+
+  it("AC-5: hand-author short-circuit content[0].text JSON has NO directive but DOES carry the short-circuit warning", async () => {
+    // Simulate hand-author marker on one sub-section so AC-3b fires.
+    mockedExtractCurrent.mockReturnValueOnce({
+      "api-contracts": "<!-- hand-authored 2026-05-11 by operator -->\n- something",
+      "data-models": "",
+      invariants: "",
+      "test-surface": "",
+    });
+    mockedHasHandAuthored.mockReturnValueOnce(true);
+
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    const result = await handleEvaluate({
+      storyId: "US-13",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect("callerAction" in parsed).toBe(false);
+    expect("specGenBrief" in parsed).toBe(false);
+    expect(Array.isArray(parsed.specGenWarnings)).toBe(true);
+    const kinds = parsed.specGenWarnings.map(
+      (w: { kind: string }) => w.kind,
+    );
+    expect(kinds).toContain("spec-gen-short-circuited-hand-author");
+  });
+});
+
 describe("computeReverseFindingId — determinism", () => {
   it("same inputs produce the same id across calls", () => {
     const a = computeReverseFindingId("server/foo.ts:10", "method-divergence", "x");

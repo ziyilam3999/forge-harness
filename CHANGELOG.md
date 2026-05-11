@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.43.1](https://github.com/ziyilam3999/forge-harness/compare/v0.43.0...v0.43.1) (2026-05-11)
+
+MCP-client-visible surfacing fix for the v0.43.0 caller-action directive. Plan: `.ai-workspace/plans/2026-05-11-spec-gen-directive-mcp-content-surfacing.md`. Cairn-stones (to place at /ship): `F-DIRECTIVE-EMITTED-OUTSIDE-CONTENT`, `F-DIRECTIVE-INTO-VOID` (retroactive n=2 recording).
+
+### Fixed
+
+- **MCP-client-visible directive surfacing** on `forge_evaluate`'s PASS path. v0.43.0 emitted `callerAction: "generate-spec-inline"` and `specGenBrief` as siblings of `content` on the outer MCP response envelope, but standard MCP clients (Claude Code's renderer included) only expose `content[0].text` to the calling agent — emitting the directive into a void. The AC-11 live smoke run record (`monday-bot/.forge/runs/forge_evaluate-2026-05-11T09-34-10-439Z-bc5b.json`) showed `specGenMode: "caller-action"` server-side but `content[0].text` carrying only `{storyId, verdict, criteria}`; the caller agent never saw the directive and silently no-op'd, leaving `docs/generated/TECHNICAL-SPEC.md` unchanged (pre-sha = post-sha). v0.43.1 merges `callerAction`, `specGenBrief`, and `specGenWarnings` INTO the JSON-stringified `content[0].text` payload alongside the eval report so the documented `JSON.parse(result.content[0].text).callerAction` access path actually works. Mirrors the working pattern in `forge_generate` (live since v0.36.0). Envelope-sibling fields (`result.callerAction`, `result.specGenBrief`, `result.specGenWarnings`) are RETAINED unchanged for envelope-aware clients — same data on both surfaces, belt-and-suspenders.
+
+### Changed
+
+- README §"Handling the `generate-spec-inline` directive" now documents the `JSON.parse(result.content[0].text)` access pattern as the primary path; the legacy envelope-sibling reference remains for envelope-aware clients.
+
+### Tests
+
+- 4 new vitest tests in `server/tools/evaluate.test.ts` (AC-1 / AC-3 / AC-4 / AC-5) assert the post-`JSON.parse(content[0].text)` access path mechanically: directive reachable on PASS, `specGenWarnings` present (empty array on no warnings), legacy-path (`FORGE_SPEC_CALLER_ACTION=0`) content omits the directive fields, hand-author short-circuit content omits the directive but carries the `spec-gen-short-circuited-hand-author` warning. Suite size grew from 1144 → 1148 tests.
+
 ## [0.43.0](https://github.com/ziyilam3999/forge-harness/compare/v0.42.1...v0.43.0) (2026-05-11)
 
 Architectural fix: the MCP child no longer calls the Anthropic API on the spec-gen path. Plan: `.ai-workspace/plans/2026-05-11-spec-gen-via-caller-action-directive.md` (v5, plan-chain GREAT × 4). Cairn-stone: `F-OAUTH-MCP-CHILD-NOT-ALLOWED-DIRECT-ANTHROPIC-CALL`.

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   generateSpecForStory,
   buildUserPrompt,
@@ -819,19 +820,12 @@ describe("spec-generator — I6 shell-only path (LLM unavailable)", () => {
       expect(w.message).toContain("AuthenticationError");
     }
 
-    // Surface 2 (on-disk file): the spec was still written to docs/generated
-    // and its `## story:` section carries the byte-stable HTML-comment
-    // placeholder body. F4's `spec-gen-failed` warning is NOT present
-    // because `generateSpecForStory` itself returned successfully.
-    expect(existsSync(result.specPath)).toBe(true);
-    const text = readFileSync(result.specPath, "utf-8");
-    expect(text.length).toBeGreaterThan(0);
-    expect(text).toContain("## story: US-01");
-    expect(text).toContain(
-      "<!-- forge: placeholder body — LLM unavailable; see warnings -->",
-    );
-    // Frontmatter `lastUpdated` and the story entry refreshed deterministically.
-    expect(text).toContain('id: "US-01"');
+    // v0.42.0 (AC-1) — preserve-on-synth-failure: when there was no
+    // pre-existing TECHNICAL-SPEC.md, the file MUST NOT be created. The
+    // pre-v0.42.0 path wrote a placeholder-body spec; this was the
+    // silent-data-loss bug surfaced 2026-05-11 against monday-bot v0.12.3.
+    expect(existsSync(result.specPath)).toBe(false);
+
     // `spec-gen-failed` is the F4 "generateSpecForStory itself threw" marker;
     // we did NOT throw here, so it must be absent.
     const failedKinds = result.warnings.filter((w) => w.kind === "spec-gen-failed");
@@ -841,9 +835,15 @@ describe("spec-generator — I6 shell-only path (LLM unavailable)", () => {
     expect(result.genTokens).toEqual({ inputTokens: 0, outputTokens: 0 });
     // No contracts inferred (synth never returned).
     expect(result.contracts).toEqual([]);
+    // bodyChanged is false — we did not touch the file.
+    expect(result.bodyChanged).toBe(false);
   });
 
-  it("idempotency (AC-F): two consecutive shell-only runs produce byte-identical files", async () => {
+  it("idempotency (AC-F): two consecutive shell-only runs leave the file absent (preserve-on-failure)", async () => {
+    // v0.42.0 (AC-1) — when synth throws on a fresh tmp dir, the file is
+    // NEVER created. Two consecutive throws → file still absent. The
+    // pre-v0.42.0 path wrote a placeholder spec on both runs; this test now
+    // asserts the preserve-on-failure invariant directly.
     const r1 = await generateSpecForStory({
       projectPath: tmp,
       storyId: "US-01",
@@ -851,9 +851,9 @@ describe("spec-generator — I6 shell-only path (LLM unavailable)", () => {
       ctx,
       synthesize: throwingSynth,
     });
-    const text1 = readFileSync(r1.specPath, "utf-8");
+    expect(existsSync(r1.specPath)).toBe(false);
 
-    // Force a wall-clock gap so any per-run timestamp would differ.
+    // Force a wall-clock gap so any per-run timestamp drift would have shown.
     await new Promise((r) => setTimeout(r, 30));
 
     const r2 = await generateSpecForStory({
@@ -863,13 +863,7 @@ describe("spec-generator — I6 shell-only path (LLM unavailable)", () => {
       ctx,
       synthesize: throwingSynth,
     });
-    const text2 = readFileSync(r2.specPath, "utf-8");
-
-    // Byte-identical — `idempotentWrite` short-circuits because the placeholder
-    // body has no per-run state. This is the "70% regen + placeholder is
-    // better than 0% regen + stale doc" outcome operator wanted, AND the
-    // git-history-stable path that prevents per-PASS dated-banner churn.
-    expect(text2).toBe(text1);
+    expect(existsSync(r2.specPath)).toBe(false);
 
     // Both runs surfaced the warning (consumer sees the cause every time).
     expect(r1.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
@@ -935,6 +929,11 @@ describe("spec-generator — #548 retry-after surfaced on 429 RateLimitError", (
       evalReport: makeReport("US-01"),
       ctx,
       synthesize: synthThrowsRateLimit,
+      // v0.42.0 — bypass real wall-clock sleep on the retry path so the test
+      // doesn't burn 60s on the retry-after header. The retry still fires
+      // (synth is invoked twice, the second invocation also throws because
+      // the stub is unconditional, falling into the no-overwrite path).
+      sleepFn: async () => {},
     });
     const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
     expect(shellOnly).toBeDefined();
@@ -981,6 +980,8 @@ describe("spec-generator — #548 retry-after surfaced on 429 RateLimitError", (
       evalReport: makeReport("US-01"),
       ctx,
       synthesize: synthThrowsNoHeader,
+      // v0.42.0 — bypass real wall-clock sleep on the retry-on-429 path.
+      sleepFn: async () => {},
     });
     const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
     expect(shellOnly).toBeDefined();
@@ -1009,6 +1010,8 @@ describe("spec-generator — #548 retry-after surfaced on 429 RateLimitError", (
       evalReport: makeReport("US-01"),
       ctx,
       synthesize: synthThrowsDate,
+      // v0.42.0 — bypass real wall-clock sleep on the retry-on-429 path.
+      sleepFn: async () => {},
     });
     const shellOnly = result.warnings.find((w) => w.kind === "spec-gen-shell-only");
     if (shellOnly && shellOnly.kind === "spec-gen-shell-only") {
@@ -1212,5 +1215,610 @@ describe("spec-generator — #546 keychain-only narrowing on 4xx/5xx (darwin)", 
     expect(/^[45][0-9]{2}\b/.test("AuthenticationError without status prefix")).toBe(false);
 
     expect(/^[45][0-9]{2}\b/.test("301 Moved Permanently")).toBe(false);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// v0.42.0 — Preserve TECHNICAL-SPEC content on synth failure + retry-on-429
+//
+// Cairn-stone: F-FORGE-SPEC-GEN-OVERWRITES-ON-SYNTH-FAILURE.
+// Plan: .ai-workspace/plans/2026-05-11-spec-generator-preserve-on-synth-failure.md
+// KB pattern: P34 (Strict Output Contract — Fail Over Silent Corruption).
+//
+// Tests are grouped by AC. Each group seeds a fixture TECHNICAL-SPEC.md
+// containing real hand-authored content with a randomised KEEP-ME-VERBATIM
+// sentinel and asserts the post-call sha256 matches the pre-call sha256.
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compute sha256 of file bytes; returns null if the file doesn't exist.
+ * Mirrors the AC-2 / AC-1 byte-identical contract: existence + content both
+ * matter, so null → null is also a valid PASS (no-overwrite means the file
+ * MUST NOT be created from thin air on the failure path either).
+ */
+function sha256OrNull(path: string): string | null {
+  if (!existsSync(path)) return null;
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+/**
+ * Seed a TECHNICAL-SPEC.md fixture under `projectPath/docs/generated/` with
+ * real content under `## story: <id>` including a KEEP-ME-VERBATIM sentinel.
+ * Returns the absolute path. Mimics the production file shape (header +
+ * frontmatter + story body) so parseSpec() accepts it.
+ */
+function seedFixtureSpec(
+  projectPath: string,
+  storyId: string,
+  sentinel: string,
+): string {
+  const specPath = join(projectPath, "docs", "generated", "TECHNICAL-SPEC.md");
+  mkdirSync(join(projectPath, "docs", "generated"), { recursive: true });
+  const body = [
+    "<!-- agent-first: this file is auto-regenerated by forge-harness on every story PASS. -->",
+    "<!-- Source of truth: docs/decisions/<US-NN>/*.md (ADRs) and docs/generated/<US-NN>.md (TECHNICAL-SPEC). -->",
+    "<!-- Do not hand-edit; edits are overwritten on next regeneration. -->",
+    "<!-- Regeneration tool: forge-harness `forge_evaluate` (PASS verdict path). -->",
+    "<!-- Design rationale: P60 Build for Consumer, Not Author. -->",
+    "",
+    "> Generated by forge-harness on 2026-05-11.",
+    "",
+    "---",
+    'schemaVersion: "1.0.0"',
+    'lastUpdated: "2026-05-11T00:00:00.000Z"',
+    "stories:",
+    `  - id: "${storyId}"`,
+    '    lastUpdated: "2026-05-11T00:00:00.000Z"',
+    '    lastGitSha: "unknown"',
+    "---",
+    "",
+    `## story: ${storyId}`,
+    "",
+    "### api-contracts",
+    "",
+    `- \`${sentinel}\`: hand-authored sentinel that MUST survive synth failure`,
+    "- `forge_evaluate.report.verdict`: returns PASS when ACs satisfied",
+    "",
+    "### data-models",
+    "",
+    "- hand-authored data model bullet — preserve me",
+    "",
+    "### invariants",
+    "",
+    "- hand-authored invariant — preserve me",
+    "",
+    "### test-surface",
+    "",
+    "- hand-authored test surface — preserve me",
+    "",
+  ].join("\n");
+  writeFileSync(specPath, body);
+  return specPath;
+}
+
+describe("spec-generator — v0.42.0 AC-1 preserve-on-synth-throw", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.0-ac1-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("AC-1: synth throw on Anthropic.AuthenticationError preserves existing file bytes (sha256 match)", async () => {
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-01", sentinel);
+    const before = sha256OrNull(specPath);
+    expect(before).not.toBeNull();
+
+    const throwingSynth = async (): Promise<SynthesisResponse> => {
+      throw new Anthropic.default.AuthenticationError(
+        401,
+        { type: "error", error: { type: "authentication_error", message: "invalid bearer" } },
+        undefined,
+        new Headers(),
+      );
+    };
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: throwingSynth,
+      sleepFn: async () => {},
+    });
+
+    const after = sha256OrNull(specPath);
+    expect(after).toBe(before);
+    expect(readFileSync(specPath, "utf-8")).toContain(sentinel);
+
+    // Warnings still surface — loud failure preserved (P34).
+    expect(
+      result.warnings.some((w) => w.kind === "spec-gen-shell-only"),
+    ).toBe(true);
+  });
+
+  it("AC-1: synth throw on generic Error preserves existing file bytes (sha256 match)", async () => {
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-02", sentinel);
+    const before = sha256OrNull(specPath);
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-02",
+      evalReport: makeReport("US-02"),
+      ctx,
+      synthesize: async () => {
+        throw new Error("500 InternalServerError: upstream down");
+      },
+      sleepFn: async () => {},
+    });
+
+    expect(sha256OrNull(specPath)).toBe(before);
+    expect(readFileSync(specPath, "utf-8")).toContain(sentinel);
+    expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
+  });
+});
+
+describe("spec-generator — v0.42.0 AC-1b preserve-on-empty-sections", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.0-ac1b-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("AC-1b (a): synth resolves with empty sections object preserves existing content + emits spec-gen-empty-sections", async () => {
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-01", sentinel);
+    const before = sha256OrNull(specPath);
+
+    // Stub synth: success but EMPTY sections object. defaultSynthesize's
+    // for-loop at lines 386-389 leaves all four section defaults at "(none)".
+    // We mimic the post-defaultSynthesize shape since `input.synthesize` is
+    // a peer of defaultSynthesize in the contract (sees the same call site).
+    const emptySectionsSynth = async (): Promise<SynthesisResponse> => ({
+      contracts: [],
+      sections: {
+        "api-contracts": "(none)",
+        "data-models": "(none)",
+        invariants: "(none)",
+        "test-surface": "(none)",
+      },
+      tokens: { inputTokens: 50, outputTokens: 0 },
+    });
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: emptySectionsSynth,
+    });
+
+    expect(sha256OrNull(specPath)).toBe(before);
+    expect(readFileSync(specPath, "utf-8")).toContain(sentinel);
+    expect(
+      result.warnings.some((w) => w.kind === "spec-gen-empty-sections"),
+    ).toBe(true);
+    // shell-only is the THROW signal; this path is SUCCESS-but-empty, so
+    // shell-only must NOT be set.
+    expect(
+      result.warnings.some((w) => w.kind === "spec-gen-shell-only"),
+    ).toBe(false);
+  });
+
+  it("AC-1b (b): synth resolves with all-(none) sections preserves existing content (same as empty path)", async () => {
+    // Same logical behavior as (a) — the production defaultSynthesize
+    // defaults each missing section to "(none)" so { sections: {} } and
+    // explicit all-(none) collapse to the same caller-observable shape.
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-02", sentinel);
+    const before = sha256OrNull(specPath);
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-02",
+      evalReport: makeReport("US-02"),
+      ctx,
+      synthesize: async () => ({
+        contracts: [],
+        sections: {
+          "api-contracts": "(none)",
+          "data-models": "(none)",
+          invariants: "(none)",
+          "test-surface": "(none)",
+        },
+        tokens: { inputTokens: 50, outputTokens: 0 },
+      }),
+    });
+
+    expect(sha256OrNull(specPath)).toBe(before);
+    expect(readFileSync(specPath, "utf-8")).toContain(sentinel);
+    expect(result.warnings.some((w) => w.kind === "spec-gen-empty-sections")).toBe(true);
+  });
+
+  it("AC-1b (c): legit case — three real sections + one (none) DOES overwrite (canonical behavior preserved)", async () => {
+    // This is the regression-protection assertion: a story legitimately
+    // having `(none)` in ONE section but real content in the others MUST
+    // still flow through the normal write path. The fix narrows the
+    // empty-sections gate to the all-four-(none) case.
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-03", sentinel);
+    const before = sha256OrNull(specPath);
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-03",
+      evalReport: makeReport("US-03"),
+      ctx,
+      synthesize: async () => ({
+        contracts: ["forge_evaluate"],
+        sections: {
+          "api-contracts": "- `forge_evaluate.report`: PASS verdict structure",
+          "data-models": "- `EvalReport`: shape returned by handleEvaluate",
+          invariants: "(none)",
+          "test-surface": "- `evaluate.test.ts`: covers PASS verdict",
+        },
+        tokens: { inputTokens: 100, outputTokens: 80 },
+      }),
+    });
+
+    // File content changed: the sentinel from the pre-call body is gone,
+    // replaced by the new section. The legit path is NOT preserve-on-failure.
+    expect(sha256OrNull(specPath)).not.toBe(before);
+    expect(readFileSync(specPath, "utf-8")).not.toContain(sentinel);
+    expect(result.warnings.some((w) => w.kind === "spec-gen-empty-sections")).toBe(false);
+    expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(false);
+  });
+});
+
+describe("spec-generator — v0.42.0 AC-3 retry-on-429", () => {
+  let tmp: string;
+  let ctx: RunContext;
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.0-ac3-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    savedEnv = process.env.FORGE_SPEC_RETRY_ON_429;
+    delete process.env.FORGE_SPEC_RETRY_ON_429;
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    if (savedEnv === undefined) delete process.env.FORGE_SPEC_RETRY_ON_429;
+    else process.env.FORGE_SPEC_RETRY_ON_429 = savedEnv;
+  });
+
+  it("AC-3: RateLimitError on first call + success on retry → exactly 2 synth invocations + outputTokens > 0", async () => {
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const rateLimit = new Anthropic.default.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+      undefined,
+      new Headers({ "retry-after": "1" }),
+    );
+    let invocations = 0;
+    const flakeySynth = async (): Promise<SynthesisResponse> => {
+      invocations++;
+      if (invocations === 1) throw rateLimit;
+      return {
+        contracts: ["forge_evaluate"],
+        sections: {
+          "api-contracts": "- `forge_evaluate.report`: ok",
+          "data-models": "- `EvalReport`: ok",
+          invariants: "- ok",
+          "test-surface": "- ok",
+        },
+        tokens: { inputTokens: 100, outputTokens: 50 },
+      };
+    };
+
+    const sleepCalls: number[] = [];
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: flakeySynth,
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+
+    expect(invocations).toBe(2);
+    expect(result.genTokens.outputTokens).toBeGreaterThan(0);
+    // Retry-after: 1 second → sleep called with 1000ms (well under the
+    // default 60s cap, so the requested value passes through unclamped).
+    expect(sleepCalls).toEqual([1000]);
+  });
+});
+
+describe("spec-generator — v0.42.0 AC-3b retry-exhaustion → no-overwrite", () => {
+  let tmp: string;
+  let ctx: RunContext;
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.0-ac3b-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    savedEnv = process.env.FORGE_SPEC_RETRY_ON_429;
+    delete process.env.FORGE_SPEC_RETRY_ON_429;
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    if (savedEnv === undefined) delete process.env.FORGE_SPEC_RETRY_ON_429;
+    else process.env.FORGE_SPEC_RETRY_ON_429 = savedEnv;
+  });
+
+  it("AC-3b: RateLimitError on BOTH attempts → file bytes preserved + shell-only warning + outputTokens === 0", async () => {
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const rateLimit = new Anthropic.default.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+      undefined,
+      new Headers({ "retry-after": "1" }),
+    );
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-01", sentinel);
+    const before = sha256OrNull(specPath);
+
+    let invocations = 0;
+    const persistentlyThrottled = async (): Promise<SynthesisResponse> => {
+      invocations++;
+      throw rateLimit;
+    };
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: persistentlyThrottled,
+      sleepFn: async () => {},
+    });
+
+    expect(invocations).toBe(2); // first call + one retry
+    expect(sha256OrNull(specPath)).toBe(before);
+    expect(readFileSync(specPath, "utf-8")).toContain(sentinel);
+    expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
+    expect(result.genTokens.outputTokens).toBe(0);
+  });
+});
+
+describe("spec-generator — v0.42.0 AC-4 FORGE_SPEC_RETRY_ON_429 three modes", () => {
+  let tmp: string;
+  let ctx: RunContext;
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.0-ac4-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    savedEnv = process.env.FORGE_SPEC_RETRY_ON_429;
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    if (savedEnv === undefined) delete process.env.FORGE_SPEC_RETRY_ON_429;
+    else process.env.FORGE_SPEC_RETRY_ON_429 = savedEnv;
+  });
+
+  it("AC-4 (a): unset env → retry enabled at default 60s cap → flaky synth succeeds on second call", async () => {
+    delete process.env.FORGE_SPEC_RETRY_ON_429;
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const rateLimit = new Anthropic.default.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+      undefined,
+      new Headers({ "retry-after": "1" }),
+    );
+    let invocations = 0;
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        invocations++;
+        if (invocations === 1) throw rateLimit;
+        return {
+          contracts: [],
+          sections: {
+            "api-contracts": "- `forge_evaluate.report`: ok",
+            "data-models": "- ok",
+            invariants: "- ok",
+            "test-surface": "- ok",
+          },
+          tokens: { inputTokens: 100, outputTokens: 50 },
+        };
+      },
+      sleepFn: async () => {},
+    });
+    expect(invocations).toBe(2);
+    expect(result.genTokens.outputTokens).toBe(50);
+  });
+
+  it("AC-4 (b): FORGE_SPEC_RETRY_ON_429=0 → retry disabled → first throw goes to no-overwrite", async () => {
+    process.env.FORGE_SPEC_RETRY_ON_429 = "0";
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const rateLimit = new Anthropic.default.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+      undefined,
+      new Headers({ "retry-after": "1" }),
+    );
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-01", sentinel);
+    const before = sha256OrNull(specPath);
+
+    let invocations = 0;
+    const sleepCalls: number[] = [];
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        invocations++;
+        throw rateLimit;
+      },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+
+    expect(invocations).toBe(1); // NO retry attempt
+    expect(sleepCalls).toEqual([]); // sleep never invoked
+    expect(sha256OrNull(specPath)).toBe(before);
+    expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
+  });
+
+  it("AC-4 (c): FORGE_SPEC_RETRY_ON_429=30 → retry-after value from header clamped to 30s", async () => {
+    process.env.FORGE_SPEC_RETRY_ON_429 = "30";
+    const Anthropic = await import("@anthropic-ai/sdk");
+    // header says "retry after 120s" but cap is 30 → sleep called with 30000ms
+    const rateLimit = new Anthropic.default.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+      undefined,
+      new Headers({ "retry-after": "120" }),
+    );
+    let invocations = 0;
+    const sleepCalls: number[] = [];
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        invocations++;
+        if (invocations === 1) throw rateLimit;
+        return {
+          contracts: [],
+          sections: {
+            "api-contracts": "- ok",
+            "data-models": "- ok",
+            invariants: "- ok",
+            "test-surface": "- ok",
+          },
+          tokens: { inputTokens: 1, outputTokens: 1 },
+        };
+      },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+
+    expect(sleepCalls).toEqual([30 * 1000]); // clamped to env cap, not 120s
+    expect(invocations).toBe(2);
+  });
+});
+
+describe("spec-generator — v0.42.0 AC-5 default-60 cap clamps retry-after: 120 to 60s", () => {
+  let tmp: string;
+  let ctx: RunContext;
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.0-ac5-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+    savedEnv = process.env.FORGE_SPEC_RETRY_ON_429;
+    delete process.env.FORGE_SPEC_RETRY_ON_429;
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    if (savedEnv === undefined) delete process.env.FORGE_SPEC_RETRY_ON_429;
+    else process.env.FORGE_SPEC_RETRY_ON_429 = savedEnv;
+  });
+
+  it("AC-5: env unset + retry-after: 120 → sleep called with 60s (default cap)", async () => {
+    const Anthropic = await import("@anthropic-ai/sdk");
+    const rateLimit = new Anthropic.default.RateLimitError(
+      429,
+      { type: "error", error: { type: "rate_limit_error", message: "Error" } },
+      undefined,
+      new Headers({ "retry-after": "120" }),
+    );
+    let invocations = 0;
+    const sleepCalls: number[] = [];
+    await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-01",
+      evalReport: makeReport("US-01"),
+      ctx,
+      synthesize: async () => {
+        invocations++;
+        if (invocations === 1) throw rateLimit;
+        return {
+          contracts: [],
+          sections: {
+            "api-contracts": "- ok",
+            "data-models": "- ok",
+            invariants: "- ok",
+            "test-surface": "- ok",
+          },
+          tokens: { inputTokens: 1, outputTokens: 1 },
+        };
+      },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      },
+    });
+    // Default cap 60s clamps the 120s request.
+    expect(sleepCalls).toEqual([60 * 1000]);
+  });
+});
+
+describe("spec-generator — v0.42.0 AC-2 / AC-11 MCP-level dual-surface warning", () => {
+  let tmp: string;
+  let ctx: RunContext;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-spec-gen-v0.42.0-ac2-"));
+    ctx = new RunContext({ toolName: "forge_evaluate", projectPath: tmp, stages: ["spec-gen"] });
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("AC-2 / AC-11: end-to-end synth throw → file bytes preserved AND result.warnings carries spec-gen-shell-only (dual surface)", async () => {
+    // AC-2 part 1: the file's KEEP-ME-VERBATIM sentinel survives.
+    // AC-11 part 1: result.warnings (which evaluate.ts copies onto BOTH
+    // `generatedDocs.warnings` on disk AND `specGenWarnings` on the MCP
+    // response — see server/tools/evaluate.ts lines 432-510 — must contain
+    // `spec-gen-shell-only`. This test asserts the spec-generator side of
+    // that contract; the evaluate.ts plumbing is already exercised by
+    // evaluate-grounding.test.ts AC-6.
+    const sentinel = `KEEP-ME-VERBATIM-${Math.random().toString(36).slice(2, 10)}`;
+    const specPath = seedFixtureSpec(tmp, "US-99", sentinel);
+    const before = sha256OrNull(specPath);
+
+    const result = await generateSpecForStory({
+      projectPath: tmp,
+      storyId: "US-99",
+      evalReport: makeReport("US-99"),
+      ctx,
+      synthesize: async () => {
+        throw new Error("synthetic spec-gen throw for AC-2 / AC-11");
+      },
+      sleepFn: async () => {},
+    });
+
+    // AC-2 (file bytes preserved).
+    expect(sha256OrNull(specPath)).toBe(before);
+    expect(readFileSync(specPath, "utf-8")).toContain(sentinel);
+
+    // AC-11 (warnings carry the spec-gen-shell-only entry — this is the
+    // SAME array that evaluate.ts stamps onto generatedDocs.warnings and
+    // specGenWarnings via the P64 producer/consumer seam at evaluate.ts:438).
+    expect(result.warnings.some((w) => w.kind === "spec-gen-shell-only")).toBe(true);
   });
 });

@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.42.0](https://github.com/ziyilam3999/forge-harness/compare/v0.41.1...v0.42.0) (2026-05-11)
+
+Silent data-loss bug fix + defense-in-depth retry-on-429. Plan: `.ai-workspace/plans/2026-05-11-spec-generator-preserve-on-synth-failure.md` (v5, plan-chain GREAT × 4). Cairn-stone: `F-FORGE-SPEC-GEN-OVERWRITES-ON-SYNTH-FAILURE`.
+
+### Fixed
+
+- **Silent data-loss bug** in spec-generator: `forge_evaluate` PASS runs no longer overwrite `docs/generated/TECHNICAL-SPEC.md` sub-sections with placeholder bodies when the underlying LLM call fails (rate-limit, locked macOS Keychain, any HTTP 4xx/5xx, network blip) OR when the LLM returns 200 OK with empty / all-`(none)` sections. Existing hand-authored content is preserved on disk; warnings still surface in `generatedDocs.warnings` and MCP top-level `specGenWarnings` (P34 Strict Output Contract — fail-over-silent-corruption). Pre-v0.42.0 a placeholder body would overwrite real content while the verdict still returned PASS — surfaced 2026-05-11 corrupting monday-bot v0.12.3's hand-authored content for US-11/12/13. There is no env-var kill-switch for the no-overwrite invariant by design; escape is via revert.
+
+### Added
+
+- New env var **`FORGE_SPEC_RETRY_ON_429`** — when set (default `60`, in seconds), the spec-generator retries an HTTP 429 once, honouring the `Retry-After` header and clamping the sleep to the env value. Set to `0` to disable retry entirely. The cap defends against an upstream that advertises a multi-minute backoff that would otherwise stall the MCP tool-call past common operator-configured timeouts (typically 30-120s range). Documented in `README.md` under Troubleshooting → Spec-generator retry-on-429.
+- New warning kind **`spec-gen-empty-sections`** distinguishes "synth resolved successfully but produced no usable sections" (e.g. LLM 200 OK with `{sections: {}}` JSON-mode partial-success) from "synth threw" (`spec-gen-shell-only`). Additive-optional per P50; consumers that only switched on `spec-gen-shell-only` continue to work — they just lose the new sub-kind.
+- Explicit `maxRetries: 0` on Anthropic SDK construction at both call-sites in `server/lib/anthropic.ts`. The SDK's hidden default of 2 retries would otherwise compound with our own retry loop (1 outer × 3 SDK = 6 attempts per logical retry); we own the retry policy now.
+- New `sleepFn` P64 producer/consumer injection seam on `SpecGeneratorInput` so vitest can exercise the retry-on-429 path deterministically without burning real wall-clock.
+
+### Tests
+
+- New vitest unit + integration suite under `server/lib/spec-generator.test.ts` covering AC-1 (synth throw → file bytes preserved, sha256-grounded), AC-1b ((a) empty-sections object, (b) all-`(none)` sections, (c) legit `(none)` in one section still overwrites), AC-2 + AC-11 (MCP dual-surface warning), AC-3 (RateLimitError retry succeeds on second call), AC-3b (retry-exhaustion preserves bytes), AC-4 ((a) unset env retry-at-default, (b) `FORGE_SPEC_RETRY_ON_429=0` disables, (c) env-set cap clamps), AC-5 (default-60 cap clamps a `Retry-After: 120` header to 60s). Sleep injected via `input.sleepFn` P64 seam — no real wall-clock waits in tests. Suite size grew from 1098 → 1110 tests.
+
 ## [0.41.1](https://github.com/ziyilam3999/forge-harness/compare/v0.41.0...v0.41.1) (2026-05-10)
 
 Patch release closing the two IMPROVE-NIT findings deferred from v0.41.0's per-task review chain. Reviewed via 4-reviewer plan-chain (sequential bg subagents); EARNED convergence with split verdicts (P1/P2 grounded on risk-cost + industry-norms, P3 on KB-pattern severity, P4 on mechanical sweep). Operator override on the F1 2-2 tie. Plan: `.ai-workspace/plans/2026-05-10-deferred-followups-546-regression-test-and-544-parser-strictness.md`.

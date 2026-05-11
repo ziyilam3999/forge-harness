@@ -192,10 +192,17 @@ export function resetClient(): void {
  *   2. `~/.claude/.credentials.json` (Claude Code OAuth)
  */
 export function getClient(): Anthropic {
+  // v0.42.0 (AC-7): explicit `maxRetries: 0` to disable the SDK's hidden
+  // default of 2 retries. The spec-generator owns its own retry loop
+  // (FORGE_SPEC_RETRY_ON_429); leaving the SDK default in place would
+  // compound — 1 outer retry × 3 SDK attempts = 6 calls per logical retry.
+  // Other call-sites (e.g. forge_plan) accept the no-retry posture: if a
+  // call fails, the caller decides the recovery policy explicitly rather
+  // than the SDK silently retrying behind their back.
   // 1. Try ANTHROPIC_API_KEY (works with direct API calls and CI)
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (apiKey) {
-    return new Anthropic({ apiKey });
+    return new Anthropic({ apiKey, maxRetries: 0 });
   }
 
   // 2. Fall back to Claude OAuth token (Claude Code Max subscription).
@@ -205,7 +212,7 @@ export function getClient(): Anthropic {
   //    Strict-expiry only — pre-emptive 5-min bail removed in I8.
   const oauthCreds = readOAuthToken();
   if (oauthCreds) {
-    return new Anthropic({ authToken: oauthCreds.accessToken });
+    return new Anthropic({ authToken: oauthCreds.accessToken, maxRetries: 0 });
   }
 
   throw new Error(

@@ -92,10 +92,23 @@ After setting the env var, restart Claude Code so the forge MCP child picks up t
 
 Starting in v0.43.0, `forge_evaluate`'s PASS path **does not call Anthropic itself**. Instead it returns a directive asking the calling Claude Code session to do the spec-gen LLM round-trip inline. This sidesteps Max-plan OAuth's header-less anti-abuse 429s entirely — the MCP child no longer hits the Anthropic API for spec-gen.
 
-The MCP response envelope looks like this on a story-mode PASS:
+**v0.43.1 surfacing fix.** Starting in v0.43.1, the directive fields (`callerAction`, `specGenBrief`, `specGenWarnings`) are embedded INSIDE `content[0].text` as JSON-stringified data so standard MCP clients (which render the `content` field) can reach them via `JSON.parse(result.content[0].text)`. The v0.43.0 envelope-sibling shape (`result.callerAction`, `result.specGenBrief`) is retained for envelope-aware clients — same data on both surfaces, belt-and-suspenders. **Use the `JSON.parse` access path** in new caller integrations:
+
+```javascript
+const parsed = JSON.parse(result.content[0].text);
+if (parsed.callerAction === "generate-spec-inline") {
+  const brief = parsed.specGenBrief;
+  // ... act on the directive
+}
+```
+
+The MCP response shape on a story-mode PASS (post-`JSON.parse(content[0].text)`):
 
 ```json
 {
+  "storyId": "US-13",
+  "verdict": "PASS",
+  "criteria": [{ "id": "AC-01", "status": "PASS", "evidence": "ok" }],
   "callerAction": "generate-spec-inline",
   "specGenBrief": {
     "storyId": "US-13",
@@ -115,15 +128,14 @@ The MCP response envelope looks like this on a story-mode PASS:
       "test-surface": "..."
     }
   },
-  "specGenWarnings": [],
-  ...
+  "specGenWarnings": []
 }
 ```
 
 Six-step caller-side flow:
 
-1. **Detect the directive.** Inspect the response envelope for `result.callerAction === "generate-spec-inline"`. When absent (hand-author short-circuit, non-PASS verdict, or `FORGE_SPEC_CALLER_ACTION=0` opt-out), do nothing — there's no caller work.
-2. **Extract the prompts.** Read `result.specGenBrief.systemPrompt` and `result.specGenBrief.userPrompt`. Both are pre-rendered server-side; do NOT re-assemble.
+1. **Detect the directive.** Parse `result.content[0].text` as JSON and inspect `parsed.callerAction === "generate-spec-inline"`. When absent (hand-author short-circuit, non-PASS verdict, or `FORGE_SPEC_CALLER_ACTION=0` opt-out), do nothing — there's no caller work. (Envelope-aware clients may also read `result.callerAction` directly; both surfaces carry the same value.)
+2. **Extract the prompts.** Read `parsed.specGenBrief.systemPrompt` and `parsed.specGenBrief.userPrompt`. Both are pre-rendered server-side; do NOT re-assemble.
 3. **Call your LLM.** Send the system + user message to your Anthropic connection (the calling Claude Code session's own, which is the path that works — the MCP child is the one with the OAuth-bucket issue). Request JSON-mode output. The model returns a single JSON object matching this schema:
    ```json
    {
@@ -136,8 +148,8 @@ Six-step caller-side flow:
      }
    }
    ```
-4. **Parse the response.** Validate that `sections` contains exactly the four keys from `result.specGenBrief.expectedSections`. Each section is a Markdown bullet list (or the literal string `"(none)"`). Capture the `tokens` your LLM client reports — `{inputTokens, outputTokens}`.
-5. **Call `forge_apply_spec_gen`.** Invoke the MCP tool with `{runId, storyId, projectPath, sections, contracts, tokens, affectedPaths, gitSha}`. The `runId` MUST be the one from the brief (`result.specGenBrief.runId`) so the merge event lands on the same run-record file as the brief-emit event. `affectedPaths` and `gitSha` are echoed from the brief for vocabulary-grounding + front-matter stamping.
+4. **Parse the response.** Validate that `sections` contains exactly the four keys from `parsed.specGenBrief.expectedSections`. Each section is a Markdown bullet list (or the literal string `"(none)"`). Capture the `tokens` your LLM client reports — `{inputTokens, outputTokens}`.
+5. **Call `forge_apply_spec_gen`.** Invoke the MCP tool with `{runId, storyId, projectPath, sections, contracts, tokens, affectedPaths, gitSha}`. The `runId` MUST be the one from the brief (`parsed.specGenBrief.runId`) so the merge event lands on the same run-record file as the brief-emit event. `affectedPaths` and `gitSha` are echoed from the brief for vocabulary-grounding + front-matter stamping.
 6. **Verify success.** The tool returns `{specPath, warnings, contracts, bodyChanged, runRecordPath}`. Success = `runRecordPath` is non-null AND `warnings` contains no `spec-gen-empty-sections` entries.
 
 **Opt-out: legacy v0.42.x in-MCP synth.** Set `FORGE_SPEC_CALLER_ACTION=0` in the environment that launches the MCP server (e.g., your Claude Code config). The PASS path then calls Anthropic directly via the legacy `generateSpecForStory` code path. Use this only when you have a stable API-key identity (not Max-plan OAuth) and want the simpler one-shot flow. Both v0.42.0's preserve-invariant and v0.42.1's retry-on-429 remain active on the legacy path; both inherit by reuse on the new path's `forge_apply_spec_gen` merge half.

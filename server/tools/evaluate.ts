@@ -712,8 +712,32 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
   // field presence as a "did the canonicalizer run?" signal. Coherence-mode
   // and divergence-mode handlers do NOT set this field — see McpResponse
   // type doc.
+  //
+  // v0.43.1 — merge `callerAction`, `specGenBrief`, and `specGenWarnings`
+  // INTO the JSON-stringified `content[0].text` payload alongside the eval
+  // report so standard MCP clients (which render `content`, not envelope
+  // siblings) can reach them via `JSON.parse(content[0].text)`. The v0.43.0
+  // envelope-sibling shape is RETAINED as belt-and-suspenders for any
+  // envelope-aware MCP client (same data, both surfaces). Mirrors the
+  // working pattern in forge_generate (`server/tools/generate.ts`, live
+  // since v0.36.0). Spread order pins eval-report keys (storyId, verdict,
+  // criteria, …) FIRST so directive fields never shadow them. See
+  // `.ai-workspace/plans/2026-05-11-spec-gen-directive-mcp-content-surfacing.md`
+  // and AC-11 live smoke run record
+  // `monday-bot/.forge/runs/forge_evaluate-2026-05-11T09-34-10-439Z-bc5b.json`.
+  const contentPayload: Record<string, unknown> = {
+    ...report,
+    specGenWarnings,
+  };
+  if (storyEvalCallerAction !== undefined) {
+    contentPayload.callerAction = storyEvalCallerAction;
+  }
+  if (storyEvalSpecGenBrief !== undefined) {
+    contentPayload.specGenBrief = storyEvalSpecGenBrief;
+  }
+
   const response: McpResponse = {
-    content: [{ type: "text", text: JSON.stringify(report, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(contentPayload, null, 2) }],
     specGenWarnings,
   };
   if (storyEvalAdrCanonicalized !== undefined) {
@@ -721,7 +745,8 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
   }
   // v0.43.0 — surface the caller-action directive + brief on the response
   // envelope when the new path emitted them. Absent on the legacy path,
-  // non-PASS verdicts, and hand-author short-circuits.
+  // non-PASS verdicts, and hand-author short-circuits. Retained at v0.43.1
+  // as belt-and-suspenders alongside the content-payload surface above.
   if (storyEvalCallerAction !== undefined) {
     response.callerAction = storyEvalCallerAction;
   }

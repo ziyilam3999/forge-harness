@@ -17,7 +17,7 @@
 
 import * as ts from "typescript";
 import { existsSync, readdirSync, statSync, readFileSync } from "node:fs";
-import { join, resolve, extname, basename } from "node:path";
+import { join, resolve, extname, basename, dirname, relative, sep } from "node:path";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -37,6 +37,31 @@ export interface SourceVocabulary {
 }
 
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
+
+/**
+ * v0.44.0 — extension probe order for relative-import resolution.
+ *
+ * Prefers TS source over compiled JS. `index.*` variants are appended when a
+ * direct file resolution fails (handles `import "./foo"` where `foo` is a
+ * directory containing `index.ts`).
+ */
+const IMPORT_RESOLVE_EXTS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+
+/**
+ * v0.44.0 — read FORGE_VOCAB_IMPORT_DEPTH at call time so a process can flip
+ * the var between calls (tests rely on this). Default `2` covers the common
+ * case of importing from siblings + their siblings. Range `0..5` clamped:
+ * `0` = no following (v0.43.x back-compat); `5` is the maximum to bound
+ * unbounded harvest in deep-graph projects.
+ */
+function readImportDepth(): number {
+  const raw = process.env.FORGE_VOCAB_IMPORT_DEPTH;
+  if (raw === undefined || raw === "") return 2;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed < 0) return 2;
+  if (parsed > 5) return 5;
+  return parsed;
+}
 
 // ── File walker ──────────────────────────────────────────────────────────
 
@@ -304,6 +329,176 @@ function harvestTestNames(sf: ts.SourceFile, vocab: SourceVocabulary): void {
   ts.forEachChild(sf, visit);
 }
 
+// ── v0.44.0 — relative-import resolver + BFS follower ────────────────────
+
+/**
+ * v0.44.0 — resolve a relative import specifier to an absolute file path.
+ *
+ * Returns the first existing candidate from `IMPORT_RESOLVE_EXTS`, then the
+ * `${path}/index.*` variants. Returns `null` if no candidate exists or the
+ * specifier is not relative (bare imports, TS path aliases, absolute paths).
+ *
+ * Bare imports (no leading `./` or `../`) are NOT resolved. TS `paths` /
+ * `baseUrl` aliasing is intentionally out-of-scope for v0.44.0.
+ */
+function resolveRelativeImport(
+  fromFile: string,
+  specifier: string,
+): string | null {
+  if (!specifier.startsWith("./") && !specifier.startsWith("../")) return null;
+  const base = resolve(dirname(fromFile), specifier);
+  const baseNoTrail = base.endsWith(sep) ? base.slice(0, -1) : base;
+
+  const tryPath = (p: string): string | null => {
+    if (!existsSync(p)) return null;
+    try {
+      return statSync(p).isFile() ? p : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // TS NodeNext convention: `import "./b.js"` resolves to `b.ts` (TS source)
+  // OR `b.js` (compiled JS). Strip a trailing source extension and probe the
+  // TS variants first, then fall through to original-extension and bare-name
+  // probes so JS-first projects also resolve.
+  const existingExt = extname(baseNoTrail);
+  if (existingExt && SOURCE_EXTS.has(existingExt)) {
+    const stem = baseNoTrail.slice(0, -existingExt.length);
+    // Swap the imported extension's TS sibling first, then full probe order.
+    const jsToTsSwap: Record<string, string> = {
+      ".js": ".ts",
+      ".jsx": ".tsx",
+      ".mjs": ".mts",
+      ".cjs": ".cts",
+    };
+    const swap = jsToTsSwap[existingExt];
+    if (swap) {
+      const r = tryPath(stem + swap);
+      if (r) return r;
+    }
+    // Full extension probe on the stem (TS first, JS last).
+    for (const ext of IMPORT_RESOLVE_EXTS) {
+      const r = tryPath(stem + ext);
+      if (r) return r;
+    }
+    // Direct hit on the literal specifier (e.g. someone really did import a .js).
+    const direct = tryPath(baseNoTrail);
+    if (direct) return direct;
+  } else {
+    // No extension on the specifier — append each candidate.
+    for (const ext of IMPORT_RESOLVE_EXTS) {
+      const r = tryPath(baseNoTrail + ext);
+      if (r) return r;
+    }
+  }
+
+  // Directory + `index.*` probes (specifier resolves to a directory).
+  for (const ext of IMPORT_RESOLVE_EXTS) {
+    const r = tryPath(join(baseNoTrail, `index${ext}`));
+    if (r) return r;
+  }
+  return null;
+}
+
+/**
+ * v0.44.0 — collect import specifiers from a parsed source file.
+ *
+ * Walks the top-level `ts.ImportDeclaration` nodes and returns the string
+ * literal text of each `moduleSpecifier`. Includes `import type` declarations
+ * (the target file's exports still grant grounding — the type-only flag is
+ * a compile-time hint, not a semantic difference for vocabulary harvest).
+ * Dynamic `import("...")` expressions are NOT collected (they're CallExpression
+ * nodes, not ImportDeclaration).
+ */
+function collectImportSpecifiers(sf: ts.SourceFile): string[] {
+  const out: string[] = [];
+  ts.forEachChild(sf, (node) => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      out.push(node.moduleSpecifier.text);
+    }
+  });
+  return out;
+}
+
+/**
+ * v0.44.0 — BFS over the import graph rooted at `seedFiles`.
+ *
+ * Returns the full set of files to harvest (absolute paths), including the
+ * seeds plus everything reachable within `maxDepth` hops via relative imports.
+ * Cycle-safe (visited set); skips test files (they're collected separately).
+ * Bare imports + unresolvable relative imports surface as warnings.
+ *
+ * Operates ONLY on source files. Test files are intentionally excluded from
+ * the BFS so test-name identifiers from followed modules cannot leak into
+ * the production-grounding vocabulary.
+ */
+function followImports(
+  projectPath: string,
+  seedFiles: string[],
+  maxDepth: number,
+  warnings: string[],
+): string[] {
+  if (maxDepth <= 0) return [...seedFiles];
+
+  const visited = new Set<string>(seedFiles);
+  type QueueItem = { file: string; depth: number };
+  const queue: QueueItem[] = seedFiles.map((f) => ({ file: f, depth: 0 }));
+  const out: string[] = [...seedFiles];
+
+  while (queue.length > 0) {
+    const { file, depth } = queue.shift()!;
+    if (depth >= maxDepth) continue;
+    let content: string;
+    try {
+      content = readFileSync(file, "utf-8");
+    } catch {
+      continue;
+    }
+    const ext = extname(file);
+    const isJs = ext === ".js" || ext === ".jsx" || ext === ".mjs" || ext === ".cjs";
+    const sf = ts.createSourceFile(
+      file,
+      content,
+      ts.ScriptTarget.ES2022,
+      /*setParentNodes*/ true,
+      isJs ? ts.ScriptKind.JS : (ext === ".tsx" || ext === ".jsx" ? ts.ScriptKind.TSX : ts.ScriptKind.TS),
+    );
+    const specifiers = collectImportSpecifiers(sf);
+    for (const spec of specifiers) {
+      if (!spec.startsWith("./") && !spec.startsWith("../")) {
+        // Bare imports (npm packages) and TS path aliases are out-of-scope.
+        // Don't warn on every bare import — too noisy; only flag aliased ones
+        // (starting with `@` but not the well-known `@types/` patterns).
+        continue;
+      }
+      const resolved = resolveRelativeImport(file, spec);
+      if (resolved === null) {
+        warnings.push(`unresolvable import "${spec}" from ${relative(projectPath, file)}`);
+        continue;
+      }
+      // Project-internal gate: must be inside projectPath AND not under
+      // node_modules / .git / dist / build. Path-prefix check is sufficient
+      // since `resolve()` already canonicalized everything.
+      const rel = relative(projectPath, resolved);
+      if (rel.startsWith("..") || rel.includes(`${sep}node_modules${sep}`) || rel.startsWith(`node_modules${sep}`)) {
+        continue;
+      }
+      // Test-file gate: do NOT enqueue tests. Their identifiers are harvested
+      // via the dedicated `collectTestFiles` path in `buildSourceVocabulary`,
+      // which scopes test-name harvest to the affectedPaths roots only.
+      if (basename(resolved).match(/\.(test|spec)\.[mc]?[jt]sx?$/)) {
+        continue;
+      }
+      if (visited.has(resolved)) continue;
+      visited.add(resolved);
+      out.push(resolved);
+      queue.push({ file: resolved, depth: depth + 1 });
+    }
+  }
+  return out;
+}
+
 // ── Public entry ─────────────────────────────────────────────────────────
 
 /**
@@ -333,7 +528,13 @@ export function buildSourceVocabulary(
     return vocab;
   }
 
-  const sourceFiles = resolveAffectedFiles(projectPath, affectedPaths, vocab.warnings);
+  const seedSourceFiles = resolveAffectedFiles(projectPath, affectedPaths, vocab.warnings);
+  // v0.44.0 — follow relative-import chains rooted at the seed source files.
+  // `FORGE_VOCAB_IMPORT_DEPTH=0` reverts to v0.43.x behavior (no following).
+  // Default depth=2 covers the common case of importing from siblings + their
+  // siblings (e.g. `src/index.ts → src/slack/adapter.ts → src/slack/queryHandler.ts`).
+  const maxImportDepth = readImportDepth();
+  const sourceFiles = followImports(projectPath, seedSourceFiles, maxImportDepth, vocab.warnings);
   const testFiles = collectTestFiles(projectPath, affectedPaths);
   const allFiles = [...sourceFiles, ...testFiles];
 

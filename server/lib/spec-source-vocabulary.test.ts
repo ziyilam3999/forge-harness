@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { resolve } from "node:path";
 import {
   buildSourceVocabulary,
@@ -154,5 +154,79 @@ describe("vocabularyContains — predicate semantics", () => {
     expect(vocabularyContains(vocab, "Baz.id")).toBe(true);
     expect(vocabularyContains(vocab, "Bogus")).toBe(false);
     expect(vocabularyContains(vocab, "Foo.bogus")).toBe(false);
+  });
+});
+
+// ── v0.44.0 — relative-import-following BFS (AC-7..AC-12) ────────────────
+
+describe("spec-source-vocabulary — v0.44.0 follows imports (AC-7)", () => {
+  const ORIG_DEPTH = process.env.FORGE_VOCAB_IMPORT_DEPTH;
+  afterEach(() => {
+    if (ORIG_DEPTH === undefined) delete process.env.FORGE_VOCAB_IMPORT_DEPTH;
+    else process.env.FORGE_VOCAB_IMPORT_DEPTH = ORIG_DEPTH;
+  });
+
+  it("AC-7: import from sibling file pulls the sibling's exports into vocabulary (1 hop)", () => {
+    delete process.env.FORGE_VOCAB_IMPORT_DEPTH; // default = 2
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [`${FIXTURE_REL}/imports-1hop/a.ts`]);
+    // a.ts's own exports.
+    expect(vocab.identifiers.has("A")).toBe(true);
+    // b.ts's exports (reached via `import { Foo } from "./b.js"` in a.ts).
+    expect(vocab.identifiers.has("Foo")).toBe(true);
+    expect(vocab.identifiers.has("BShape")).toBe(true);
+    expect(vocab.methods.has("Foo.hello")).toBe(true);
+    expect(vocab.fields.has("BShape.id")).toBe(true);
+  });
+
+  it("AC-8: cycle import a↔b does NOT infinite-loop and produces no cycle warning", () => {
+    delete process.env.FORGE_VOCAB_IMPORT_DEPTH;
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [`${FIXTURE_REL}/imports-cycle/a.ts`]);
+    expect(vocab.identifiers.has("Alpha")).toBe(true);
+    expect(vocab.identifiers.has("Bravo")).toBe(true);
+    // Visited-set prevents re-enqueue; no warning text should mention "cycle".
+    for (const w of vocab.warnings) {
+      expect(w.toLowerCase()).not.toContain("cycle");
+    }
+  });
+
+  it("AC-9: FORGE_VOCAB_IMPORT_DEPTH=1 follows 1 hop but NOT a 2-hop transitive import", () => {
+    process.env.FORGE_VOCAB_IMPORT_DEPTH = "1";
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [`${FIXTURE_REL}/imports-2hop/a.ts`]);
+    expect(vocab.identifiers.has("Alpha")).toBe(true); // seed
+    expect(vocab.identifiers.has("Bee")).toBe(true);    // 1 hop
+    // 2-hop file should NOT be harvested under depth=1.
+    expect(vocab.identifiers.has("CeeShape")).toBe(false);
+    expect(vocab.identifiers.has("CeeHelper")).toBe(false);
+  });
+
+  it("AC-9b: default depth (2) DOES follow the 2-hop transitive import", () => {
+    delete process.env.FORGE_VOCAB_IMPORT_DEPTH;
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [`${FIXTURE_REL}/imports-2hop/a.ts`]);
+    expect(vocab.identifiers.has("Alpha")).toBe(true);
+    expect(vocab.identifiers.has("Bee")).toBe(true);
+    expect(vocab.identifiers.has("CeeShape")).toBe(true);
+    expect(vocab.identifiers.has("CeeHelper")).toBe(true);
+  });
+
+  it("AC-10: FORGE_VOCAB_IMPORT_DEPTH=0 disables following (v0.43.x back-compat)", () => {
+    process.env.FORGE_VOCAB_IMPORT_DEPTH = "0";
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [
+      `${FIXTURE_REL}/imports-depth-disabled/a.ts`,
+    ]);
+    expect(vocab.identifiers.has("Root")).toBe(true); // seed harvested
+    // Imported sibling NOT harvested when depth=0.
+    expect(vocab.identifiers.has("OnlySeenWhenFollowed")).toBe(false);
+  });
+
+  it("AC-12: unresolvable relative import surfaces a warning with specifier + source", () => {
+    delete process.env.FORGE_VOCAB_IMPORT_DEPTH;
+    const vocab = buildSourceVocabulary(PROJECT_ROOT, [
+      `${FIXTURE_REL}/imports-unresolvable/a.ts`,
+    ]);
+    expect(vocab.identifiers.has("Solid")).toBe(true);
+    const hasWarning = vocab.warnings.some(
+      (w) => w.includes("does-not-exist") && w.includes("imports-unresolvable") && w.includes("a.ts"),
+    );
+    expect(hasWarning).toBe(true);
   });
 });

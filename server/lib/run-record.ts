@@ -117,6 +117,16 @@ export interface RunRecord {
      *      time. No directive emitted, no LLM call, no overwrite.
      */
     specGenMode?: "in-mcp" | "caller-action" | "short-circuited-hand-author";
+    /**
+     * v0.45.0 — when true, `genTokens` was computed via a byte/4 estimate
+     * rather than measured from an LLM-usage response. Set by the caller-action
+     * path when the caller (e.g. /forge-execute v1.1.0 in a Claude Code session)
+     * cannot observe its own LLM token usage. Additive-optional per P50; pre-
+     * v0.45.0 records lack the field. Consumers should treat absence as "false"
+     * (measured tokens). Cost rollups derived via `computeSpecGenCostUsd` are
+     * unaffected mathematically — the flag is a confidence-signal for audit.
+     */
+    tokensEstimated?: boolean;
   };
   metrics: {
     inputTokens: number;
@@ -362,6 +372,10 @@ export const GeneratedDocsSchema = z.object({
   specGenMode: z
     .enum(["in-mcp", "caller-action", "short-circuited-hand-author"])
     .optional(),
+  // v0.45.0 — additive optional confidence flag. When true, genTokens is a
+  // byte/4 estimate from a caller that cannot observe its own LLM usage
+  // (e.g. /forge-execute v1.1.0 spec-inline path). Cost math is unchanged.
+  tokensEstimated: z.boolean().optional(),
 });
 
 /**

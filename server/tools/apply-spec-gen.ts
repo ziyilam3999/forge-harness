@@ -84,6 +84,12 @@ export const applySpecGenInputSchema = {
     .describe(
       "Token usage from the caller's LLM round-trip. Used by the run record's totalCostUsd rollup.",
     ),
+  tokensEstimated: z
+    .boolean()
+    .optional()
+    .describe(
+      "Optional: when true, the caller computed `tokens` via a byte/4 estimate (e.g. /forge-execute v1.1.0 in-session spec-inline path where Claude cannot observe its own LLM usage). Threaded onto `generatedDocs.tokensEstimated` so cost-audit consumers can mark the totalCostUsd as approximate.",
+    ),
   affectedPaths: z
     .array(z.string())
     .optional()
@@ -119,6 +125,7 @@ type ApplySpecGenInput = {
   };
   contracts: string[];
   tokens: { inputTokens: number; outputTokens: number };
+  tokensEstimated?: boolean;
   affectedPaths?: string[];
   evalReport?: unknown;
   gitSha?: string;
@@ -215,6 +222,7 @@ export async function handleApplySpecGen(
     contracts: result.contracts,
     warnings: result.warnings,
     specGenMode: "caller-action",
+    ...(input.tokensEstimated === true ? { tokensEstimated: true } : {}),
   };
   // totalCostUsd: forge_apply_spec_gen owns the spec-gen leg's cost; the
   // run-level (shell-AC) cost was already recorded by evaluate.ts in the

@@ -40,10 +40,28 @@ import type { SpecGeneratorWarning } from "./run-record.js";
 // ── Constants ────────────────────────────────────────────────────────────
 
 const SCHEMA_VERSION = "1.0.0" as const;
-const REQUIRED_SECTIONS = ["api-contracts", "data-models", "invariants", "test-surface"] as const;
-type SectionName = (typeof REQUIRED_SECTIONS)[number];
+/**
+ * The four canonical sub-section names under each `## story: <id>` heading.
+ * Exported so consumers (the v0.43.0 `forge_apply_spec_gen` MCP tool, tests,
+ * external callers handling the `generate-spec-inline` directive) can refer to
+ * the same source of truth rather than re-typing the literal tuple.
+ */
+export const REQUIRED_SECTIONS = ["api-contracts", "data-models", "invariants", "test-surface"] as const;
+export type SectionName = (typeof REQUIRED_SECTIONS)[number];
 
 const SPEC_REL_PATH = "docs/generated/TECHNICAL-SPEC.md";
+
+/**
+ * v0.43.0 — substring marker that signals a sub-section was hand-authored by
+ * an operator (e.g. monday-bot's v0.12.3 ship pattern). When ANY of the four
+ * canonical sub-sections under `## story: <id>` contains this prefix on the
+ * on-disk TECHNICAL-SPEC.md, both the brief-build AC-3b short-circuit and
+ * the apply-time AC-6 preserve check refuse to overwrite that sub-section.
+ *
+ * Exported so the AC-3b decision in `evaluate.ts` and the AC-6 race-window
+ * check in `applySpecGenResult` share one literal — F49 single-locus.
+ */
+export const HAND_AUTHORED_MARKER_PREFIX = "<!-- hand-authored ";
 
 /**
  * I6 — byte-stable HTML-comment placeholder body used when the synthesizer
@@ -489,7 +507,12 @@ function captureDiffSummary(cwd: string): string {
 
 // ── LLM synthesis ────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are the spec-generator for forge-harness's living TECHNICAL-SPEC.md.
+/**
+ * Exported so the v0.43.0 `forge_evaluate` directive flow can ship the
+ * pre-rendered system prompt verbatim to the caller. Same string the
+ * legacy in-MCP synth path uses on the OAuth path (`FORGE_SPEC_CALLER_ACTION=0`).
+ */
+export const SYSTEM_PROMPT = `You are the spec-generator for forge-harness's living TECHNICAL-SPEC.md.
 
 For one story (a unit of shipped work), you write four short structured Markdown subsections capturing what the diff settled.
 
@@ -1232,4 +1255,386 @@ function mergeStorySectionInBody(
 
 function normaliseBody(body: string): string {
   return body.replace(/\r\n/g, "\n").trim() + "\n";
+}
+
+// ── v0.43.0 callerAction directive support ────────────────────────────────
+//
+// The directive flow splits the legacy `generateSpecForStory` into two halves:
+//
+//   1. `buildSpecGenBrief(input)` — runs server-side in `forge_evaluate` and
+//      computes everything the LLM needs as inputs. Returns a `SpecGenBrief`
+//      payload to attach to the MCP response. Makes ZERO Anthropic API calls.
+//
+//   2. `applySpecGenResult(brief, llmResult, opts)` — runs server-side in the
+//      new `forge_apply_spec_gen` MCP tool. Re-reads the on-disk spec content
+//      (the AC-6 race-window check), merges the caller-supplied sections,
+//      and writes the file via the existing `idempotentWrite` + preserve-
+//      invariant code path. Makes ZERO Anthropic API calls.
+//
+// The legacy `generateSpecForStory` remains in place as the
+// `FORGE_SPEC_CALLER_ACTION=0` opt-out path.
+
+/**
+ * Read the on-disk TECHNICAL-SPEC.md for `projectPath` and return the
+ * current text content of each of the four canonical sub-sections under
+ * `## story: <storyId>`. Empty string for any sub-section that doesn't
+ * exist on disk yet (first PASS for that story, or a missing file).
+ *
+ * Exported so the AC-3b short-circuit in `evaluate.ts` and the AC-6
+ * race-window check in `applySpecGenResult` share one extractor.
+ */
+export function extractCurrentSectionContent(
+  projectPath: string,
+  storyId: string,
+): Record<SectionName, string> {
+  const empty: Record<SectionName, string> = {
+    "api-contracts": "",
+    "data-models": "",
+    invariants: "",
+    "test-surface": "",
+  };
+  const specPath = resolve(projectPath, SPEC_REL_PATH);
+  if (!existsSync(specPath)) return empty;
+  let parsed: ParsedSpec;
+  try {
+    parsed = parseSpec(readFileSync(specPath, "utf-8"));
+  } catch {
+    return empty;
+  }
+  const sections = splitBodyByStory(parsed.body);
+  const target = sections.find((s) => s.id === storyId);
+  if (!target) return empty;
+  // The story section's markdown is a contiguous block:
+  //   ## story: <id>
+  //   ### api-contracts
+  //   <content>
+  //   ### data-models
+  //   ...
+  // Walk the lines and bucket each non-heading line under the most recent
+  // `### <name>` heading we saw.
+  const out: Record<SectionName, string> = { ...empty };
+  let current: SectionName | null = null;
+  let buf: string[] = [];
+  const flush = () => {
+    if (current !== null) {
+      out[current] = buf.join("\n").trim();
+    }
+  };
+  for (const line of target.markdown.split("\n")) {
+    const m = line.match(/^### (.+)$/);
+    if (m) {
+      flush();
+      const name = m[1].trim();
+      if ((REQUIRED_SECTIONS as readonly string[]).includes(name)) {
+        current = name as SectionName;
+        buf = [];
+      } else {
+        current = null;
+        buf = [];
+      }
+      continue;
+    }
+    if (current !== null) buf.push(line);
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Test whether ANY of the four canonical sub-sections' current on-disk
+ * content contains the hand-author marker prefix. Mirrors the AC-3b /
+ * AC-6 rule.
+ *
+ * Exported so the same predicate fires at brief-emit time (in evaluate.ts)
+ * and at apply time (in applySpecGenResult / forge_apply_spec_gen).
+ */
+export function hasHandAuthoredMarker(
+  currentSectionContent: Record<SectionName, string>,
+): boolean {
+  for (const name of REQUIRED_SECTIONS) {
+    if ((currentSectionContent[name] ?? "").includes(HAND_AUTHORED_MARKER_PREFIX)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Per-section variant of `hasHandAuthoredMarker` — returns the set of
+ * sub-section names whose current on-disk content contains the marker.
+ * Used by `applySpecGenResult` (AC-6) to preserve marked sub-sections
+ * verbatim while overwriting unmarked ones with the caller's generated
+ * content.
+ */
+export function findHandAuthoredSections(
+  currentSectionContent: Record<SectionName, string>,
+): Set<SectionName> {
+  const out = new Set<SectionName>();
+  for (const name of REQUIRED_SECTIONS) {
+    if ((currentSectionContent[name] ?? "").includes(HAND_AUTHORED_MARKER_PREFIX)) {
+      out.add(name);
+    }
+  }
+  return out;
+}
+
+/**
+ * v0.43.0 — input shape for `buildSpecGenBrief`. Strict subset of
+ * `SpecGeneratorInput`: we only need the inputs that participate in
+ * prompt rendering + on-disk snapshot capture. No LLM-related fields
+ * (`synthesize`, `sleepFn`, `randomFn`) — the brief is pre-LLM, by design.
+ */
+export interface BuildSpecGenBriefInput {
+  projectPath: string;
+  storyId: string;
+  evalReport: EvalReport;
+  affectedPaths?: string[];
+  gitSha?: string;
+}
+
+/**
+ * v0.43.0 — output shape of `buildSpecGenBrief`. Mirrors `SpecGenBrief`
+ * from `server/types/evaluate-result.ts` but lives in the lib layer so
+ * it can be imported without a circular dep. The two interfaces are
+ * structurally identical and MUST stay in sync; the type-checker enforces
+ * the link at the evaluate.ts call site.
+ */
+export interface SpecGenBriefPayload {
+  storyId: string;
+  runId: string;
+  specPath: string;
+  affectedPaths: string[];
+  systemPrompt: string;
+  userPrompt: string;
+  vocabularyPrompt: string;
+  diffSummary: string;
+  evalReport: EvalReport;
+  expectedSections: readonly ["api-contracts", "data-models", "invariants", "test-surface"];
+  currentSectionContent: Record<SectionName, string>;
+}
+
+/**
+ * v0.43.0 (P34 Strict Output Contract + P64 Producer/Consumer Seam) — compute
+ * EVERYTHING the caller's LLM needs to do the spec-gen round-trip, attach to
+ * a `runId` for atomic observability, and return a payload ready to surface
+ * on the forge_evaluate MCP response envelope.
+ *
+ * Makes ZERO Anthropic API calls. This is the producer half of the directive
+ * flow; the caller (Claude Code session) is the consumer; `forge_apply_spec_gen`
+ * is the post-LLM merge half (server-side).
+ *
+ * The `runId` parameter MUST be threaded through `forge_apply_spec_gen` by the
+ * caller so the merge event lands in the SAME `.forge/runs/forge_evaluate-*`
+ * file as the brief-emit event (AC-14).
+ */
+export function buildSpecGenBrief(
+  input: BuildSpecGenBriefInput,
+  runId: string,
+): SpecGenBriefPayload {
+  const specPath = resolve(input.projectPath, SPEC_REL_PATH);
+  // Build source vocabulary + render the vocabulary prompt the same way the
+  // legacy in-MCP path does — keeps the prompt byte-identical across the
+  // two paths so an opt-out toggle does not silently mutate output shape.
+  const vocab = buildSourceVocabulary(
+    input.projectPath,
+    input.affectedPaths ?? [],
+  );
+  const vocabularyPrompt = renderVocabularyForPrompt(vocab);
+  const diffSummary = captureDiffSummary(input.projectPath);
+  const userPrompt = buildUserPrompt({
+    storyId: input.storyId,
+    evalReport: input.evalReport,
+    diffSummary,
+    vocabularyPrompt,
+  });
+  const currentSectionContent = extractCurrentSectionContent(
+    input.projectPath,
+    input.storyId,
+  );
+  return {
+    storyId: input.storyId,
+    runId,
+    specPath,
+    affectedPaths: input.affectedPaths ?? [],
+    systemPrompt: SYSTEM_PROMPT,
+    userPrompt,
+    vocabularyPrompt,
+    diffSummary,
+    evalReport: input.evalReport,
+    expectedSections: REQUIRED_SECTIONS,
+    currentSectionContent,
+  };
+}
+
+/**
+ * v0.43.0 — caller-supplied result after the directive flow round-trip.
+ * Mirrors the SDK-shape of `SynthesisResponse` so the legacy in-MCP path
+ * (`FORGE_SPEC_CALLER_ACTION=0`) and the new caller-action path share the
+ * same merge code path.
+ */
+export interface CallerSpecGenResult {
+  sections: Record<SectionName, string>;
+  contracts: string[];
+  tokens: { inputTokens: number; outputTokens: number };
+}
+
+/**
+ * v0.43.0 — output of `applySpecGenResult`. Mirrors `SpecGeneratorResult`
+ * (the legacy in-MCP shape) so the run record stays uniform across the
+ * two code paths. Both surfaces stamp the same fields onto
+ * `RunRecord.generatedDocs`.
+ */
+export interface ApplySpecGenResult {
+  specPath: string;
+  genTimestamp: string;
+  genTokens: { inputTokens: number; outputTokens: number };
+  contracts: string[];
+  bodyChanged: boolean;
+  warnings: SpecGeneratorWarning[];
+}
+
+/**
+ * v0.43.0 — server-side merge half of the directive flow. Re-reads the
+ * on-disk spec at apply time (AC-6 race-window check), preserves any
+ * sub-section that has acquired a `<!-- hand-authored ` marker since the
+ * brief was emitted, validates against the source vocabulary, and writes
+ * the file via the existing `idempotentWrite` + preserve-invariant path.
+ *
+ * Inherits v0.42.0's no-overwrite invariant via reuse: empty / all-`(none)`
+ * caller sections → `spec-gen-empty-sections` warning + file unchanged.
+ *
+ * Makes ZERO Anthropic API calls.
+ *
+ * `gitSha` is the SHA `evaluate.ts` captured at brief-build time so the
+ * front-matter `lastGitSha` field reflects the PASS-verdict commit (NOT
+ * the wall-clock-later moment when `forge_apply_spec_gen` lands the merge).
+ */
+export function applySpecGenResult(
+  input: BuildSpecGenBriefInput,
+  caller: CallerSpecGenResult,
+): ApplySpecGenResult {
+  const specPath = resolve(input.projectPath, SPEC_REL_PATH);
+  const now = new Date().toISOString();
+  const gitShaSafe = input.gitSha && /^[0-9a-f]{40}$/.test(input.gitSha)
+    ? input.gitSha
+    : "unknown";
+
+  // Re-read on-disk spec so we see any operator hand-edits that landed
+  // between brief-emit and now (AC-6 race-window check).
+  let parsed: ParsedSpec;
+  if (existsSync(specPath)) {
+    const text = readFileSync(specPath, "utf-8");
+    try {
+      parsed = parseSpec(text);
+    } catch (err) {
+      console.error(
+        `apply-spec-gen: existing spec at ${specPath} is malformed (${err instanceof Error ? err.message : String(err)}); rewriting from scratch`,
+      );
+      parsed = emptySpec(now);
+    }
+  } else {
+    parsed = emptySpec(now);
+  }
+
+  // v0.43.0 (AC-6) — re-sample the current on-disk content of each sub-section.
+  // Preserve any sub-section that contains the hand-author marker; the caller's
+  // sections for those names are silently dropped.
+  const currentContent = extractCurrentSectionContent(
+    input.projectPath,
+    input.storyId,
+  );
+  const handAuthoredSet = findHandAuthoredSections(currentContent);
+
+  // v0.42.0 (AC-1b) — no-overwrite invariant: empty / all-`(none)` sections
+  // preserve existing content. Inherited via reuse on the new directive path.
+  const allNone = REQUIRED_SECTIONS.every(
+    (k) => (caller.sections[k] ?? "").trim() === "(none)" || (caller.sections[k] ?? "").trim() === "",
+  );
+
+  const warnings: SpecGeneratorWarning[] = [];
+
+  if (allNone) {
+    warnings.push({
+      kind: "spec-gen-empty-sections",
+      message:
+        "caller-action result had empty / all-(none) sections; existing TECHNICAL-SPEC content preserved",
+    });
+    return {
+      specPath,
+      genTimestamp: now,
+      genTokens: caller.tokens,
+      contracts: caller.contracts,
+      bodyChanged: false,
+      warnings,
+    };
+  }
+
+  // Build the validated section payload: start from caller-supplied sections,
+  // then OVERRIDE any hand-authored sub-section with its current on-disk
+  // content (AC-6). The on-disk content is what gets re-rendered into the
+  // story section so its bytes are preserved across the round-trip.
+  const sectionsAfterPreserve: Record<SectionName, string> = {
+    "api-contracts": caller.sections["api-contracts"] ?? "(none)",
+    "data-models": caller.sections["data-models"] ?? "(none)",
+    invariants: caller.sections.invariants ?? "(none)",
+    "test-surface": caller.sections["test-surface"] ?? "(none)",
+  };
+  for (const name of handAuthoredSet) {
+    sectionsAfterPreserve[name] = currentContent[name];
+  }
+
+  // Vocabulary-grounded post-validation. Reuses the existing
+  // `validateAgainstVocabulary` path so caller-action and in-MCP outputs
+  // pass through the same grounding gate.
+  const vocab = buildSourceVocabulary(
+    input.projectPath,
+    input.affectedPaths ?? [],
+  );
+  let validatedSections = sectionsAfterPreserve;
+  const hasVocab = vocab.identifiers.size > 0 || vocab.testNames.size > 0;
+  if (hasVocab) {
+    const validated = validateAgainstVocabulary(
+      sectionsAfterPreserve,
+      vocab,
+      { filesScanned: vocab.filesScanned.length },
+    );
+    validatedSections = validated.sections;
+    for (const w of validated.warnings) warnings.push(w);
+  } else {
+    warnings.push({ kind: "no-vocabulary", filesScanned: vocab.filesScanned.length });
+  }
+
+  // Merge into front-matter `stories[]` by id.
+  const idx = parsed.frontMatter.stories.findIndex((s) => s.id === input.storyId);
+  const entry = { id: input.storyId, lastUpdated: now, lastGitSha: gitShaSafe };
+  if (idx === -1) parsed.frontMatter.stories.push(entry);
+  else parsed.frontMatter.stories[idx] = entry;
+  parsed.frontMatter.stories.sort((a, b) => a.id.localeCompare(b.id));
+  parsed.frontMatter.lastUpdated = now;
+  parsed.frontMatter.schemaVersion = SCHEMA_VERSION;
+
+  const newSection = renderStorySection(input.storyId, validatedSections);
+  const bodyChanged = mergeStorySectionInBody(parsed, input.storyId, newSection);
+
+  // Write atomically — same agent-first header + idempotentWrite as the
+  // legacy in-MCP path.
+  mkdirSync(dirname(specPath), { recursive: true });
+  const today = now.slice(0, 10);
+  const headerBlock = [
+    ...AGENT_FIRST_COMMENT_BLOCK,
+    "",
+    `> Generated by forge-harness on ${today}.`,
+    "",
+  ].join("\n");
+  const out = `${headerBlock}\n---\n${renderFrontMatter(parsed.frontMatter)}\n---\n\n${normaliseBody(parsed.body)}`;
+  idempotentWrite(specPath, out);
+
+  return {
+    specPath,
+    genTimestamp: now,
+    genTokens: caller.tokens,
+    contracts: caller.contracts,
+    bodyChanged,
+    warnings,
+  };
 }

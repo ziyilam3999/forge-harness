@@ -30,12 +30,20 @@ vi.mock("../lib/run-record.js", async () => {
     writeRunRecord: vi.fn(async () => {}),
     canonicalizeEvalReport: actual.canonicalizeEvalReport,
     computeSpecGenCostUsd: actual.computeSpecGenCostUsd,
+    // v0.43.0 — deterministic runId so directive-flow tests can assert on it.
+    generateRunId: vi.fn(() => "abcd"),
+    findAndMergeRunRecord: vi.fn(async () => null),
   };
 });
 
 // v0.36.0 Phase B — mock spec-generator so PASS-mode tests don't try to
 // write to non-existent project paths (e.g. "/some/path"). The real
 // integration is exercised by `server/lib/spec-generator.test.ts`.
+//
+// v0.43.0 — also stub the new caller-action directive-flow helpers
+// (`buildSpecGenBrief`, `extractCurrentSectionContent`, `hasHandAuthoredMarker`)
+// so the default code path in evaluate.ts has all the helpers it imports.
+// Individual tests override these as needed.
 vi.mock("../lib/spec-generator.js", () => ({
   generateSpecForStory: vi.fn(async (input: { projectPath: string; storyId: string }) => ({
     specPath: `${input.projectPath}/docs/generated/TECHNICAL-SPEC.md`,
@@ -45,6 +53,38 @@ vi.mock("../lib/spec-generator.js", () => ({
     bodyChanged: true,
     warnings: [],
   })),
+  buildSpecGenBrief: vi.fn(
+    (input: { projectPath: string; storyId: string; affectedPaths?: string[]; evalReport: unknown }, runId: string) => ({
+      storyId: input.storyId,
+      runId,
+      specPath: `${input.projectPath}/docs/generated/TECHNICAL-SPEC.md`,
+      affectedPaths: input.affectedPaths ?? [],
+      systemPrompt: "test-system-prompt",
+      userPrompt: "test-user-prompt",
+      vocabularyPrompt: "test-vocab-prompt",
+      diffSummary: "test-diff",
+      evalReport: input.evalReport,
+      expectedSections: [
+        "api-contracts",
+        "data-models",
+        "invariants",
+        "test-surface",
+      ],
+      currentSectionContent: {
+        "api-contracts": "",
+        "data-models": "",
+        invariants: "",
+        "test-surface": "",
+      },
+    }),
+  ),
+  extractCurrentSectionContent: vi.fn(() => ({
+    "api-contracts": "",
+    "data-models": "",
+    invariants: "",
+    "test-surface": "",
+  })),
+  hasHandAuthoredMarker: vi.fn(() => false),
 }));
 
 // v0.36.0 Phase C — mock adr-extractor for the same reason (no real disk
@@ -168,10 +208,19 @@ function makeCallResult(data: unknown): CallClaudeResult {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // v0.43.0 — the default story-mode PASS path emits a `generate-spec-inline`
+  // directive instead of calling `generateSpecForStory`. The legacy tests in
+  // this file were written against the in-MCP synth path, so we pin
+  // `FORGE_SPEC_CALLER_ACTION=0` here to keep them exercising the path
+  // they were designed for. The new directive-flow tests live in their own
+  // describe block below and `vi.stubEnv("FORGE_SPEC_CALLER_ACTION", "")`
+  // back out of legacy mode per test.
+  vi.stubEnv("FORGE_SPEC_CALLER_ACTION", "0");
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 // ── Story Mode (backward-compatible existing tests) ───────
@@ -1277,6 +1326,173 @@ describe("self-healing cycle support", () => {
 // ── Q0/L2 — deterministic reverseFindings ids ──
 
 import { computeReverseFindingId } from "./evaluate.js";
+
+// ── v0.43.0: callerAction directive flow (AC-1, AC-2, AC-3, AC-3b, AC-4) ──
+
+import {
+  buildSpecGenBrief as mockedBuildSpecGenBriefImport,
+  extractCurrentSectionContent as mockedExtractCurrentImport,
+  hasHandAuthoredMarker as mockedHasHandAuthoredImport,
+  generateSpecForStory as mockedGenerateSpecForStoryImport,
+} from "../lib/spec-generator.js";
+const mockedBuildSpecGenBrief = vi.mocked(mockedBuildSpecGenBriefImport);
+const mockedExtractCurrent = vi.mocked(mockedExtractCurrentImport);
+const mockedHasHandAuthored = vi.mocked(mockedHasHandAuthoredImport);
+const mockedGenerateSpecForStory2 = vi.mocked(mockedGenerateSpecForStoryImport);
+
+describe("v0.43.0 — callerAction directive flow on PASS path", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // CRITICAL: override the top-level legacy-pin so this describe block
+    // exercises the NEW default path. Tests inside flip back to "0" as
+    // needed for the AC-4 opt-out coverage.
+    vi.stubEnv("FORGE_SPEC_CALLER_ACTION", "");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-1: PASS path emits `callerAction: \"generate-spec-inline\"` AND a `specGenBrief`", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.callerAction).toBe("generate-spec-inline");
+    expect(result.specGenBrief).toBeDefined();
+  });
+
+  it("AC-2: ZERO Anthropic synth calls on the default PASS path (synth.callCount === 0)", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    // The legacy in-MCP synth path goes through `generateSpecForStory`, which
+    // wraps `trackedCallClaude` → `callClaude`. The directive flow does not
+    // call any of these. Assert both layers are untouched.
+    expect(mockedGenerateSpecForStory2).not.toHaveBeenCalled();
+    expect(mockedCallClaude).not.toHaveBeenCalled();
+  });
+
+  it("AC-3: specGenBrief carries the required 10 fields (storyId, runId, specPath, affectedPaths, systemPrompt, userPrompt, vocabularyPrompt, diffSummary, evalReport, expectedSections, currentSectionContent)", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    const brief = result.specGenBrief!;
+    expect(brief).toBeDefined();
+    expect(brief.storyId).toBe("US-01");
+    expect(typeof brief.runId).toBe("string");
+    expect(brief.runId.length).toBeGreaterThan(0);
+    expect(typeof brief.specPath).toBe("string");
+    expect(Array.isArray(brief.affectedPaths)).toBe(true);
+    expect(typeof brief.systemPrompt).toBe("string");
+    expect(typeof brief.userPrompt).toBe("string");
+    expect(typeof brief.vocabularyPrompt).toBe("string");
+    expect(typeof brief.diffSummary).toBe("string");
+    expect(brief.evalReport).toBeDefined();
+    expect(brief.expectedSections).toEqual([
+      "api-contracts",
+      "data-models",
+      "invariants",
+      "test-surface",
+    ]);
+    expect(brief.currentSectionContent).toBeDefined();
+    expect(brief.currentSectionContent["api-contracts"]).toBeDefined();
+    expect(brief.currentSectionContent["data-models"]).toBeDefined();
+    expect(brief.currentSectionContent.invariants).toBeDefined();
+    expect(brief.currentSectionContent["test-surface"]).toBeDefined();
+  });
+
+  it("AC-3b: hand-author marker on on-disk content → NO directive AND NO brief AND warning surfaces on both surfaces", async () => {
+    // Simulate hand-author marker on one sub-section.
+    mockedExtractCurrent.mockReturnValueOnce({
+      "api-contracts": "<!-- hand-authored 2026-05-11 by operator -->\n- something",
+      "data-models": "",
+      invariants: "",
+      "test-surface": "",
+    });
+    mockedHasHandAuthored.mockReturnValueOnce(true);
+
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    const result = await handleEvaluate({
+      storyId: "US-13",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    expect(result.callerAction).toBeUndefined();
+    expect(result.specGenBrief).toBeUndefined();
+    // No Anthropic call.
+    expect(mockedCallClaude).not.toHaveBeenCalled();
+    expect(mockedGenerateSpecForStory2).not.toHaveBeenCalled();
+    // Warning surfaced on MCP top-level field.
+    const mcpKinds = (result.specGenWarnings ?? []).map((w) => w.kind);
+    expect(mcpKinds).toContain("spec-gen-short-circuited-hand-author");
+    // Warning ALSO surfaced on the on-disk record.
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const record = mockedWriteRunRecord.mock.calls[0][1];
+    const onDiskKinds = (record.generatedDocs?.warnings ?? []).map((w) => w.kind);
+    expect(onDiskKinds).toContain("spec-gen-short-circuited-hand-author");
+    // Run record records the discriminator.
+    expect(record.generatedDocs?.specGenMode).toBe(
+      "short-circuited-hand-author",
+    );
+  });
+
+  it("AC-4 (a): FORGE_SPEC_CALLER_ACTION=0 routes to legacy in-MCP synth (synth called ≥1)", async () => {
+    vi.stubEnv("FORGE_SPEC_CALLER_ACTION", "0");
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    expect(result.callerAction).toBeUndefined();
+    expect(result.specGenBrief).toBeUndefined();
+    expect(mockedGenerateSpecForStory2).toHaveBeenCalledTimes(1);
+    // The run record stamps the legacy discriminator.
+    const record = mockedWriteRunRecord.mock.calls[0][1];
+    expect(record.generatedDocs?.specGenMode).toBe("in-mcp");
+  });
+
+  it("AC-4 (b): env unset (default) routes to the directive flow (synth called 0)", async () => {
+    // beforeEach already pins env=""; assert directive emission.
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    expect(mockedGenerateSpecForStory2).not.toHaveBeenCalled();
+    expect(mockedBuildSpecGenBrief).toHaveBeenCalledTimes(1);
+    // The run record stamps the new-path discriminator.
+    const record = mockedWriteRunRecord.mock.calls[0][1];
+    expect(record.generatedDocs?.specGenMode).toBe("caller-action");
+  });
+
+  it("AC-14: directive-emit run record uses the runId as filename suffix (`runId` option threaded to writeRunRecord)", async () => {
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const [, , options] = mockedWriteRunRecord.mock.calls[0];
+    expect(options).toBeDefined();
+    expect(options).toMatchObject({ runId: expect.stringMatching(/^[0-9a-f]{4}$/) });
+    // The brief's runId matches the writeRunRecord runId option.
+    const briefRunId = mockedBuildSpecGenBrief.mock.calls[0][1];
+    expect((options as { runId?: string }).runId).toBe(briefRunId);
+  });
+});
 
 describe("computeReverseFindingId — determinism", () => {
   it("same inputs produce the same id across calls", () => {

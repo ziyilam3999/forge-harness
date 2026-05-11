@@ -510,6 +510,58 @@ describe("handleStoryEval — v0.36.0 Phase B spec-generator integration", () =>
     // P64 — the MCP top-level surface MUST carry the same warnings.
     expect(result.specGenWarnings).toEqual(record.generatedDocs!.warnings);
   });
+
+  it("v0.42.1 AC-13: spec-gen-rate-limit-exhausted surfaces on BOTH generatedDocs.warnings and result.specGenWarnings (dual-surface)", async () => {
+    // Simulate what the real spec-generator emits when the retry loop
+    // exhausts on a header-less 429 (AC-6): both spec-gen-shell-only AND
+    // spec-gen-rate-limit-exhausted in the warnings array. evaluate.ts
+    // must thread BOTH onto the run-record (on-disk) and the MCP-response
+    // top-level field (in-band) — that's the P64 dual-surface contract
+    // established by v0.42.0's F4 fix.
+    mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
+    mockedGenerateSpec.mockResolvedValueOnce({
+      specPath: "/some/path/docs/generated/TECHNICAL-SPEC.md",
+      genTimestamp: "2026-05-11T07:13:00.000Z",
+      genTokens: { inputTokens: 0, outputTokens: 0 },
+      contracts: [],
+      bodyChanged: false,
+      warnings: [
+        {
+          kind: "spec-gen-shell-only",
+          message: "429 rate_limit_error",
+        },
+        {
+          kind: "spec-gen-rate-limit-exhausted",
+          message:
+            "forge_evaluate retried 2 times on HTTP 429 but the rate-limit window did not clear. " +
+            "Likely cause: a concurrent OAuth token bucket consumer (e.g. Claude Code main session) is sharing the same bucket.",
+        },
+      ],
+    });
+
+    const result = await handleEvaluate({
+      storyId: "US-01",
+      planJson: makeValidPlanJson(),
+      projectPath: "/some/path",
+    });
+
+    // Surface 1: on-disk run record.
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const record = mockedWriteRunRecord.mock.calls[0][1];
+    expect(record.generatedDocs).toBeDefined();
+    const onDiskKinds = record.generatedDocs!.warnings.map((w) => w.kind);
+    expect(onDiskKinds).toContain("spec-gen-shell-only");
+    expect(onDiskKinds).toContain("spec-gen-rate-limit-exhausted");
+
+    // Surface 2: in-band MCP response.
+    expect(result.specGenWarnings).toBeDefined();
+    const mcpKinds = (result.specGenWarnings ?? []).map((w) => w.kind);
+    expect(mcpKinds).toContain("spec-gen-shell-only");
+    expect(mcpKinds).toContain("spec-gen-rate-limit-exhausted");
+
+    // Parity guarantee: both surfaces carry the same array shape.
+    expect(result.specGenWarnings).toEqual(record.generatedDocs!.warnings);
+  });
 });
 
 // ── v0.40.x I1: surface canonicalized ADR triples on response ──

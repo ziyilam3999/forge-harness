@@ -101,6 +101,116 @@ function parseRetryOn429Cap(raw: string | undefined): number {
 }
 
 /**
+ * v0.42.1 — default for the header-less 429 fallback sleep. Anthropic's
+ * Max-plan OAuth returns 429 WITHOUT a `retry-after` header (4 of 4
+ * historical cases observed in monday-bot run records), so v0.42.0's 1s
+ * fallback guaranteed the retry hit the same rate-limit window. The
+ * 30s default is grounded in the observed bucket-reset behaviour.
+ * Operators tune via `FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC`. Cap-clamped
+ * by `FORGE_SPEC_RETRY_ON_429`.
+ */
+const RETRY_ON_429_FALLBACK_DEFAULT_SEC = 30;
+
+/**
+ * v0.42.1 — number of retry attempts after the INITIAL call. Total synth
+ * invocations on persistent 429 = 1 + ATTEMPTS. Set to `1` for v0.42.0
+ * behaviour; `0` to disable retry (equivalent to FORGE_SPEC_RETRY_ON_429=0
+ * but more specific). Operators tune via `FORGE_SPEC_RETRY_ON_429_ATTEMPTS`.
+ */
+const RETRY_ON_429_ATTEMPTS_DEFAULT = 2;
+
+/**
+ * v0.42.1 — random jitter ±N% applied to each retry sleep. Breaks
+ * thundering-herd lockstep when multiple concurrent forge consumers share
+ * an OAuth token bucket. Range 0-50 (integer percent). Operators tune via
+ * `FORGE_SPEC_RETRY_ON_429_JITTER_PCT`. Tests set 0 for deterministic
+ * sleep-duration assertions.
+ */
+const RETRY_ON_429_JITTER_PCT_DEFAULT = 10;
+
+/**
+ * v0.42.1 — parse `FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC` env var. Mirrors
+ * `parseRetryOn429Cap` semantics: unset/empty → default; malformed → log
+ * + default; valid non-negative integer → parsed value. `0` propagates
+ * through (recovers v0.42.0's 1s fallback would require explicit
+ * setting; 0 disables fallback, falling through to legacy 1s).
+ */
+function parseRetryOn429Fallback(raw: string | undefined): number {
+  if (raw === undefined || raw === "") return RETRY_ON_429_FALLBACK_DEFAULT_SEC;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    console.error(
+      `spec-generator: ignoring malformed FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC="${raw}" (expected non-negative integer seconds); using default ${RETRY_ON_429_FALLBACK_DEFAULT_SEC}s`,
+    );
+    return RETRY_ON_429_FALLBACK_DEFAULT_SEC;
+  }
+  return Number.parseInt(trimmed, 10);
+}
+
+/**
+ * v0.42.1 — parse `FORGE_SPEC_RETRY_ON_429_ATTEMPTS` env var. Same shape
+ * as the others. Valid non-negative integer; `0` = disable retry.
+ */
+function parseRetryOn429Attempts(raw: string | undefined): number {
+  if (raw === undefined || raw === "") return RETRY_ON_429_ATTEMPTS_DEFAULT;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    console.error(
+      `spec-generator: ignoring malformed FORGE_SPEC_RETRY_ON_429_ATTEMPTS="${raw}" (expected non-negative integer); using default ${RETRY_ON_429_ATTEMPTS_DEFAULT}`,
+    );
+    return RETRY_ON_429_ATTEMPTS_DEFAULT;
+  }
+  return Number.parseInt(trimmed, 10);
+}
+
+/**
+ * v0.42.1 — parse `FORGE_SPEC_RETRY_ON_429_JITTER_PCT` env var. Range
+ * 0..50 (inclusive); values outside that range log and fall back to
+ * default. Returns the integer percentage to apply as ±N% of the sleep
+ * duration. `0` disables jitter (deterministic backoff; required by
+ * tests that assert exact sleep durations).
+ */
+function parseRetryOn429JitterPct(raw: string | undefined): number {
+  if (raw === undefined || raw === "") return RETRY_ON_429_JITTER_PCT_DEFAULT;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    console.error(
+      `spec-generator: ignoring malformed FORGE_SPEC_RETRY_ON_429_JITTER_PCT="${raw}" (expected non-negative integer 0-50); using default ${RETRY_ON_429_JITTER_PCT_DEFAULT}`,
+    );
+    return RETRY_ON_429_JITTER_PCT_DEFAULT;
+  }
+  const n = Number.parseInt(trimmed, 10);
+  if (n > 50) {
+    console.error(
+      `spec-generator: FORGE_SPEC_RETRY_ON_429_JITTER_PCT="${raw}" exceeds max 50; using default ${RETRY_ON_429_JITTER_PCT_DEFAULT}`,
+    );
+    return RETRY_ON_429_JITTER_PCT_DEFAULT;
+  }
+  return n;
+}
+
+/**
+ * v0.42.1 — apply ±jitterPct% randomization to baseSec using injected
+ * randomFn (defaults to Math.random). randomFn return is mapped:
+ *   randomFn() = 0.0  → factor 1 - jitterPct/100  (e.g. 0.9 at pct=10)
+ *   randomFn() = 0.5  → factor 1.0  (mid-point, base passes through)
+ *   randomFn() = 1.0  → factor 1 + jitterPct/100  (e.g. 1.1 at pct=10)
+ * Result clamped to >= 0. When jitterPct=0, returns baseSec unchanged
+ * (deterministic; required by tests). Returns SECONDS (not ms).
+ */
+function applyJitter(
+  baseSec: number,
+  jitterPct: number,
+  randomFn: () => number,
+): number {
+  if (jitterPct === 0) return baseSec;
+  // r ∈ [0,1] → factor ∈ [1 - pct/100, 1 + pct/100]
+  const r = randomFn();
+  const factor = 1 + (r - 0.5) * 2 * (jitterPct / 100);
+  return Math.max(0, baseSec * factor);
+}
+
+/**
  * Agent-first header (Bundle 1a). Five HTML-comment lines + 1 blank line are
  * BYTE-IDENTICAL across regenerations (idempotency contract AC-1a-3). The
  * visible "Generated by ..." date line that follows refreshes on every call
@@ -160,6 +270,15 @@ export interface SpecGeneratorInput {
    * recorder to assert sleep duration was clamped to the configured cap.
    */
   sleepFn?: (ms: number) => Promise<void>;
+  /**
+   * v0.42.1 (AC-14 / P64) — override the jitter random source so vitest
+   * can deterministically exercise the ±jitter math without flakiness.
+   * Default = `Math.random`. Tests pass a fixed-value function (e.g.
+   * `() => 0.5` for mid-point → factor 1.0, `() => 0.0` for min →
+   * factor 1 - pct/100, `() => 1.0` for max → factor 1 + pct/100).
+   * Mirrors the v0.42.0 `sleepFn` P64 seam pattern.
+   */
+  randomFn?: () => number;
 }
 
 export interface SpecGeneratorResult {
@@ -681,10 +800,23 @@ export async function generateSpecForStory(
   // throws (e.g. the placeholder write itself fails); see plan §59.
   const synth = input.synthesize ?? ((req) => defaultSynthesize(input.ctx, req));
   const sleep = input.sleepFn ?? defaultSleep;
+  const randomFn = input.randomFn ?? Math.random;
   const diffSummary = captureDiffSummary(input.projectPath);
   // v0.42.0 (AC-4) — retry cap is read PER CALL (not module-load) so vitest
   // can mutate `process.env.FORGE_SPEC_RETRY_ON_429` between tests.
   const retryOn429Cap = parseRetryOn429Cap(process.env.FORGE_SPEC_RETRY_ON_429);
+  // v0.42.1 — header-less fallback (default 30s), retry-count (default 2),
+  // jitter pct (default 10) read per-call from env. All cap-clamped by
+  // retryOn429Cap in the loop body below.
+  const retryOn429Fallback = parseRetryOn429Fallback(
+    process.env.FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC,
+  );
+  const retryOn429Attempts = parseRetryOn429Attempts(
+    process.env.FORGE_SPEC_RETRY_ON_429_ATTEMPTS,
+  );
+  const retryOn429JitterPct = parseRetryOn429JitterPct(
+    process.env.FORGE_SPEC_RETRY_ON_429_JITTER_PCT,
+  );
   // Initialise to a safe shape so the type-checker can prove definite
   // assignment after the retry loop. The shell-only path overwrites this
   // with placeholder bodies; the success path overwrites via the loop's
@@ -706,13 +838,25 @@ export async function generateSpecForStory(
   // file write is skipped just like the throw path so existing content is
   // preserved.
   let emptySections = false;
-  // v0.42.0 (AC-3) — retry-on-429 wrapper. One retry attempt max, gated by
-  // `FORGE_SPEC_RETRY_ON_429` (0 = disabled, default 60s cap, cap-clamped).
+  // v0.42.0 (AC-3) + v0.42.1 — retry-on-429 wrapper.
+  //
+  // Total attempts on persistent 429 = 1 initial + retryOn429Attempts retries.
+  // The legacy `FORGE_SPEC_RETRY_ON_429=0` kill-switch RETAINS PRECEDENCE
+  // over the new ATTEMPTS knob (AC-15): when cap is 0, attempts collapse to
+  // 1 regardless of ATTEMPTS value.
+  //
+  // Sleep duration per retry N (0-indexed):
+  //   - if `retry-after` header present + parseable: use that value
+  //   - else: exponential backoff = retryOn429Fallback * 2^N (default 30, 60, …)
+  //   - clamp to retryOn429Cap (default 60)
+  //   - apply ±retryOn429JitterPct% jitter via injected randomFn
+  //
   // SDK's `maxRetries: 0` (set in anthropic.ts) means this is THE only retry
   // layer — no SDK double-up.
   let synthThrew = false;
   let synthError: unknown = undefined;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const totalAttempts = retryOn429Cap > 0 ? 1 + retryOn429Attempts : 1;
+  for (let attempt = 0; attempt < totalAttempts; attempt++) {
     try {
       synthResult = await synth({
         storyId: input.storyId,
@@ -726,23 +870,34 @@ export async function generateSpecForStory(
     } catch (err) {
       synthThrew = true;
       synthError = err;
-      // Retry conditions: cap > 0 AND this is the first attempt AND error
-      // is a 429 RateLimitError. Everything else falls through to the
-      // existing catch handling (AC-3b: retry-exhaustion → no-overwrite).
+      // Retry conditions: cap > 0 AND we have more retries remaining AND
+      // error is a 429 RateLimitError. Everything else falls through to
+      // the existing catch handling (retry-exhaustion → no-overwrite).
       const isRateLimit = err instanceof Anthropic.RateLimitError;
-      if (retryOn429Cap > 0 && attempt === 0 && isRateLimit) {
+      const hasMoreRetries = attempt < totalAttempts - 1;
+      if (retryOn429Cap > 0 && hasMoreRetries && isRateLimit) {
         const retryAfterHeader = err.headers?.get("retry-after");
         const retryAfterSeconds = retryAfterHeader
           ? Number.parseInt(retryAfterHeader, 10)
           : 0;
-        // AC-5 — clamp to cap. Default 1s when header is missing / unparseable
-        // so a header-less 429 still backs off briefly rather than hammering.
+        // Retry-index N is 0-indexed: this is retry N=attempt (we're
+        // computing sleep for the upcoming retry, which is `attempt+1`-th
+        // synth invocation but the N=attempt-th retry).
+        const retryIndex = attempt;
+        const expBackoffSec = retryOn429Fallback * Math.pow(2, retryIndex);
+        // Header value wins when present + valid; otherwise exponential
+        // backoff fallback (default 30, 60, 120, …).
         const requestedSec =
           Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
             ? retryAfterSeconds
-            : 1;
-        const sleepSec = Math.min(requestedSec, retryOn429Cap);
-        await sleep(sleepSec * 1000);
+            : expBackoffSec;
+        const cappedSec = Math.min(requestedSec, retryOn429Cap);
+        const jitteredSec = applyJitter(
+          cappedSec,
+          retryOn429JitterPct,
+          randomFn,
+        );
+        await sleep(jitteredSec * 1000);
         continue;
       }
       break;
@@ -846,6 +1001,27 @@ export async function generateSpecForStory(
   // shell-only marker still belongs in the array — both signals are true).
   if (shellOnly) {
     warnings.push({ kind: "spec-gen-shell-only", message: shellOnlyMessage });
+
+    // v0.42.1 (AC-6 / AC-7) — additive-optional 429-specific exhaustion
+    // marker. Only emitted when the FINAL error in the retry loop was a
+    // RateLimitError (discriminator: non-429 exhaustion does NOT emit
+    // this kind — AC-7). Operator-actionable message points at the
+    // most-likely cause (concurrent OAuth bucket pressure) and lists
+    // three mitigations. P50 additive-optional pattern: legacy
+    // `spec-gen-shell-only` ALSO present in this branch, so consumers
+    // that don't know about the new kind still see the original warning.
+    if (synthError instanceof Anthropic.RateLimitError) {
+      warnings.push({
+        kind: "spec-gen-rate-limit-exhausted",
+        message:
+          `forge_evaluate retried ${retryOn429Attempts} times on HTTP 429 but the rate-limit window did not clear. ` +
+          `Likely cause: a concurrent OAuth token bucket consumer (e.g. Claude Code main session) is sharing the same bucket. ` +
+          `Mitigation: (a) wait 60-300 seconds for the rate-limit window to expire then re-run forge_evaluate; ` +
+          `(b) avoid concurrent forge_evaluate during heavy Claude Code activity; ` +
+          `(c) increase FORGE_SPEC_RETRY_ON_429_FALLBACK_SEC or FORGE_SPEC_RETRY_ON_429_ATTEMPTS if your workload tolerates longer waits. ` +
+          `The TECHNICAL-SPEC.md file was preserved (v0.42.0+ no-overwrite invariant).`,
+      });
+    }
 
     // F6 (v0.40.5) — macOS-only diagnostic. When the run fell through to
     // shell-only on darwin, do a cheap exit-code-only probe of macOS

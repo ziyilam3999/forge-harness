@@ -251,6 +251,19 @@ export type SpecGeneratorWarning =
       // succeeded but produced nothing usable. Plan AC-1b.
       kind: "spec-gen-empty-sections";
       message: string;
+    }
+  | {
+      // v0.42.1 — emitted ALONGSIDE `spec-gen-shell-only` when the retry
+      // loop exhausted on an HTTP 429 `RateLimitError` specifically (not
+      // other shell-only failure modes). Additive-optional per P50:
+      // legacy consumers that don't know about this kind still see the
+      // `spec-gen-shell-only` warning in the same array; new consumers
+      // can branch on this kind for operator-actionable mitigation
+      // guidance (concurrent OAuth bucket pressure, env-var knobs).
+      // v0.42.0's no-overwrite invariant still applies — the
+      // TECHNICAL-SPEC file is preserved when this warning fires.
+      kind: "spec-gen-rate-limit-exhausted";
+      message: string;
     };
 
 /**
@@ -295,6 +308,10 @@ export const SpecGeneratorWarningSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("spec-gen-empty-sections"),
+    message: z.string(),
+  }),
+  z.object({
+    kind: z.literal("spec-gen-rate-limit-exhausted"),
     message: z.string(),
   }),
 ]);

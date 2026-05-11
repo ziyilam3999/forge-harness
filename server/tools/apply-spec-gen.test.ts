@@ -35,6 +35,22 @@ function readSpec(tmp: string): string {
 }
 
 /**
+ * v0.43.2 (I1 fold) — seed a fake brief-emit run record under .forge/runs/
+ * so handleApplySpecGen's pre-validation probe finds it. Without this, the
+ * pre-validation returns isError before any merge work happens.
+ */
+function seedRunRecord(tmp: string, runId: string): void {
+  const runsDir = join(tmp, ".forge", "runs");
+  mkdirSync(runsDir, { recursive: true });
+  const filename = `forge_evaluate-2026-05-11T20-00-00-000Z-${runId}.json`;
+  writeFileSync(
+    join(runsDir, filename),
+    JSON.stringify({ tool: "forge_evaluate", runId }, null, 2),
+    "utf-8",
+  );
+}
+
+/**
  * Seed a TECHNICAL-SPEC.md with one story section. Used by AC-5 and AC-6
  * to verify the preserve-invariant + hand-author race-window guard.
  */
@@ -152,6 +168,7 @@ describe("forge_apply_spec_gen — AC-5 v0.42.0 preserve-invariant", () => {
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "forge-apply-spec-gen-"));
     seedTechSpec(tmp, {});
+    seedRunRecord(tmp, "abcd");
   });
   afterEach(() => {
     rmSync(tmp, { recursive: true, force: true });
@@ -216,6 +233,10 @@ describe("forge_apply_spec_gen — AC-6 hand-author race-window guard", () => {
     // sub-sections are NOT hand-authored — the caller's content for those
     // should overwrite while api-contracts stays preserved.
     seedTechSpec(tmp, { handAuthored: true });
+    // v0.43.2 (I1 fold) — seed brief-emit run record so pre-validation passes.
+    // The AC-14 sub-test re-creates tmp from scratch and generates its own
+    // runId via handleEvaluate, so it doesn't depend on this seed.
+    seedRunRecord(tmp, "abcd");
   });
   afterEach(() => {
     rmSync(tmp, { recursive: true, force: true });
@@ -344,5 +365,79 @@ describe("forge_apply_spec_gen — AC-6 hand-author race-window guard", () => {
     expect(afterBody).toContain("caller-generated test bullet, SHOULD land");
     // The body changed (despite api-contracts being preserved verbatim) because
     // the other three sub-sections changed.
+  });
+});
+
+// ── v0.43.2 (I1 fold) — runId pre-validation (nonexistent runId case) ───
+
+describe("forge_apply_spec_gen — v0.43.2 runId pre-validation (I1 fold)", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-apply-spec-gen-v0432-"));
+    seedTechSpec(tmp, {});
+    // INTENTIONALLY DO NOT seed a brief-emit run record — the pre-validation
+    // probe should fail before any spec mutation happens.
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("syntactically-valid but nonexistent runId returns isError + leaves spec bytes unchanged", async () => {
+    const before = readSpec(tmp);
+    const beforeSha = sha256(before);
+
+    const result = await handleApplySpecGen({
+      runId: "dead", // 4-char hex, Zod-valid, but no brief-emit record exists
+      storyId: "US-01",
+      projectPath: tmp,
+      sections: {
+        "api-contracts": "- `newApi`: caller content that should NOT land",
+        "data-models": "- `NewShape`: caller content that should NOT land",
+        invariants: "- caller invariant that should NOT land",
+        "test-surface": "- caller test that should NOT land",
+      },
+      contracts: [],
+      tokens: { inputTokens: 100, outputTokens: 50 },
+    });
+
+    // Pre-validation fired: isError set, error text mentions the missing record.
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain(
+      "no brief-emit run record found for runId=dead",
+    );
+
+    // Spec file bytes unchanged — the spec mutation never happened.
+    const after = readSpec(tmp);
+    expect(sha256(after)).toBe(beforeSha);
+  });
+
+  it(".forge/runs/ directory entirely missing → same isError path", async () => {
+    // Re-create tmp without the .forge/runs/ dir at all.
+    rmSync(tmp, { recursive: true, force: true });
+    tmp = mkdtempSync(join(tmpdir(), "forge-apply-spec-gen-v0432-noruns-"));
+    seedTechSpec(tmp, {});
+    // Deliberately do NOT create .forge/runs/.
+
+    const before = readSpec(tmp);
+    const beforeSha = sha256(before);
+
+    const result = await handleApplySpecGen({
+      runId: "abcd",
+      storyId: "US-01",
+      projectPath: tmp,
+      sections: {
+        "api-contracts": "(none)",
+        "data-models": "(none)",
+        invariants: "(none)",
+        "test-surface": "(none)",
+      },
+      contracts: [],
+      tokens: { inputTokens: 0, outputTokens: 0 },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("no brief-emit run record found for runId=abcd");
+    const after = readSpec(tmp);
+    expect(sha256(after)).toBe(beforeSha);
   });
 });

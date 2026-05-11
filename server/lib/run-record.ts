@@ -550,8 +550,23 @@ export async function findAndMergeRunRecord(
     if (patch.generatedDocs !== undefined) {
       parsed.generatedDocs = patch.generatedDocs;
     }
-    if (patch.totalCostUsd !== undefined) {
-      parsed.totalCostUsd = patch.totalCostUsd;
+    // v0.43.2 (I1 fold) — sum-not-overwrite for totalCostUsd. The brief-emit
+    // event in forge_evaluate records a shell-AC cost (the eval LLM call); a
+    // subsequent forge_apply_spec_gen patch should ADD the spec-gen leg, not
+    // clobber the shell-AC portion. Explicit null and undefined patches are
+    // no-ops — reset is intentionally NOT a supported operation (forge today
+    // never emits null; making reset a no-op closes a future-bug hatch where
+    // a regression in the producer would silently zero the rollup).
+    //
+    // Concurrency: the read-modify-write here is NOT atomic — no file lock.
+    // Today's MCP caller is single-threaded per runId (forge_evaluate is the
+    // sole producer of brief-emit events; the directive round-trip has one
+    // consumer), so concurrent applies on the same runId cannot happen. If a
+    // future parallel-spec-gen feature breaks that assumption, this seam
+    // needs a file lock or transactional rewrite.
+    if (typeof patch.totalCostUsd === "number") {
+      const existing = typeof parsed.totalCostUsd === "number" ? parsed.totalCostUsd : 0;
+      parsed.totalCostUsd = existing + patch.totalCostUsd;
     }
     await writeFile(filePath, JSON.stringify(parsed, null, 2), "utf-8");
     return filePath;

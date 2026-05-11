@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   writeRunRecord,
+  findAndMergeRunRecord,
   type RunRecord,
   GeneratedDocsSchema,
   SpecGeneratorWarningSchema,
@@ -264,5 +265,77 @@ describe("GeneratedDocsSchema (AC-10) — warnings is a typed array, default []"
     const parsed = GeneratedDocsSchema.parse(lenient);
     expect(parsed.warnings).toHaveLength(1);
     expect(parsed.warnings[0].kind).toBe("no-vocabulary");
+  });
+});
+
+// ── v0.43.2 (I1 fold) — findAndMergeRunRecord totalCostUsd sum-not-overwrite ─
+
+describe("findAndMergeRunRecord — totalCostUsd sum (v0.43.2 I1 fold)", () => {
+  async function writeFakeRunRecord(
+    projectPath: string,
+    runId: string,
+    body: Record<string, unknown>,
+  ): Promise<string> {
+    const runsDir = join(projectPath, ".forge", "runs");
+    await mkdir(runsDir, { recursive: true });
+    const filename = `forge_evaluate-2026-05-11T20-00-00-000Z-${runId}.json`;
+    const filePath = join(runsDir, filename);
+    await writeFile(filePath, JSON.stringify(body, null, 2), "utf-8");
+    return filePath;
+  }
+
+  it("sums totalCostUsd when both existing and patch are numeric (primary case)", async () => {
+    const runId = "abcd";
+    const shellAcCost = 0.0042;
+    const specGenCost = 0.013;
+    await writeFakeRunRecord(tempDir, runId, {
+      tool: "forge_evaluate",
+      totalCostUsd: shellAcCost,
+    });
+
+    const merged = await findAndMergeRunRecord(tempDir, runId, {
+      totalCostUsd: specGenCost,
+    });
+
+    expect(merged).not.toBeNull();
+    const raw = await readFile(merged as string, "utf-8");
+    const parsed = JSON.parse(raw) as { totalCostUsd: number };
+    expect(parsed.totalCostUsd).toBeCloseTo(shellAcCost + specGenCost, 10);
+  });
+
+  it("treats existing-undefined as 0 when summing (patch becomes the first leg)", async () => {
+    const runId = "bbbb";
+    const specGenCost = 0.007;
+    await writeFakeRunRecord(tempDir, runId, {
+      tool: "forge_evaluate",
+      // no totalCostUsd field present at all
+    });
+
+    const merged = await findAndMergeRunRecord(tempDir, runId, {
+      totalCostUsd: specGenCost,
+    });
+
+    expect(merged).not.toBeNull();
+    const raw = await readFile(merged as string, "utf-8");
+    const parsed = JSON.parse(raw) as { totalCostUsd: number };
+    expect(parsed.totalCostUsd).toBeCloseTo(specGenCost, 10);
+  });
+
+  it("is a no-op when patch.totalCostUsd is null (does NOT reset existing value)", async () => {
+    const runId = "cccc";
+    const existing = 0.0099;
+    await writeFakeRunRecord(tempDir, runId, {
+      tool: "forge_evaluate",
+      totalCostUsd: existing,
+    });
+
+    const merged = await findAndMergeRunRecord(tempDir, runId, {
+      totalCostUsd: null,
+    });
+
+    expect(merged).not.toBeNull();
+    const raw = await readFile(merged as string, "utf-8");
+    const parsed = JSON.parse(raw) as { totalCostUsd: number };
+    expect(parsed.totalCostUsd).toBeCloseTo(existing, 10);
   });
 });

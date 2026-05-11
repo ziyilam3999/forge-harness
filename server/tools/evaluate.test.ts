@@ -1378,7 +1378,7 @@ describe("v0.43.0 — callerAction directive flow on PASS path", () => {
     expect(mockedCallClaude).not.toHaveBeenCalled();
   });
 
-  it("AC-3: specGenBrief carries the required 10 fields (storyId, runId, specPath, affectedPaths, systemPrompt, userPrompt, vocabularyPrompt, diffSummary, evalReport, expectedSections, currentSectionContent)", async () => {
+  it("AC-3: specGenBrief carries the required 11 fields (storyId, runId, specPath, affectedPaths, systemPrompt, userPrompt, vocabularyPrompt, diffSummary, evalReport, expectedSections, currentSectionContent) plus optional gitSha", async () => {
     mockedEvaluateStory.mockResolvedValueOnce(makeEvalReport({ verdict: "PASS" }));
     const result = await handleEvaluate({
       storyId: "US-01",
@@ -1408,6 +1408,11 @@ describe("v0.43.0 — callerAction directive flow on PASS path", () => {
     expect(brief.currentSectionContent["data-models"]).toBeDefined();
     expect(brief.currentSectionContent.invariants).toBeDefined();
     expect(brief.currentSectionContent["test-surface"]).toBeDefined();
+    // gitSha field is on the brief shape; value may be undefined when
+    // captureGitSha can't read a sha (e.g. the path is not a repo).
+    // README §"Handling the directive" step 5 requires the caller to echo
+    // this back via forge_apply_spec_gen so lastGitSha is preserved.
+    expect("gitSha" in brief).toBe(true);
   });
 
   it("AC-3b: hand-author marker on on-disk content → NO directive AND NO brief AND warning surfaces on both surfaces", async () => {

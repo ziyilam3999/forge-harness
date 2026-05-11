@@ -1411,6 +1411,15 @@ export interface SpecGenBriefPayload {
   evalReport: EvalReport;
   expectedSections: readonly ["api-contracts", "data-models", "invariants", "test-surface"];
   currentSectionContent: Record<SectionName, string>;
+  /**
+   * v0.43.0 — git HEAD sha captured at brief-build time. The caller MUST echo
+   * this back through `forge_apply_spec_gen({gitSha})` so the spec front-matter's
+   * `lastGitSha` field reflects the PASS-verdict commit (v0.35.1 AC-2 contract).
+   * Optional because `captureGitSha` is best-effort (missing repo / missing
+   * binary returns undefined). When absent on the brief, the apply tool stamps
+   * `lastGitSha: "unknown"`.
+   */
+  gitSha?: string;
 }
 
 /**
@@ -1463,6 +1472,7 @@ export function buildSpecGenBrief(
     evalReport: input.evalReport,
     expectedSections: REQUIRED_SECTIONS,
     currentSectionContent,
+    gitSha: input.gitSha,
   };
 }
 

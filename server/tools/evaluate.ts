@@ -539,6 +539,7 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
               "test-surface",
             ],
             currentSectionContent: briefPayload.currentSectionContent,
+            gitSha: briefPayload.gitSha,
           };
           // Brief-emit event lands in run record with structural marker
           // (`specGenMode: "caller-action"`) so observability shows the

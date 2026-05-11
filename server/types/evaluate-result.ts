@@ -83,6 +83,15 @@ export interface SpecGenBrief {
     invariants: string;
     "test-surface": string;
   };
+  /**
+   * v0.43.0 — git HEAD sha captured at brief-build time. The caller MUST echo
+   * this back through `forge_apply_spec_gen({gitSha})` so the spec front-matter's
+   * `lastGitSha` field reflects the PASS-verdict commit (v0.35.1 AC-2 contract).
+   * Optional because `captureGitSha` is best-effort (missing repo / missing
+   * `git` binary / shallow clone all simply omit the field). When absent on
+   * the brief, the apply tool stamps `lastGitSha: "unknown"`.
+   */
+  gitSha?: string;
 }
 
 /**

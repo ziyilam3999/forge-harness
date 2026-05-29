@@ -22,7 +22,7 @@
  */
 
 import { z } from "zod";
-import { readdir } from "node:fs/promises";
+import { readdir, access } from "node:fs/promises";
 import { join } from "node:path";
 import type { EvalReport } from "../types/eval-report.js";
 import {
@@ -108,6 +108,12 @@ export const applySpecGenInputSchema = {
     .describe(
       "Optional: 40-char hex git SHA captured at evaluate-time. Stamps onto the spec front-matter as lastGitSha.",
     ),
+  runRecordPath: z
+    .string()
+    .optional()
+    .describe(
+      "Optional: absolute path to the brief-emit run record file (e.g. /project/.forge/runs/forge_evaluate-{ts}-{runId}.json). When supplied, the readdir probe is skipped and this path is used directly for the pre-validation check and merge. Callers that already hold the path (e.g. from a prior forge_evaluate response) should supply it to avoid the readdir round-trip.",
+    ),
 };
 
 // v0.36.0 Phase D (AC-D5) named-export convention.
@@ -129,6 +135,7 @@ type ApplySpecGenInput = {
   affectedPaths?: string[];
   evalReport?: unknown;
   gitSha?: string;
+  runRecordPath?: string;
 };
 
 type McpResponse = {
@@ -148,11 +155,21 @@ export async function handleApplySpecGen(
   // file write, with only a log-and-continue warning when findAndMergeRunRecord
   // (line ~210 below) fails to locate the record. Closing the disk-mutates-
   // without-observability gap is the v0.43.2 correctness win.
+  //
+  // E3 optimisation: when the caller supplies `runRecordPath` directly (e.g.
+  // from the forge_evaluate response), skip the readdir probe entirely and
+  // do a single stat-equivalent access check instead.
   const runsDir = join(input.projectPath, ".forge", "runs");
   let runRecordExists = false;
   try {
-    const entries = await readdir(runsDir);
-    runRecordExists = entries.some((e) => e.endsWith(`-${input.runId}.json`));
+    if (input.runRecordPath !== undefined) {
+      // Fast path: caller already knows the path — just check it exists.
+      await access(input.runRecordPath);
+      runRecordExists = true;
+    } else {
+      const entries = await readdir(runsDir);
+      runRecordExists = entries.some((e) => e.endsWith(`-${input.runId}.json`));
+    }
   } catch {
     runRecordExists = false;
   }

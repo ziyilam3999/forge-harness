@@ -11,7 +11,7 @@
  *     brief-emit and merge time is preserved; the caller's content for
  *     OTHER sub-sections still overwrites.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   mkdtempSync,
   rmSync,
@@ -24,7 +24,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { handleApplySpecGen, applySpecGenInputSchema } from "./apply-spec-gen.js";
+import { findAndMergeRunRecord } from "../lib/run-record.js";
 import { z } from "zod";
+
+// Top-level spy on findAndMergeRunRecord so individual tests can override its
+// return value (e.g. race-window test). Default: call through to the real impl.
+vi.mock("../lib/run-record.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/run-record.js")>();
+  return {
+    ...actual,
+    findAndMergeRunRecord: vi.fn(actual.findAndMergeRunRecord),
+  };
+});
 
 function sha256(buf: string): string {
   return createHash("sha256").update(buf).digest("hex");
@@ -530,5 +541,66 @@ describe("forge_apply_spec_gen — v0.43.2 runId pre-validation (I1 fold)", () =
     expect(result.content[0].text).toContain("no brief-emit run record found for runId=abcd");
     const after = readSpec(tmp);
     expect(sha256(after)).toBe(beforeSha);
+  });
+});
+
+// ── Race-window: record wiped between probe and merge ────────────────────────
+//
+// Scenario: the readdir pre-validation probe FINDS the brief-emit record
+// (runRecordExists = true, no isError), but by the time findAndMergeRunRecord
+// runs the file has been wiped (returns null). The spec merge itself MUST
+// still succeed (the file bytes change), and a console.error warning MUST fire
+// to surface the degraded-observability case.
+
+describe("forge_apply_spec_gen — race-window: record wiped between probe and merge", () => {
+  let tmp: string;
+  const mockedFindAndMerge = vi.mocked(findAndMergeRunRecord);
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "forge-apply-spec-gen-race-"));
+    seedTechSpec(tmp, {});
+    seedRunRecord(tmp, "abcd");
+    // Reset to real impl before each test so other suites are unaffected.
+    mockedFindAndMerge.mockRestore();
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+    mockedFindAndMerge.mockRestore();
+  });
+
+  it("spec mutated + console.error warning when record wiped between probe and merge", async () => {
+    // Simulate the race: findAndMergeRunRecord returns null (file gone after probe).
+    mockedFindAndMerge.mockResolvedValueOnce(null);
+
+    const before = readSpec(tmp);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await handleApplySpecGen({
+      runId: "abcd",
+      storyId: "US-01",
+      projectPath: tmp,
+      sections: {
+        "api-contracts": "- `raceApi`: caller bullet written during race",
+        "data-models": "- `RaceShape`: caller data model",
+        invariants: "- caller invariant during race",
+        "test-surface": "- caller test during race",
+      },
+      contracts: [],
+      tokens: { inputTokens: 100, outputTokens: 50 },
+    });
+
+    // Merge succeeded — no isError.
+    expect(result.isError).toBeUndefined();
+
+    // Spec bytes CHANGED — the merge actually ran despite the race.
+    const after = readSpec(tmp);
+    expect(sha256(after)).not.toBe(sha256(before));
+    expect(after).toContain("caller bullet written during race");
+
+    // Warning fired — observability degradation is surfaced.
+    const calls = errSpy.mock.calls.map((args) => args.join(" "));
+    expect(calls.some((c) => c.includes("could not locate run record"))).toBe(true);
+
+    errSpy.mockRestore();
   });
 });

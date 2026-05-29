@@ -572,7 +572,7 @@ export async function findAndMergeRunRecord(
     // never emits null; making reset a no-op closes a future-bug hatch where
     // a regression in the producer would silently zero the rollup).
     //
-    // Concurrency: the read-modify-write here is NOT atomic — no file lock.
+    // TODO(parallel-spec-gen): Concurrency: the read-modify-write here is NOT atomic — no file lock.
     // Today's MCP caller is single-threaded per runId (forge_evaluate is the
     // sole producer of brief-emit events; the directive round-trip has one
     // consumer), so concurrent applies on the same runId cannot happen. If a

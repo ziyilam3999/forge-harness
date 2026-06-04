@@ -42,7 +42,8 @@ const AGENT_FIRST_HEADER_RE =
  */
 function splitFrontMatter(text) {
   // Normalise CRLF → LF for the split, then operate on LF-only text.
-  const normalised = text.replace(/\r\n/g, "\n");
+  // Strip UTF-8 BOM if present (e.g. from Windows editors).
+  const normalised = text.replace(/^﻿/, "").replace(/\r\n/g, "\n");
   // Strip the optional agent-first header. Files written before Bundle 1a
   // skip this strip and continue to validate.
   const stripped = normalised.replace(AGENT_FIRST_HEADER_RE, "");

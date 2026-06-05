@@ -13,12 +13,10 @@
  * Modeled on `server/smoke/mcp-surface.test.ts`, the existing live-transport
  * smoke test that ships in this repo.
  *
- * Pre-requisite: the MCP server's render-loop interval must NOT be the
- * production [15_000, 30_000] ms. We pass `FORGE_LOOP_FAST_INTERVAL_MS`
- * — but the production loop module does not honor that env var by design,
- * so the test waits 35s (one production tick at 30s + jitter slack). This
- * matches the AC-3b plan body's `setTimeout(35_000)` and keeps the test
- * exercising the real production cadence rather than a fast-test seam.
+ * Pre-requisite: the test waits 35s to match the production 30s tick rate
+ * (one production tick at 30s + jitter slack). This matches the AC-3b plan
+ * body's `setTimeout(35_000)` and keeps the test exercising the real
+ * production cadence rather than a fast-test seam.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

@@ -296,4 +296,58 @@ describe("handleEvaluate — critic mode", () => {
 
     expect(mockedWriteRunRecord).not.toHaveBeenCalled();
   });
+
+  it("all-errored scenario: critic outcome written as 'failure' [AC-05]", async () => {
+    const planA = join(tmpRoot, "plan-a.json");
+    const planB = join(tmpRoot, "plan-b.json");
+    // Both plans have invalid JSON → both result in per-plan errors, no LLM calls.
+    writeFileSync(planA, "not valid json");
+    writeFileSync(planB, "also not valid json");
+
+    const result = await handleEvaluate({
+      evaluationMode: "critic",
+      planPaths: [planA, planB],
+      projectPath,
+    });
+
+    expect(result.isError).not.toBe(true);
+    const report = JSON.parse(result.content[0]!.text) as {
+      results: Array<{ error?: string }>;
+    };
+    expect(report.results).toHaveLength(2);
+    expect(report.results[0]!.error).toBeDefined();
+    expect(report.results[1]!.error).toBeDefined();
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const [, record] = mockedWriteRunRecord.mock.calls[0]!;
+    expect(record.outcome).toBe("failure");
+  });
+
+  it("mixed success/error scenario: critic outcome written as 'partial' [AC-05]", async () => {
+    const planA = join(tmpRoot, "plan-a.json");
+    const planB = join(tmpRoot, "plan-b.json");
+    writeFileSync(planA, JSON.stringify(makeValidPlanObject("US-01")));
+    // Second plan has invalid JSON → per-plan error.
+    writeFileSync(planB, "not valid json");
+
+    mockedCallClaude.mockResolvedValueOnce(
+      makeCallResult({ findings: [] }),
+    );
+
+    const result = await handleEvaluate({
+      evaluationMode: "critic",
+      planPaths: [planA, planB],
+      projectPath,
+    });
+
+    expect(result.isError).not.toBe(true);
+    const report = JSON.parse(result.content[0]!.text) as {
+      results: Array<{ error?: string }>;
+    };
+    expect(report.results).toHaveLength(2);
+    expect(report.results[0]!.error).toBeUndefined();
+    expect(report.results[1]!.error).toBeDefined();
+    expect(mockedWriteRunRecord).toHaveBeenCalledTimes(1);
+    const [, record] = mockedWriteRunRecord.mock.calls[0]!;
+    expect(record.outcome).toBe("partial");
+  });
 });

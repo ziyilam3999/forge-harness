@@ -347,7 +347,8 @@ interface ParsedSpec {
 }
 
 function parseSpec(text: string): ParsedSpec {
-  const normalised = text.replace(/\r\n/g, "\n");
+  // Strip UTF-8 BOM if present (e.g. from Windows editors).
+  const normalised = text.replace(/^﻿/, "").replace(/\r\n/g, "\n");
   // Skip the agent-first header (Bundle 1a) if present. The header lives BEFORE
   // the YAML front-matter fence; older spec files written prior to v0.40.0
   // start directly with `---\n` and pass through unchanged.

@@ -142,15 +142,18 @@ else
   else
     ac9_failures=0
     diff_out=$(git diff origin/master..HEAD 2>/dev/null || true)
+    _ac9_tmp=$(mktemp)
+    printf "%s\n" "$diff_out" > "$_ac9_tmp"
     while IFS= read -r token; do
       [ -z "$token" ] && continue
-      if printf "%s\n" "$diff_out" | grep -i -F -e "$token" >/dev/null 2>&1; then
+      if grep -i -F -e "$token" "$_ac9_tmp" >/dev/null 2>&1; then
         printf "    [token: redacted] MATCH FOUND in PR diff\n"
         ac9_failures=$((ac9_failures + 1))
       else
         printf "    [token: redacted] no match\n"
       fi
     done <<<"$tokens"
+    rm -f "$_ac9_tmp"
     if [ "$ac9_failures" -eq 0 ]; then
       pass "AC-9: no employer-brand tokens in PR diff"
     else

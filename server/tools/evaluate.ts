@@ -1174,6 +1174,28 @@ async function handleCriticEval(input: EvaluateInput): Promise<McpResponse> {
     }
   }
 
+  // Guard: no plan files resolved → return a clear "no plans" outcome rather
+  // than falling through to the empty-loop path which yields a misleading
+  // failure verdict (JS `[].every(...)` is vacuously true).
+  if (resolvedPaths.length === 0) {
+    const emptyReport: CriticEvalReport = {
+      evaluationMode: "critic",
+      results: [],
+    };
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            { ...emptyReport, summary: "no plans to evaluate" },
+            null,
+            2,
+          ),
+        },
+      ],
+    };
+  }
+
   const results: CriticEvalReport["results"] = [];
 
   for (const planPath of resolvedPaths) {

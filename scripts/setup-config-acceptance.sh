@@ -23,11 +23,7 @@ cd "$REPO_ROOT"
 # This is the invariant for AC-9: "host config is byte-identical before/after."
 # Uses node to avoid sha256sum/shasum portability traps.
 HOST_CLAUDE_JSON="$HOME/.claude.json"
-if [ -f "$HOST_CLAUDE_JSON" ]; then
-  HOST_CLAUDE_JSON_BEFORE_SHA256=$(node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"));' "$HOST_CLAUDE_JSON")
-else
-  HOST_CLAUDE_JSON_BEFORE_SHA256="ABSENT"
-fi
+HOST_CLAUDE_JSON_BEFORE_SHA256=$(hash_or_absent "$HOST_CLAUDE_JSON")
 
 # ---------- Scratch HOME setup (bridges Git Bash / MSYS path mismatch) ----------
 # Git Bash's /tmp maps to $USERPROFILE/AppData/Local/Temp, which Node sees as
@@ -57,6 +53,17 @@ ok() { echo "  ✓ $1"; PASS_COUNT=$((PASS_COUNT + 1)); }
 fail() { echo "  ✗ $1"; FAIL=1; }
 
 ac() { echo; echo "=== $1 ==="; }
+
+# Return the sha256 hex of FILE, or "ABSENT" if the file does not exist.
+# Single-sources the ABSENT sentinel so capture and AC-9 compare stay in sync.
+hash_or_absent() {
+  local file="$1"
+  if [ -f "$file" ]; then
+    node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"));' "$file"
+  else
+    echo "ABSENT"
+  fi
+}
 
 # ---------- Pre-flight ----------
 ac "Pre-flight"
@@ -266,12 +273,7 @@ fi
 # ABSENT if missing). Re-capture now and compare. Any divergence means the
 # wrapper's scratch-HOME isolation leaked — fail loud.
 ac "AC-9 — host ~/.claude.json untouched"
-if [ -f "$HOST_CLAUDE_JSON" ]; then
-  # Compute sha256 of host ~/.claude.json after all scratch-HOME subprocess runs.
-  HOST_CLAUDE_JSON_AFTER_SHA256=$(node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"));' "$HOST_CLAUDE_JSON")
-else
-  HOST_CLAUDE_JSON_AFTER_SHA256="ABSENT"
-fi
+HOST_CLAUDE_JSON_AFTER_SHA256=$(hash_or_absent "$HOST_CLAUDE_JSON")
 if [ "$HOST_CLAUDE_JSON_BEFORE_SHA256" = "$HOST_CLAUDE_JSON_AFTER_SHA256" ]; then
   ok "AC-9 host ~/.claude.json unchanged (sha256 before=after)"
 else

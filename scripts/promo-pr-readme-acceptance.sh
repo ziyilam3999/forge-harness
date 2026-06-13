@@ -146,11 +146,12 @@ else
     printf "%s\n" "$diff_out" > "$_ac9_tmp"
     while IFS= read -r token; do
       [ -z "$token" ] && continue
+      hash=$(printf "%s" "$token" | sha1sum | cut -c1-6)
       if grep -i -F -e "$token" "$_ac9_tmp" >/dev/null 2>&1; then
-        printf "    [token: redacted] MATCH FOUND in PR diff\n"
+        printf "    [token: redacted #%s] MATCH FOUND in PR diff\n" "$hash"
         ac9_failures=$((ac9_failures + 1))
       else
-        printf "    [token: redacted] no match\n"
+        printf "    [token: redacted #%s] no match\n" "$hash"
       fi
     done <<<"$tokens"
     rm -f "$_ac9_tmp"

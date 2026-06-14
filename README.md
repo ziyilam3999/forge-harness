@@ -35,6 +35,25 @@ cd forge-harness
 
 Then restart Claude Code. The forge tools will appear in your tool list.
 
+`./setup.sh` also installs the **`/prd` skill** into your global Claude Code skills directory (`~/.claude/skills/prd/`), so `/prd` is available in every project. `/prd` is the companion that authors `forge_plan`'s input — it runs a guided product diagnostic and writes a PRD, the vision doc `forge_plan` turns into an execution plan.
+
+## From PRD to plan
+
+`/prd` and `forge_plan` are a two-step flow: `/prd` writes the PRD, `forge_plan` turns it into a structured execution plan.
+
+1. **Author the PRD.** In Claude Code, run `/prd`. It runs a product diagnostic (challenges your premise, validates demand, scopes the narrowest wedge), then writes the PRD to `PRD.md` (default).
+2. **Hand the PRD to `forge_plan`.** Pass the PRD's contents as the vision doc. Lead with the master tier to decompose it into phases:
+
+   ```javascript
+   forge_plan({ documentTier: "master", visionDoc: <contents of PRD.md> })
+   ```
+
+   Or, for a single focused plan, pass it as `intent`:
+
+   ```javascript
+   forge_plan({ intent: <contents of PRD.md> })
+   ```
+
 ## Tools
 
 | Tool | What It Does | LLM? | Phase |

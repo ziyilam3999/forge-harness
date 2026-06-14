@@ -684,7 +684,7 @@ function renderHeader(
     return `
 <div class="top-bar">
   <div class="top-bar-left">
-    <div class="logo">Hive Mind <span>Forge</span><span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
+    <div class="logo"><span>forge</span>-harness<span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
     <div class="phase-tag">no brief</div>
     ${declarationHtml}
   </div>
@@ -739,7 +739,7 @@ function renderHeader(
   return `
 <div class="top-bar">
   <div class="top-bar-left">
-    <div class="logo">Hive Mind <span>Forge</span><span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
+    <div class="logo"><span>forge</span>-harness<span class="logo-divider">/</span><span class="logo-sub">Coordinate</span></div>
     <div class="phase-tag">${escapeHtml(brief.status)}</div>
     ${declarationHtml}
   </div>

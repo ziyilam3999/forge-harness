@@ -22,4 +22,8 @@ echo "forge setup: compiling TypeScript..."
 echo "forge setup: registering MCP server..."
 node "$SCRIPT_DIR/scripts/setup-config.cjs" "$SCRIPT_DIR"
 
-echo "forge setup: done. Restart Claude Code to pick up the forge tools."
+# Install bundled skills (the /prd skill) into the global Claude Code skills dir
+echo "forge setup: installing skills..."
+node "$SCRIPT_DIR/scripts/install-skills.cjs" "$SCRIPT_DIR"
+
+echo "forge setup: done. Restart Claude Code to pick up the forge tools and the /prd skill."

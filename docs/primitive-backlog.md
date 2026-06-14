@@ -320,6 +320,11 @@ Key principle: **files canonical, SQL derived.** DB corruption is a non-event (`
 
 **Decision:** Ship one public GitHub repo containing forge-harness MCP server + skills (`/prd`, `/prototype`, `/recall`) + indexer CLI + docs + examples. One-command install via `setup.sh`.
 
+**Status (reconciled 2026-06-14, task #907):**
+- **`/prd` — SHIPPED / bundled.** Lives at `skills/prd/`, installed into `~/.claude/skills/prd/` by `setup.sh` via `scripts/install-skills.cjs`. It is the front door that authors `forge_plan`'s input (see README "From PRD to plan").
+- **`/prototype` — DEFERRED (roadmap-only, not built).** No skill exists yet; bundle when it does.
+- **`/recall` — DEFERRED (roadmap-only, not built).** No skill exists yet; bundle when it does.
+
 **Full design:** `.ai-workspace/plans/2026-04-09-forge-memory-ui-package-design.md` Part C
 
 ---

@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.46.0](https://github.com/ziyilam3999/forge-harness/compare/v0.45.0...v0.46.0) (2026-06-14)
+
+### Features
+
+- bundle the `/prd` skill into the public repo — a guided product-diagnostic + requirements interview that writes a PRD ready for `forge_plan`, installed globally via `setup.sh` ([#580](https://github.com/ziyilam3999/forge-harness/pull/580))
+
+### Bug Fixes
+
+- setup-config-acceptance: `ABSENT` sentinel duplicated across capture + AC-9 compare ([#577](https://github.com/ziyilam3999/forge-harness/pull/577))
+- handleCriticEval: empty-plans edge case yields misleading `failure` outcome ([#578](https://github.com/ziyilam3999/forge-harness/pull/578))
+- wrapper: redacted token verdict lines lack stable hash for triage ([#579](https://github.com/ziyilam3999/forge-harness/pull/579))
+- add test coverage for critic outcome `failure` and `partial` ([#574](https://github.com/ziyilam3999/forge-harness/pull/574))
+- use temp-file to avoid SIGPIPE noise in AC-9 privacy grep loop ([#576](https://github.com/ziyilam3999/forge-harness/pull/576))
+- defensive UTF-8 BOM strip in parseSpec and splitFrontMatter ([#571](https://github.com/ziyilam3999/forge-harness/pull/571))
+- relax AC-1 allowlist date from 2026-04-25 to any YYYY-MM-DD ([#573](https://github.com/ziyilam3999/forge-harness/pull/573))
+- v0.43.2 ship-review enhancements: race-window test coverage + perf optimization ([#569](https://github.com/ziyilam3999/forge-harness/pull/569))
+
+### Miscellaneous
+
+- drop dangling FORGE_LOOP_FAST_INTERVAL_MS reference in AC-3b docstring ([#570](https://github.com/ziyilam3999/forge-harness/pull/570))
+
 ## [0.45.0](https://github.com/ziyilam3999/forge-harness/compare/v0.44.0...v0.45.0) (2026-05-11)
 
 Adds optional `tokensEstimated?: boolean` field on `applySpecGenInputSchema` so callers like `/forge-execute` v1.1.0 — which compute token usage via byte/4 estimate because Claude Code sessions can't observe their own LLM usage — can mark their token reports as approximate. Threads through to `RunRecord.generatedDocs.tokensEstimated` so cost-audit consumers can label `totalCostUsd` as estimated. Closes PR #755 follow-up (ai-brain). Additive-optional per P50; legacy callers unchanged.

@@ -24,6 +24,6 @@ node "$SCRIPT_DIR/scripts/setup-config.cjs" "$SCRIPT_DIR"
 
 # Install bundled skills (the /prd skill) into the global Claude Code skills dir
 echo "forge setup: installing skills..."
-node "$SCRIPT_DIR/scripts/install-skills.cjs" "$SCRIPT_DIR"
+node "$SCRIPT_DIR/scripts/install-skills.cjs" "$SCRIPT_DIR" || exit 1
 
 echo "forge setup: done. Restart Claude Code to pick up the forge tools and the /prd skill."

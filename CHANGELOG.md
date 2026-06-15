@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.47.0](https://github.com/ziyilam3999/forge-harness/compare/v0.46.1...v0.47.0) (2026-06-15)
+
+### Features
+
+* **dashboard:** responsive mobile/narrow layout — at ≤640px the 6-column kanban board reflows to a vertical grouped-by-status list (statuses stacked in workflow order, empty statuses collapse to a one-line header, fonts step up to the mobile legibility floor); the desktop board is unchanged ([#586](https://github.com/ziyilam3999/forge-harness/pull/586))
+
 ## [0.46.1](https://github.com/ziyilam3999/forge-harness/compare/v0.46.0...v0.46.1) (2026-06-14)
 
 ### Bug Fixes

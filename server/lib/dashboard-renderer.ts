@@ -915,7 +915,12 @@ function renderBoard(
           : accent === "red"
             ? "accent-red"
             : "accent-grey";
-    return `<div class="kanban-column ${accentClass}" id="${id}">
+    // v0.46.x — mark zero-card columns so the narrow/mobile media query can
+    // collapse them to a one-line section header (kills dead vertical space
+    // when 5 of 6 statuses are empty). Desktop layout is unaffected. The id
+    // and the existing `kanban-column[^"]*` test anchor are preserved.
+    const emptyClass = count === 0 ? " is-empty" : "";
+    return `<div class="kanban-column ${accentClass}${emptyClass}" id="${id}">
   <div class="column-header"><span class="col-title">${escapeHtml(title)}</span><span class="col-count">${count}</span></div>
   <div class="column-body">${extra}${cards}${emptyState}</div>
 </div>`;
@@ -1181,6 +1186,62 @@ body { font-family: var(--font-ui); line-height: 1.5; background: var(--off-whit
 .feed-stage { color: var(--text); }
 .feed-decision { color: var(--text-secondary); font-style: italic; }
 .feed-role { font-family: var(--font-mono); color: var(--text-dim); font-size: 11px; text-align: right; }
+
+/* ── Narrow / mobile (phones, vertical screens) ─────────────────────────────
+   The 6-column board is a wide, short artifact; on a tall narrow screen it
+   either crops sideways or floats as a short island, and six columns across a
+   ~360pt phone forces card text below the legibility floor. So at <=640px we
+   switch metaphor from BOARD to a vertical "grouped-by-status list": the six
+   statuses stack full-width in workflow order (Backlog->Ready->In Progress->
+   Retry->Done->Blocked, the markup order), each a section header + its cards.
+   This is the conventional responsive kanban pattern (Linear/Asana/Notion/
+   GitHub all offer a list-grouped-by-status sibling of the board) and it is
+   what LETS fonts step up to the mobile legibility floor (body >=16px). Empty
+   (zero-card) statuses collapse to a one-line header so the board stays
+   scannable instead of endlessly tall. Desktop layout is untouched. */
+@media (max-width: 640px) {
+  html { font-size: 16px; }
+  .dashboard { padding: 14px 16px; gap: 12px; }
+  .top-bar { flex-wrap: wrap; padding: 14px 16px; gap: 12px; }
+
+  /* stats: 4-up is illegible on a phone — go 2-up and enlarge */
+  .stats-row { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat-value { font-size: 26px; }
+  .stat-value-sm { font-size: 16px; }
+  .stat-label { font-size: 13px; }
+  .stat-sub { font-size: 14px; }
+
+  /* board -> single-column stacked status sections */
+  .kanban-board { grid-template-columns: 1fr; gap: 10px; }
+  .kanban-column { min-height: 0; padding: 14px 16px; }
+  .column-header { font-size: 15px; padding-bottom: 10px; margin-bottom: 10px; }
+
+  /* legibility floor for card text (>=14px labels, >=16px body) */
+  .story-card { font-size: 16px; padding: 14px; }
+  .story-card .card-id { font-size: 17px; }
+  .story-card .card-tool { font-size: 15px; }
+  .story-card .card-stage { font-size: 15px; }
+  .story-card .card-label,
+  .story-card .card-evidence,
+  .story-card .card-live,
+  .story-card .card-path,
+  .story-card .card-non-fatal-warning { font-size: 14px; }
+  .story-card .card-warning-chip,
+  .story-card .master-merged-badge { font-size: 12px; }
+  .retry-badge { font-size: 14px; }
+
+  /* collapse EMPTY status sections to a compact one-liner (kill dead space) */
+  .kanban-column.is-empty { min-height: 0; padding: 12px 16px; opacity: 0.7; }
+  .kanban-column.is-empty .column-header { padding-bottom: 0; margin-bottom: 0; border-bottom: none; }
+  .kanban-column.is-empty .column-body { display: none; }
+
+  /* activity feed: drop the redundant trailing columns, enlarge the rest */
+  .activity-feed { font-size: 14px; max-height: none; }
+  .feed-entry { grid-template-columns: auto auto 1fr; gap: 10px; }
+  .feed-decision,
+  .feed-role { display: none; }
+  .feed-time { font-size: 13px; }
+}
 `;
 
 // ── Top-level render ──────────────────────────────────────────────────────

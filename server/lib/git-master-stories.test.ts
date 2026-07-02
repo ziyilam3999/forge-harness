@@ -96,9 +96,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   for (const r of extraRemotes) {
-    await rm(r, { recursive: true, force: true });
+    await rm(r, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
-  await rm(tmpRoot, { recursive: true, force: true });
+  await rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 });
 
 // ── AC-5 — single git call regardless of story count ──────────────────────

@@ -1126,6 +1126,15 @@ export async function handleSmokeTest(
 
 // ── Critic Mode Handler ───────────────────────────────────
 
+/** Derives the run-record outcome for a critic eval from the per-plan results. */
+function deriveCriticOutcome(
+  results: Array<{ error?: string }>,
+): "failure" | "partial" | "success" {
+  if (results.every((r) => r.error)) return "failure";
+  if (results.some((r) => r.error)) return "partial";
+  return "success";
+}
+
 /**
  * Q0.5/C1 — critic eval mode. Loads N plan files, fans out N critic prompt
  * calls via `trackedCallClaude`, aggregates findings into a `CriticEvalReport`.
@@ -1240,11 +1249,7 @@ async function handleCriticEval(input: EvaluateInput): Promise<McpResponse> {
       0,
     );
     const base = buildRunRecord(ctx, startTime, findingsTotal);
-    const outcome = results.every((r) => r.error)
-      ? "failure"
-      : results.some((r) => r.error)
-        ? "partial"
-        : "success";
+    const outcome = deriveCriticOutcome(results);
     await writeRunRecord(input.projectPath, {
       ...base,
       outcome,

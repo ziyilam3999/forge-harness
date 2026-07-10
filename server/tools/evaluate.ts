@@ -698,8 +698,7 @@ async function handleStoryEval(input: EvaluateInput): Promise<McpResponse> {
 
   // v0.38.0 I3 — surface spec-generator warnings at the top level of the
   // forge_evaluate MCP response. Byte-identical to the on-disk run record's
-  // `generatedDocs.warnings` (same array reference at this point — array
-  // copy here just to avoid downstream mutation).
+  // `generatedDocs.warnings` (same array reference).
   // The `specGenWarnings` field is also set on records that omit
   // `generatedDocs` entirely (non-PASS verdicts, spec-gen failure) — empty
   // array in that case so consumers can rely on field presence.
